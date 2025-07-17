@@ -1,19 +1,52 @@
+/*
+ * -----------------------------------------------------------------
+ * 第三部分：更新认证控制器 (AuthController)
+ * -----------------------------------------------------------------
+ */
+
+/**
+ * 文件路径: src/auth/auth.controller.ts
+ * 文件描述:
+ * 这个文件是认证模块的控制器（Controller）。
+ * 它负责接收来自客户端的HTTP请求（如POST /auth/register），
+ * 并调用相应的服务（AuthService）来处理业务逻辑。
+ */
 import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, WechatLoginDto } from './dto/auth.dto';
 
-@Controller('auth') // 所有路由都以 /auth 开头
+@Controller('auth') // 定义了所有API路由都以 /auth 为前缀
 export class AuthController {
+  /**
+   * 构造函数，通过依赖注入的方式，引入了AuthService的实例。
+   */
   constructor(private readonly authService: AuthService) {}
 
-  @Post('register') // 处理 POST /auth/register 请求
+  /**
+   * 处理老板注册请求
+   * @decorator @Post('register') - 监听 POST /auth/register 路由
+   * @decorator @Body() - 获取请求体中的数据并自动转换为RegisterDto对象
+   */
+  @Post('register')
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
 
+  /**
+   * 处理邮箱密码登录请求
+   */
   @HttpCode(HttpStatus.OK)
-  @Post('login') // 处理 POST /auth/login 请求
+  @Post('login')
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
+  }
+
+  /**
+   * 处理所有微信相关的登录请求
+   */
+  @HttpCode(HttpStatus.OK)
+  @Post('wechat-login')
+  async wechatLogin(@Body() wechatLoginDto: WechatLoginDto) {
+    return this.authService.loginByWechat(wechatLoginDto);
   }
 }
