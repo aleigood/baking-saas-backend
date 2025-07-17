@@ -4,10 +4,17 @@ import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { RecipesModule } from './recipes/recipes.module';
-import { IngredientsModule } from './ingredients/ingredients.module'; // 1. 导入IngredientsModule
+import { IngredientsModule } from './ingredients/ingredients.module';
+import { TasksModule } from './tasks/tasks.module'; // 1. 导入TasksModule
 
 @Module({
-  imports: [PrismaModule, AuthModule, RecipesModule, IngredientsModule], // 2. 在这里注册新模块
+  imports: [
+    PrismaModule,
+    AuthModule,
+    RecipesModule,
+    IngredientsModule,
+    TasksModule, // 2. 在这里注册新模块
+  ],
   controllers: [AppController],
   providers: [AppService],
 })
