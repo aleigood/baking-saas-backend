@@ -1,0 +1,251 @@
+// prisma/schema.prisma (Version 8 - Final with User & Permission Management)
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// --- 枚举类型 ---
+enum Role {
+  OWNER   // 老板/管理员
+  MANAGER // 主管/店长
+  BAKER   // 面包师
+}
+
+enum UserStatusInTenant {
+  ACTIVE    // 在职
+  INACTIVE  // 已禁用/软删除
+}
+
+enum AddOnType {
+  FILLING // 包入的馅料
+  TOPPING // 表面装饰
+}
+
+enum ProductionTaskStatus {
+  IN_PROGRESS // 进行中
+  COMPLETED   // 已完成
+  CANCELED    // 已取消
+}
+
+// --- 核心模型 ---
+
+// 1. 租户/商家表
+model Tenant {
+  id              String           @id @default(uuid())
+  name            String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  users           TenantUser[]     // 通过中间表关联用户
+  recipeFamilies  RecipeFamily[]
+  ingredients     Ingredient[]
+  extras          Extra[]
+  productionTasks ProductionTask[]
+}
+
+// 2. 用户表 (代表一个真实的人)
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  wechatOpenId  String?  @unique // 微信OpenID，用于登录
+  email         String?  @unique // 邮箱可作为备用
+  passwordHash  String?  // 密码可作为备用
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenants  TenantUser[]     // 通过中间表关联到多个门店
+  tasks    ProductionTask[]
+}
+
+// 3. 租户-用户关联表 (核心！定义了用户在哪个店是什么角色)
+model TenantUser {
+  role      Role                @default(BAKER)
+  status    UserStatusInTenant  @default(ACTIVE)
+  createdAt DateTime            @default(now())
+
+  tenantId String
+  userId   String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  user     User   @relation(fields: [userId], references: [id])
+
+  @@id([tenantId, userId]) // 复合主键
+}
+
+
+// --- 其他模型 (基本不变，仅微调关联关系) ---
+
+// 原料品类表
+model Ingredient {
+  id           String          @id @default(uuid())
+  name         String
+  hydration    Float?
+  defaultSkuId String?
+  defaultSku   IngredientSKU?  @relation("DefaultSKU", fields: [defaultSkuId], references: [id])
+  tenantId     String
+  tenant       Tenant          @relation(fields: [tenantId], references: [id])
+  skus         IngredientSKU[]
+  doughIngredients   DoughIngredient[]
+  productMixIns      ProductMixIn[]
+  extraIngredients   ExtraIngredient[]
+  consumptionRecords ConsumptionRecord[]
+  @@unique([tenantId, name])
+}
+
+// 原料SKU表
+model IngredientSKU {
+  id                    String                @id @default(uuid())
+  brand                 String?
+  specName              String
+  specWeightInGrams     Float
+  ingredientId          String
+  ingredient            Ingredient            @relation(fields: [ingredientId], references: [id])
+  procurementRecords    ProcurementRecord[]
+  defaultForIngredients Ingredient[]          @relation("DefaultSKU")
+  @@unique([ingredientId, brand, specName])
+}
+
+// 采购记录表
+model ProcurementRecord {
+  id                String        @id @default(uuid())
+  packagesPurchased Int
+  pricePerPackage   Decimal
+  purchaseDate      DateTime      @default(now())
+  skuId             String
+  sku               IngredientSKU @relation(fields: [skuId], references: [id])
+}
+
+// 制作任务表
+model ProductionTask {
+  id                 String               @id @default(uuid())
+  status             ProductionTaskStatus @default(IN_PROGRESS)
+  plannedQuantity    Int
+  createdAt          DateTime             @default(now())
+  completedAt        DateTime?
+  tenantId           String
+  tenant             Tenant               @relation(fields: [tenantId], references: [id])
+  productId          String
+  product            Product              @relation(fields: [productId], references: [id])
+  creatorId          String
+  creator            User                 @relation(fields: [creatorId], references: [id])
+  consumptionRecords ConsumptionRecord[]
+}
+
+// 消耗记录表
+model ConsumptionRecord {
+  id                    String     @id @default(uuid())
+  amountConsumedInGrams Float
+  taskId                String
+  task                  ProductionTask @relation(fields: [taskId], references: [id])
+  ingredientId          String
+  ingredient            Ingredient @relation(fields: [ingredientId], references: [id])
+}
+
+// 配方家族表
+model RecipeFamily {
+  id        String    @id @default(uuid())
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  doughs    Dough[]
+  products  Product[]
+  procedures Procedure[]
+}
+
+// 面团表
+model Dough {
+  id             String   @id @default(uuid())
+  name           String
+  isPreDough     Boolean  @default(false)
+  targetTemp     Float?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  recipeFamilyId String
+  recipeFamily   RecipeFamily @relation(fields: [recipeFamilyId], references: [id])
+  ingredients    DoughIngredient[]
+}
+
+// 最终产品表
+model Product {
+  id             String   @id @default(uuid())
+  name           String
+  weight         Float
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  recipeFamilyId String
+  recipeFamily   RecipeFamily @relation(fields: [recipeFamilyId], references: [id])
+  mixIns         ProductMixIn[]
+  addOns         ProductAddOn[]
+  procedures     Procedure[]
+  tasks          ProductionTask[]
+}
+
+// 附加项/子配方表
+model Extra {
+  id            String   @id @default(uuid())
+  name          String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  ingredients   ExtraIngredient[]
+  productAddOns ProductAddOn[]
+}
+
+// 工序表
+model Procedure {
+  id             String        @id @default(uuid())
+  step           Int
+  name           String
+  description    String
+  recipeFamilyId String?
+  recipeFamily   RecipeFamily? @relation(fields: [recipeFamilyId], references: [id])
+  productId      String?
+  product        Product?      @relation(fields: [productId], references: [id])
+}
+
+// --- 关联关系表 ---
+
+model DoughIngredient {
+  ratio        Float
+  isFlour      Boolean    @default(false)
+  doughId      String
+  ingredientId String
+  dough        Dough      @relation(fields: [doughId], references: [id])
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  @@id([doughId, ingredientId])
+}
+
+model ProductMixIn {
+  ratio        Float
+  productId    String
+  ingredientId String
+  product      Product    @relation(fields: [productId], references: [id])
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  @@id([productId, ingredientId])
+}
+
+model ProductAddOn {
+  weight    Float
+  type      AddOnType @default(FILLING)
+  productId String
+  extraId   String
+  product   Product   @relation(fields: [productId], references: [id])
+  extra     Extra     @relation(fields: [extraId], references: [id])
+  @@id([productId, extraId, type])
+}
+
+model ExtraIngredient {
+  ratio        Float
+  extraId      String
+  ingredientId String
+  extra        Extra      @relation(fields: [extraId], references: [id])
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  @@id([extraId, ingredientId])
+}
