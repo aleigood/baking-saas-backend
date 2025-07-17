@@ -2,8 +2,11 @@
  * 文件路径: src/recipes/recipes.service.ts
  * 文件描述: 处理所有与配方相关的数据库操作和业务逻辑。
  */
-// 修复点：移除了未使用的 'NotFoundException' 导入
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common'; // 1. 导入ForbiddenException
 import { PrismaService } from '../prisma/prisma.service';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { CreateRecipeFamilyDto } from './dto/create-recipe.dto';
@@ -17,9 +20,7 @@ export class RecipesService {
 
   /**
    * 创建一个新的配方家族
-   * @param createRecipeFamilyDto - 包含完整配方信息的DTO
-   * @param user - 从JWT令牌中解析出的当前用户信息
-   * @returns 创建成功的配方家族对象
+   * (此方法保持不变)
    */
   async create(
     createRecipeFamilyDto: CreateRecipeFamilyDto,
@@ -108,12 +109,6 @@ export class RecipesService {
             addOns: {
               create: await Promise.all(
                 productDto.addOns.map(async (addOn) => {
-                  // --- 修复点：解决 'Extra' 的 upsert 类型错误 ---
-                  // 原因：`upsert` 的 `where` 条件必须是一个唯一字段，而我们当前的
-                  // `Extra` 模型中 `name` 字段不是唯一的。
-                  // 解决方案：我们手动实现 "find-or-create" 逻辑，这与upsert效果相同，
-                  // 且能与我们当前的数据库模型完美配合。
-
                   // 1. 尝试根据名称和租户ID查找已存在的Extra
                   let extra = await tx.extra.findFirst({
                     where: { name: addOn.name, tenantId: tenantId },
@@ -145,16 +140,67 @@ export class RecipesService {
 
   /**
    * 查找当前租户的所有配方家族
-   * @param user - 从JWT令牌中解析出的当前用户信息
-   * @returns 配方家族列表
+   * (此方法保持不变)
    */
   async findAll(user: UserPayload) {
     return this.prisma.recipeFamily.findMany({
       where: {
         tenantId: user.tenantId,
       },
-      // 可以通过 include 加载关联数据，但为了性能，列表接口通常不加载所有详情
-      // include: { doughs: true, products: true }
     });
+  }
+
+  /**
+   * --- 新增方法 ---
+   * 查找单个配方家族的完整详情
+   * @param id - 要查找的配方家族ID
+   * @param user - 从JWT令牌中解析出的当前用户信息
+   * @returns 包含所有关联数据的配方家族对象
+   */
+  async findOne(id: string, user: UserPayload) {
+    // 1. 根据ID查找配方
+    const recipeFamily = await this.prisma.recipeFamily.findUnique({
+      where: { id },
+      // 2. 使用 include 加载所有关联的详细数据
+      include: {
+        procedures: true, // 通用工序
+        doughs: {
+          include: {
+            ingredients: {
+              include: {
+                ingredient: true, // 加载原料详情
+              },
+            },
+          },
+        },
+        products: {
+          include: {
+            procedures: true, // 产品特定工序
+            mixIns: {
+              include: {
+                ingredient: true,
+              },
+            },
+            addOns: {
+              include: {
+                extra: true, // 加载附加项详情
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // 3. 如果找不到配方，抛出404错误
+    if (!recipeFamily) {
+      throw new NotFoundException(`ID为 ${id} 的配方不存在`);
+    }
+
+    // 4. 安全检查：确保该配方属于当前登录用户所在的门店
+    if (recipeFamily.tenantId !== user.tenantId) {
+      throw new ForbiddenException('您无权访问此配方');
+    }
+
+    return recipeFamily;
   }
 }
