@@ -1,13 +1,10 @@
-/**
- * 文件路径: src/tasks/tasks.controller.ts
- * 文件描述: 接收制作任务相关的HTTP请求。
- */
 import {
   Controller,
+  Get,
   Post,
   Body,
-  Param,
   Patch,
+  Param,
   UseGuards,
 } from '@nestjs/common';
 import { TasksService } from './tasks.service';
@@ -22,19 +19,17 @@ import { UserPayload } from '../auth/interfaces/user-payload.interface';
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
-  /**
-   * 创建新制作任务的端点
-   * @route POST /tasks
-   */
   @Post()
   create(@Body() createTaskDto: CreateTaskDto, @GetUser() user: UserPayload) {
     return this.tasksService.create(createTaskDto, user);
   }
 
-  /**
-   * 更新任务状态的端点 (例如：完成或取消)
-   * @route PATCH /tasks/:id/status
-   */
+  // [核心新增] 获取制作任务列表的端点
+  @Get()
+  findAll(@GetUser() user: UserPayload) {
+    return this.tasksService.findAllForTenant(user.tenantId);
+  }
+
   @Patch(':id/status')
   updateStatus(
     @Param('id') id: string,
