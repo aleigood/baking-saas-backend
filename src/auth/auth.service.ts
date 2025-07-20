@@ -1,16 +1,3 @@
-/*
- * -----------------------------------------------------------------
- * 第二部分：重构认证服务 (AuthService)
- * -----------------------------------------------------------------
- */
-
-/**
- * 文件路径: src/auth/auth.service.ts
- * 文件描述:
- * 这个文件是认证模块的服务（Service）。
- * 它包含了所有核心的业务逻辑，如创建用户、验证密码、与数据库交互、生成令牌等。
- * 控制器（Controller）会调用这里的方法来完成实际工作。
- */
 import {
   Injectable,
   UnauthorizedException,
@@ -239,6 +226,25 @@ export class AuthService {
   }
 
   /**
+   * 根据用户ID获取完整的用户信息
+   * @param userId - 从JWT令牌中解析出的用户ID
+   * @returns 返回一个不包含密码哈希的安全用户对象
+   */
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) {
+      // 这个情况理论上不会发生，因为JWT守卫已经验证了用户存在
+      throw new UnauthorizedException();
+    }
+    // 从返回的对象中移除 passwordHash 字段，确保密码哈希不会泄露到前端
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { passwordHash, ...result } = user;
+    return result;
+  }
+
+  /**
    * 封装的JWT令牌签发函数
    * @param userId - 用户ID
    * @param tenantId - 租户（门店）ID
@@ -248,7 +254,7 @@ export class AuthService {
   private generateJwtToken(userId: string, tenantId: string, role: Role) {
     // JWT的载荷(payload)中包含了用户的核心身份信息
     const payload = {
-      sub: userId, // subject，通常是用户ID
+      userId: userId, // [修正] 使用 userId 替代 sub，与 UserPayload 接口保持一致
       tenantId: tenantId,
       role: role,
     };
