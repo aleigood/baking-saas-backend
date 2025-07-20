@@ -221,7 +221,7 @@ export class AuthService {
     if (!tenantUserInfo) {
       throw new UnauthorizedException('无法找到用户在该门店的角色信息');
     }
-
+    // 签发JWT令牌
     return this.generateJwtToken(user.id, targetTenantId, tenantUserInfo.role);
   }
 
@@ -254,7 +254,7 @@ export class AuthService {
   private generateJwtToken(userId: string, tenantId: string, role: Role) {
     // JWT的载荷(payload)中包含了用户的核心身份信息
     const payload = {
-      userId: userId, // [修正] 使用 userId 替代 sub，与 UserPayload 接口保持一致
+      sub: userId,
       tenantId: tenantId,
       role: role,
     };
