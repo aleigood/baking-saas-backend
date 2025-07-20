@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { RecipesModule } from './recipes/recipes.module';
 import { IngredientsModule } from './ingredients/ingredients.module';
 import { TasksModule } from './tasks/tasks.module'; // 1. 导入TasksModule
+import { TenantsModule } from './tenants/tenants.module';
 
 @Module({
   imports: [
@@ -13,7 +14,8 @@ import { TasksModule } from './tasks/tasks.module'; // 1. 导入TasksModule
     AuthModule,
     RecipesModule,
     IngredientsModule,
-    TasksModule, // 2. 在这里注册新模块
+    TasksModule,
+    TenantsModule, // 2. 在这里注册新模块
   ],
   controllers: [AppController],
   providers: [AppService],
