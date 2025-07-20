@@ -1,32 +1,160 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
+import { Tenant } from '@prisma/client';
+import {
+  ProductionTaskDto,
+  RecipeDto,
+  IngredientDto,
+  MemberDto,
+  RecipeStatDto,
+  IngredientStatDto,
+} from './dto/tenant-data.dto';
 
 @Injectable()
 export class TenantsService {
   constructor(private prisma: PrismaService) {}
 
-  /**
-   * 根据用户ID查找该用户所属的所有店铺
-   * @param user - 从JWT令牌中解析出的用户信息载荷
-   * @returns 返回一个包含该用户所有店铺信息的数组
-   */
-  async findForUser(user: UserPayload) {
-    // 这是 Prisma 的核心查询逻辑：
-    // 我们在 Tenant (店铺) 表中进行查询，
-    // 查询条件是，该店铺所关联的用户列表 (users) 中，
-    // 至少有一个 (some) 用户的 userId 匹配我们传入的参数。
-    // 这正是利用了 TenantUser 这个中间表来实现的。
-    const tenants = await this.prisma.tenant.findMany({
+  async findForUser(user: UserPayload): Promise<Tenant[]> {
+    return this.prisma.tenant.findMany({
       where: {
         users: {
           some: {
-            // [修复] 将 user.sub 修改为 user.userId 以匹配 UserPayload 接口
             userId: user.userId,
           },
         },
       },
     });
-    return tenants;
+  }
+
+  async findProductionTasks(tenantId: string): Promise<ProductionTaskDto[]> {
+    const tasks = await this.prisma.productionTask.findMany({
+      where: { tenantId },
+      include: { product: true, creator: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return tasks.map((task) => ({
+      id: task.id,
+      recipeName: task.product.name,
+      time: task.createdAt.toISOString(),
+      creator: task.creator.name,
+      status: task.status,
+    }));
+  }
+
+  async findRecipes(tenantId: string): Promise<RecipeDto[]> {
+    const products = await this.prisma.product.findMany({
+      where: { recipeFamily: { tenantId } },
+      include: { recipeFamily: true },
+    });
+
+    return products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      type: p.recipeFamily.name,
+      weight: p.weight,
+      rating: 4.8,
+      publicCount: 100,
+      ingredients: [],
+    }));
+  }
+
+  async findIngredients(tenantId: string): Promise<IngredientDto[]> {
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { tenantId },
+      include: { skus: true },
+    });
+
+    return ingredients.map((i) => ({
+      id: i.id,
+      name: i.name,
+      brand: i.skus[0]?.brand || 'N/A',
+      price: 10.0,
+      stock: 100,
+    }));
+  }
+
+  async findMembers(tenantId: string): Promise<MemberDto[]> {
+    const tenantUsers = await this.prisma.tenantUser.findMany({
+      where: { tenantId, status: 'ACTIVE' },
+      include: { user: true },
+    });
+
+    return tenantUsers.map((tu) => ({
+      id: tu.user.id,
+      name: tu.user.name,
+      role: tu.role,
+      joinDate: tu.createdAt.toISOString().split('T')[0],
+    }));
+  }
+
+  async findRecipeStats(tenantId: string): Promise<RecipeStatDto[]> {
+    const stats = await this.prisma.productionTask.groupBy({
+      by: ['productId'],
+      where: { tenantId, status: 'COMPLETED' },
+      _count: {
+        productId: true,
+      },
+      orderBy: {
+        _count: {
+          productId: 'desc',
+        },
+      },
+    });
+
+    if (stats.length === 0) return [];
+
+    const productIds = stats.map((s) => s.productId);
+    const products = await this.prisma.product.findMany({
+      where: {
+        id: { in: productIds },
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    const productMap = new Map(products.map((p) => [p.id, p.name]));
+
+    return stats.map((s) => ({
+      name: productMap.get(s.productId) || '未知产品',
+      count: s._count.productId,
+    }));
+  }
+
+  async findIngredientStats(tenantId: string): Promise<IngredientStatDto[]> {
+    const stats = await this.prisma.consumptionRecord.groupBy({
+      by: ['ingredientId'],
+      where: {
+        task: {
+          tenantId: tenantId,
+        },
+      },
+      _sum: {
+        amountConsumedInGrams: true,
+      },
+      orderBy: {
+        _sum: {
+          amountConsumedInGrams: 'desc',
+        },
+      },
+    });
+
+    if (stats.length === 0) return [];
+
+    const ingredientIds = stats.map((s) => s.ingredientId);
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { id: { in: ingredientIds } },
+      select: { id: true, name: true },
+    });
+
+    const ingredientMap = new Map(ingredients.map((i) => [i.id, i.name]));
+
+    return stats.map((s) => ({
+      name: ingredientMap.get(s.ingredientId) || '未知原料',
+      consumed: (s._sum.amountConsumedInGrams || 0) / 1000, // 转换为 kg
+    }));
   }
 }
