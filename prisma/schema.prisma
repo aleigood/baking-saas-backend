@@ -197,6 +197,7 @@ model Extra {
   tenant        Tenant   @relation(fields: [tenantId], references: [id])
   ingredients   ExtraIngredient[]
   productAddOns ProductAddOn[]
+  @@unique([tenantId, name]) // [核心修复] 添加此行，确保附加项名称在租户内唯一
 }
 
 // 13. 工序表 (用于替代keyPoints)
