@@ -1,15 +1,17 @@
-// prisma/schema.prisma (Version 10.1 - Fixed relations)
-
+// prisma/schema.prisma (Version 11.0 - Recipe Versioning & Loss Ratio)
+// 数据库提供商和连接 URL
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+// Prisma 客户端生成器
 generator client {
   provider = "prisma-client-js"
 }
 
 // --- Enums ---
+// 枚举类型定义保持不变
 enum IngredientType {
   STANDARD
   UNTRACKED
@@ -53,26 +55,27 @@ model Tenant {
 }
 
 model User {
-  id            String   @id @default(uuid())
-  name          String
-  wechatOpenId  String?  @unique
-  email         String?  @unique
-  passwordHash  String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  tenants       TenantUser[]
-  tasks         ProductionTask[]
-  createdInvitations Invitation[] // [核心修复] 添加此行以完成与 Invitation 模型的关系
+  id                 String       @id @default(uuid())
+  name               String
+  wechatOpenId       String?      @unique
+  email              String?      @unique
+  passwordHash       String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  tenants            TenantUser[]
+  tasks              ProductionTask[]
+  createdInvitations Invitation[]
 }
 
 model TenantUser {
-  role      Role                @default(BAKER)
-  status    UserStatusInTenant  @default(ACTIVE)
-  createdAt DateTime            @default(now())
+  role      Role               @default(BAKER)
+  status    UserStatusInTenant @default(ACTIVE)
+  createdAt DateTime           @default(now())
   tenantId  String
   userId    String
-  tenant    Tenant @relation(fields: [tenantId], references: [id])
-  user      User   @relation(fields: [userId], references: [id])
+  tenant    Tenant             @relation(fields: [tenantId], references: [id])
+  user      User               @relation(fields: [userId], references: [id])
+
   @@id([tenantId, userId])
 }
 
@@ -88,19 +91,20 @@ model Invitation {
 }
 
 model Ingredient {
-  id                 String              @id @default(uuid())
-  name               String
-  hydration          Float?
-  type               IngredientType      @default(STANDARD)
-  defaultSkuId       String?
-  defaultSku         IngredientSKU?      @relation("DefaultSKU", fields: [defaultSkuId], references: [id])
-  tenantId           String
-  tenant             Tenant              @relation(fields: [tenantId], references: [id])
-  skus               IngredientSKU[]
-  doughIngredients   DoughIngredient[]
-  productMixIns      ProductMixIn[]
-  extraIngredients   ExtraIngredient[]
-  consumptionRecords ConsumptionRecord[]
+  id                      String              @id @default(uuid())
+  name                    String
+  hydration               Float? // 原料含水率
+  type                    IngredientType      @default(STANDARD)
+  defaultSkuId            String? // 默认使用的SKU ID
+  defaultSku              IngredientSKU?      @relation("DefaultSKU", fields: [defaultSkuId], references: [id])
+  tenantId                String
+  tenant                  Tenant              @relation(fields: [tenantId], references: [id])
+  skus                    IngredientSKU[]
+  doughIngredients        DoughIngredient[]
+  productMixIns           ProductMixIn[]
+  extraIngredients        ExtraIngredient[]
+  consumptionRecords      ConsumptionRecord[]
+
   @@unique([tenantId, name])
 }
 
@@ -113,6 +117,7 @@ model IngredientSKU {
   ingredient            Ingredient          @relation(fields: [ingredientId], references: [id])
   procurementRecords    ProcurementRecord[]
   defaultForIngredients Ingredient[]        @relation("DefaultSKU")
+
   @@unique([ingredientId, brand, specName])
 }
 
@@ -149,65 +154,86 @@ model ConsumptionRecord {
   ingredient            Ingredient @relation(fields: [ingredientId], references: [id])
 }
 
+// --- [更新] 配方模型 ---
+
 model RecipeFamily {
-  id         String      @id @default(uuid())
-  name       String
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-  tenantId   String
-  tenant     Tenant      @relation(fields: [tenantId], references: [id])
-  doughs     Dough[]
-  products   Product[]
-  procedures Procedure[]
+  id        String          @id @default(uuid())
+  name      String
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  tenantId  String
+  tenant    Tenant          @relation(fields: [tenantId], references: [id])
+  // [更新] 关联到版本，而不是直接关联到面团和产品
+  versions  RecipeVersion[]
+}
+
+// [新增] 配方版本模型
+model RecipeVersion {
+  id             String      @id @default(uuid())
+  versionNumber  Int
+  name           String // e.g., "夏季版", "2025新版"
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  recipeFamilyId String
+  recipeFamily   RecipeFamily @relation(fields: [recipeFamilyId], references: [id])
+  doughs         Dough[]
+  products       Product[]
+  procedures     Procedure[]
+
+  @@unique([recipeFamilyId, versionNumber]) // 确保同一家族下版本号唯一
 }
 
 model Dough {
-  id             String            @id @default(uuid())
-  name           String
-  isPreDough     Boolean           @default(false)
-  targetTemp     Float?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  recipeFamilyId String
-  recipeFamily   RecipeFamily      @relation(fields: [recipeFamilyId], references: [id])
-  ingredients    DoughIngredient[]
+  id              String            @id @default(uuid())
+  name            String
+  isPreDough      Boolean           @default(false)
+  targetTemp      Float?
+  lossRatio       Float             @default(0) // [新增] 生产损耗率
+  // [更新] 关联到 RecipeVersion
+  recipeVersionId String
+  recipeVersion   RecipeVersion     @relation(fields: [recipeVersionId], references: [id])
+  ingredients     DoughIngredient[]
 }
 
 model Product {
-  id             String         @id @default(uuid())
-  name           String
-  weight         Float
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  recipeFamilyId String
-  recipeFamily   RecipeFamily   @relation(fields: [recipeFamilyId], references: [id])
-  mixIns         ProductMixIn[]
-  addOns         ProductAddOn[]
-  procedures     Procedure[]
-  tasks          ProductionTask[]
+  id              String         @id @default(uuid())
+  name            String
+  weight          Float
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  // [更新] 关联到 RecipeVersion
+  recipeVersionId String
+  recipeVersion   RecipeVersion  @relation(fields: [recipeVersionId], references: [id])
+  mixIns          ProductMixIn[]
+  addOns          ProductAddOn[]
+  procedures      Procedure[]
+  tasks           ProductionTask[]
 }
 
 model Extra {
   id            String            @id @default(uuid())
   name          String
+  lossRatio     Float             @default(0) // [新增] 生产损耗率
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   tenantId      String
   tenant        Tenant            @relation(fields: [tenantId], references: [id])
   ingredients   ExtraIngredient[]
   productAddOns ProductAddOn[]
+
   @@unique([tenantId, name])
 }
 
 model Procedure {
-  id             String        @id @default(uuid())
-  step           Int
-  name           String
-  description    String
-  recipeFamilyId String?
-  recipeFamily   RecipeFamily? @relation(fields: [recipeFamilyId], references: [id])
-  productId      String?
-  product        Product?      @relation(fields: [productId], references: [id])
+  id              String         @id @default(uuid())
+  step            Int
+  name            String
+  description     String
+  // [更新] 关联到 RecipeVersion
+  recipeVersionId String?
+  recipeVersion   RecipeVersion? @relation(fields: [recipeVersionId], references: [id])
+  productId       String?
+  product         Product?       @relation(fields: [productId], references: [id])
 }
 
 // --- Relation Tables ---
@@ -219,6 +245,7 @@ model DoughIngredient {
   ingredientId String
   dough        Dough      @relation(fields: [doughId], references: [id])
   ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+
   @@id([doughId, ingredientId])
 }
 
@@ -228,6 +255,7 @@ model ProductMixIn {
   ingredientId String
   product      Product    @relation(fields: [productId], references: [id])
   ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+
   @@id([productId, ingredientId])
 }
 
@@ -238,6 +266,7 @@ model ProductAddOn {
   extraId   String
   product   Product    @relation(fields: [productId], references: [id])
   extra     Extra      @relation(fields: [extraId], references: [id])
+
   @@id([productId, extraId, type])
 }
 
@@ -247,5 +276,6 @@ model ExtraIngredient {
   ingredientId String
   extra        Extra      @relation(fields: [extraId], references: [id])
   ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+
   @@id([extraId, ingredientId])
 }

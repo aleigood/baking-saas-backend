@@ -1,13 +1,15 @@
 /**
  * 文件路径: src/ingredients/ingredients.service.ts
- * 文件描述: (功能完善) 实现了真实的库存和成本计算逻辑。
+ * 文件描述: (功能完善) 新增了更新原料信息和设置默认SKU的逻辑。
  */
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { Prisma } from '@prisma/client';
+import { UserPayload } from '../auth/interfaces/user-payload.interface';
+import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 
 @Injectable()
 export class IngredientsService {
@@ -23,29 +25,26 @@ export class IngredientsService {
   }
 
   /**
-   * [核心更新] 获取指定店铺的原料列表，并计算真实库存和成本。
+   * 获取指定店铺的原料列表，并计算真实库存和成本。
    * @param tenantId 店铺ID
    */
   async findAllForTenant(tenantId: string) {
-    // 1. 获取店铺下的所有原料及其SKU
     const ingredients = await this.prisma.ingredient.findMany({
       where: { tenantId },
       include: {
         skus: {
           include: {
-            procurementRecords: true, // 获取所有采购记录用于计算
+            procurementRecords: true,
           },
         },
-        consumptionRecords: true, // 获取所有消耗记录
+        consumptionRecords: true,
       },
     });
 
-    // 2. 映射并计算每个原料的数据
     return ingredients.map((ingredient) => {
       let totalGramsPurchased = 0;
       let totalCost = new Prisma.Decimal(0);
 
-      // 2a. 计算总采购量和总成本
       for (const sku of ingredient.skus) {
         for (const record of sku.procurementRecords) {
           totalGramsPurchased +=
@@ -58,36 +57,28 @@ export class IngredientsService {
         }
       }
 
-      // 2b. 计算总消耗量
       const totalGramsConsumed = ingredient.consumptionRecords.reduce(
         (sum, record) => sum + record.amountConsumedInGrams,
         0,
       );
 
-      // 2c. 计算实时库存 (kg)
       const stockInKg = (totalGramsPurchased - totalGramsConsumed) / 1000;
 
-      // 2d. 计算加权平均成本 (元/kg)
       const pricePerKg =
         totalGramsPurchased > 0
-          ? totalCost
-              .mul(1000)
-              .div(totalGramsPurchased)
-              .toDP(2) // 保留两位小数
-              .toNumber()
+          ? totalCost.mul(1000).div(totalGramsPurchased).toDP(2).toNumber()
           : 0;
 
       return {
         id: ingredient.id,
         name: ingredient.name,
-        // 优先使用默认SKU的品牌，否则使用第一个SKU的品牌
         brand:
           ingredient.skus.find((s) => s.id === ingredient.defaultSkuId)
             ?.brand ||
           ingredient.skus[0]?.brand ||
           'N/A',
         price: pricePerKg,
-        stock: Math.max(0, stockInKg), // 库存不能为负
+        stock: Math.max(0, stockInKg),
       };
     });
   }
@@ -114,6 +105,62 @@ export class IngredientsService {
           },
         },
       },
+    });
+  }
+
+  /**
+   * [新增] 更新原料信息，例如含水率
+   * @param ingredientId 原料ID
+   * @param updateIngredientDto 包含更新数据的DTO
+   * @param user 当前用户信息
+   */
+  async update(
+    ingredientId: string,
+    updateIngredientDto: UpdateIngredientDto,
+    user: UserPayload,
+  ) {
+    const ingredient = await this.prisma.ingredient.findFirst({
+      where: { id: ingredientId, tenantId: user.tenantId },
+    });
+
+    if (!ingredient) {
+      throw new NotFoundException('原料不存在或无权操作');
+    }
+
+    return this.prisma.ingredient.update({
+      where: { id: ingredientId },
+      data: updateIngredientDto,
+    });
+  }
+
+  /**
+   * [新增] 为原料设置默认SKU
+   * @param ingredientId 原料ID
+   * @param skuId 要设置为默认的SKU ID
+   * @param user 当前用户信息
+   */
+  async setDefaultSku(ingredientId: string, skuId: string, user: UserPayload) {
+    return this.prisma.$transaction(async (tx) => {
+      const ingredient = await tx.ingredient.findFirst({
+        where: { id: ingredientId, tenantId: user.tenantId },
+      });
+
+      if (!ingredient) {
+        throw new NotFoundException('原料不存在或无权操作');
+      }
+
+      const sku = await tx.ingredientSKU.findFirst({
+        where: { id: skuId, ingredientId: ingredientId },
+      });
+
+      if (!sku) {
+        throw new NotFoundException('SKU不存在或不属于该原料');
+      }
+
+      return tx.ingredient.update({
+        where: { id: ingredientId },
+        data: { defaultSkuId: skuId },
+      });
     });
   }
 }

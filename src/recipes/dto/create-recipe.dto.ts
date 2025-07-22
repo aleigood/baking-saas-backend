@@ -1,6 +1,6 @@
 /**
  * 文件路径: src/recipes/dto/create-recipe.dto.ts
- * 文件描述: (已重构) 为复杂的嵌套结构添加了完整的递归验证。
+ * 文件描述: (已更新) 为 CreateDoughDto 添加了 lossRatio 字段。
  */
 import {
   IsString,
@@ -42,6 +42,11 @@ class CreateDoughDto {
   @IsNumber()
   @IsOptional()
   targetTemp?: number;
+
+  // [新增] 允许前端传入损耗率
+  @IsNumber()
+  @IsOptional()
+  lossRatio?: number;
 
   @IsArray()
   @ValidateNested({ each: true })
