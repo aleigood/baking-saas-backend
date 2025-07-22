@@ -19,7 +19,6 @@ export class RegisterDto {
 }
 
 export class LoginDto {
-  // [核心修复] 添加了验证装饰器，确保 email 和 password 字段存在且格式正确
   @IsEmail()
   @IsNotEmpty()
   email: string;
@@ -34,7 +33,8 @@ export class WechatLoginDto {
   @IsNotEmpty()
   code: string;
 
+  // [核心修复] 添加 invitationCode 字段以接收邀请码
   @IsString()
   @IsOptional()
-  tenantId?: string;
+  invitationCode?: string;
 }

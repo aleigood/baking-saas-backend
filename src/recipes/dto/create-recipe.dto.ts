@@ -1,51 +1,137 @@
 /**
  * 文件路径: src/recipes/dto/create-recipe.dto.ts
- * 文件描述: 定义了创建配方家族所需的数据结构。
+ * 文件描述: (已重构) 为复杂的嵌套结构添加了完整的递归验证。
  */
-// 注意：为了简化，我们暂时不使用class-validator进行详细验证
+import {
+  IsString,
+  IsNotEmpty,
+  IsNumber,
+  IsBoolean,
+  IsOptional,
+  IsEnum,
+  ValidateNested,
+  IsArray,
+  ArrayMinSize,
+  IsPositive,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { AddOnType } from '@prisma/client';
+
+// 注意：为了让 @ValidateNested 生效，所有嵌套的 DTO 也必须是 class 并有验证装饰器。
 
 class CreateDoughIngredientDto {
+  @IsString()
+  @IsNotEmpty()
   name: string;
+
+  @IsNumber()
   ratio: number;
+
+  @IsBoolean()
   isFlour: boolean;
 }
 
 class CreateDoughDto {
+  @IsString()
+  @IsNotEmpty()
   name: string;
+
+  @IsBoolean()
   isPreDough: boolean;
+
+  @IsNumber()
+  @IsOptional()
   targetTemp?: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateDoughIngredientDto)
   ingredients: CreateDoughIngredientDto[];
 }
 
 class CreateProductMixInDto {
+  @IsString()
+  @IsNotEmpty()
   name: string;
+
+  @IsNumber()
   ratio: number;
 }
 
 class CreateProductAddOnDto {
-  name: string; // 这里是Extra的名称，如“柠檬奶油奶酪”
-  weight: number;
-  type: 'FILLING' | 'TOPPING';
-}
-
-class CreateProductDto {
+  @IsString()
+  @IsNotEmpty()
   name: string;
+
+  @IsNumber()
+  @IsPositive()
   weight: number;
-  mixIns: CreateProductMixInDto[];
-  addOns: CreateProductAddOnDto[];
-  procedures: CreateProcedureDto[];
+
+  @IsEnum(AddOnType)
+  type: AddOnType;
 }
 
 class CreateProcedureDto {
+  @IsNumber()
   step: number;
+
+  @IsString()
+  @IsNotEmpty()
   name: string;
+
+  @IsString()
+  @IsNotEmpty()
   description: string;
 }
 
-export class CreateRecipeFamilyDto {
+class CreateProductDto {
+  @IsString()
+  @IsNotEmpty()
   name: string;
-  keyPoints?: string[]; // 兼容旧版，但我们现在使用procedures
+
+  @IsNumber()
+  @IsPositive()
+  weight: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductMixInDto)
+  @IsOptional()
+  mixIns: CreateProductMixInDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductAddOnDto)
+  @IsOptional()
+  addOns: CreateProductAddOnDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProcedureDto)
+  @IsOptional()
+  procedures: CreateProcedureDto[];
+}
+
+export class CreateRecipeFamilyDto {
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateDoughDto)
   doughs: CreateDoughDto[];
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductDto)
   products: CreateProductDto[];
-  procedures: CreateProcedureDto[]; // 通用工序
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProcedureDto)
+  @IsOptional()
+  procedures: CreateProcedureDto[];
 }

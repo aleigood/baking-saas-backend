@@ -1,8 +1,15 @@
 /**
  * 文件路径: src/ingredients/dto/create-ingredient.dto.ts
- * 文件描述: 定义了创建新原料品类所需的数据结构。
+ * 文件描述: (已重构) 添加了完整的 class-validator 验证装饰器。
  */
+import { IsString, IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
+
 export class CreateIngredientDto {
+  @IsString()
+  @IsNotEmpty()
   name: string;
-  hydration?: number; // 含水率，可选
+
+  @IsNumber()
+  @IsOptional()
+  hydration?: number;
 }

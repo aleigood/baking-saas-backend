@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config'; // [核心重构] 导入 ConfigModule
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -7,19 +8,27 @@ import { TenantsModule } from './tenants/tenants.module';
 import { RecipesModule } from './recipes/recipes.module';
 import { IngredientsModule } from './ingredients/ingredients.module';
 import { TasksModule } from './tasks/tasks.module';
-import { MembersModule } from './members/members.module'; // 1. 导入新模块
-import { StatsModule } from './stats/stats.module'; // 2. 导入新模块
+import { MembersModule } from './members/members.module';
+import { StatsModule } from './stats/stats.module';
+import { InvitationsModule } from './invitations/invitations.module';
+import { CostingModule } from './costing/costing.module';
 
 @Module({
   imports: [
+    // [核心重构] 将 ConfigModule 放在最前面，并设置为全局可用
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     PrismaModule,
     AuthModule,
     TenantsModule,
     RecipesModule,
     IngredientsModule,
     TasksModule,
-    MembersModule, // 3. 注册新模块
-    StatsModule, // 4. 注册新模块
+    MembersModule,
+    StatsModule,
+    InvitationsModule,
+    CostingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

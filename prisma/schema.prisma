@@ -1,4 +1,4 @@
-// prisma/schema.prisma (Version 9 - Final with Special Ingredient Handling)
+// prisma/schema.prisma (Version 10.1 - Fixed relations)
 
 datasource db {
   provider = "postgresql"
@@ -9,65 +9,62 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// --- 枚举类型 ---
+// --- Enums ---
 enum IngredientType {
-  STANDARD   // 标准原料，需要追踪库存和成本
-  UNTRACKED  // 非追踪原料，如水，无限库存，无成本
+  STANDARD
+  UNTRACKED
 }
 
 enum Role {
-  OWNER   // 老板/管理员
-  MANAGER // 主管/店长
-  BAKER   // 面包师
+  OWNER
+  MANAGER
+  BAKER
 }
 
 enum UserStatusInTenant {
-  ACTIVE    // 在职
-  INACTIVE  // 已禁用/软删除
+  ACTIVE
+  INACTIVE
 }
 
 enum AddOnType {
-  FILLING // 包入的馅料
-  TOPPING // 表面装饰
+  FILLING
+  TOPPING
 }
 
 enum ProductionTaskStatus {
-  IN_PROGRESS // 进行中
-  COMPLETED   // 已完成
-  CANCELED    // 已取消
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
 }
 
-// --- 核心模型 ---
+// --- Core Models ---
 
-// 1. 租户/商家表
 model Tenant {
   id              String           @id @default(uuid())
   name            String
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
-
-  users           TenantUser[]     // 通过中间表关联用户
+  users           TenantUser[]
   recipeFamilies  RecipeFamily[]
   ingredients     Ingredient[]
   extras          Extra[]
   productionTasks ProductionTask[]
+  invitations     Invitation[]
 }
 
-// 2. 用户表 (代表一个真实的人)
 model User {
   id            String   @id @default(uuid())
   name          String
-  wechatOpenId  String?  @unique // 微信OpenID，用于登录
-  email         String?  @unique // 邮箱可作为备用
-  passwordHash  String?  // 密码可作为备用
+  wechatOpenId  String?  @unique
+  email         String?  @unique
+  passwordHash  String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-
-  tenants  TenantUser[]     // 通过中间表关联到多个门店
-  tasks    ProductionTask[]
+  tenants       TenantUser[]
+  tasks         ProductionTask[]
+  createdInvitations Invitation[] // [核心修复] 添加此行以完成与 Invitation 模型的关系
 }
 
-// 3. 租户-用户关联表 (核心！定义了用户在哪个店是什么角色)
 model TenantUser {
   role      Role                @default(BAKER)
   status    UserStatusInTenant  @default(ACTIVE)
@@ -79,17 +76,27 @@ model TenantUser {
   @@id([tenantId, userId])
 }
 
-// 4. 原料品类表 (抽象原料, 不含库存) - 已优化
+model Invitation {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  expiresAt DateTime
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  creatorId String
+  creator   User     @relation(fields: [creatorId], references: [id])
+  createdAt DateTime @default(now())
+}
+
 model Ingredient {
-  id           String         @id @default(uuid())
-  name         String
-  hydration    Float?
-  type         IngredientType @default(STANDARD) // 新增：原料类型字段
-  defaultSkuId String?
-  defaultSku   IngredientSKU? @relation("DefaultSKU", fields: [defaultSkuId], references: [id])
-  tenantId     String
-  tenant       Tenant         @relation(fields: [tenantId], references: [id])
-  skus         IngredientSKU[]
+  id                 String              @id @default(uuid())
+  name               String
+  hydration          Float?
+  type               IngredientType      @default(STANDARD)
+  defaultSkuId       String?
+  defaultSku         IngredientSKU?      @relation("DefaultSKU", fields: [defaultSkuId], references: [id])
+  tenantId           String
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  skus               IngredientSKU[]
   doughIngredients   DoughIngredient[]
   productMixIns      ProductMixIn[]
   extraIngredients   ExtraIngredient[]
@@ -97,20 +104,18 @@ model Ingredient {
   @@unique([tenantId, name])
 }
 
-// 5. 原料SKU表 (具体商品, 如 "安琪500g袋装酵母")
 model IngredientSKU {
-  id                    String                @id @default(uuid())
+  id                    String              @id @default(uuid())
   brand                 String?
   specName              String
   specWeightInGrams     Float
   ingredientId          String
-  ingredient            Ingredient            @relation(fields: [ingredientId], references: [id])
+  ingredient            Ingredient          @relation(fields: [ingredientId], references: [id])
   procurementRecords    ProcurementRecord[]
-  defaultForIngredients Ingredient[]          @relation("DefaultSKU")
+  defaultForIngredients Ingredient[]        @relation("DefaultSKU")
   @@unique([ingredientId, brand, specName])
 }
 
-// 6. 采购记录表
 model ProcurementRecord {
   id                String        @id @default(uuid())
   packagesPurchased Int
@@ -120,7 +125,6 @@ model ProcurementRecord {
   sku               IngredientSKU @relation(fields: [skuId], references: [id])
 }
 
-// 7. 制作任务表
 model ProductionTask {
   id                 String               @id @default(uuid())
   status             ProductionTaskStatus @default(IN_PROGRESS)
@@ -136,7 +140,6 @@ model ProductionTask {
   consumptionRecords ConsumptionRecord[]
 }
 
-// 8. 消耗记录表
 model ConsumptionRecord {
   id                    String     @id @default(uuid())
   amountConsumedInGrams Float
@@ -146,61 +149,56 @@ model ConsumptionRecord {
   ingredient            Ingredient @relation(fields: [ingredientId], references: [id])
 }
 
-// 9. 配方家族表 (如: "贝果", "海盐卷")
 model RecipeFamily {
-  id        String    @id @default(uuid())
-  name      String
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  tenantId  String
-  tenant    Tenant    @relation(fields: [tenantId], references: [id])
-  doughs    Dough[]
-  products  Product[]
+  id         String      @id @default(uuid())
+  name       String
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  tenantId   String
+  tenant     Tenant      @relation(fields: [tenantId], references: [id])
+  doughs     Dough[]
+  products   Product[]
   procedures Procedure[]
 }
 
-// 10. 面团表 (如: "BIGA", "烫种", "主面团")
 model Dough {
-  id             String   @id @default(uuid())
+  id             String            @id @default(uuid())
   name           String
-  isPreDough     Boolean  @default(false)
+  isPreDough     Boolean           @default(false)
   targetTemp     Float?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
   recipeFamilyId String
-  recipeFamily   RecipeFamily @relation(fields: [recipeFamilyId], references: [id])
+  recipeFamily   RecipeFamily      @relation(fields: [recipeFamilyId], references: [id])
   ingredients    DoughIngredient[]
 }
 
-// 11. 最终产品表 (如: "原味贝果")
 model Product {
-  id             String   @id @default(uuid())
+  id             String         @id @default(uuid())
   name           String
   weight         Float
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
   recipeFamilyId String
-  recipeFamily   RecipeFamily @relation(fields: [recipeFamilyId], references: [id])
+  recipeFamily   RecipeFamily   @relation(fields: [recipeFamilyId], references: [id])
   mixIns         ProductMixIn[]
   addOns         ProductAddOn[]
   procedures     Procedure[]
   tasks          ProductionTask[]
 }
 
-// 12. 附加项/子配方表 (如: "柠檬奶油奶酪")
 model Extra {
-  id            String   @id @default(uuid())
+  id            String            @id @default(uuid())
   name          String
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
   tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
   ingredients   ExtraIngredient[]
   productAddOns ProductAddOn[]
-  @@unique([tenantId, name]) // [核心修复] 添加此行，确保附加项名称在租户内唯一
+  @@unique([tenantId, name])
 }
 
-// 13. 工序表 (用于替代keyPoints)
 model Procedure {
   id             String        @id @default(uuid())
   step           Int
@@ -212,9 +210,8 @@ model Procedure {
   product        Product?      @relation(fields: [productId], references: [id])
 }
 
-// --- 关联关系表 ---
+// --- Relation Tables ---
 
-// 面团与原料的关联
 model DoughIngredient {
   ratio        Float
   isFlour      Boolean    @default(false)
@@ -225,7 +222,6 @@ model DoughIngredient {
   @@id([doughId, ingredientId])
 }
 
-// 产品与混入原料的关联
 model ProductMixIn {
   ratio        Float
   productId    String
@@ -235,18 +231,16 @@ model ProductMixIn {
   @@id([productId, ingredientId])
 }
 
-// 产品与附加项(馅料/装饰)的关联
 model ProductAddOn {
   weight    Float
-  type      AddOnType @default(FILLING)
+  type      AddOnType  @default(FILLING)
   productId String
   extraId   String
-  product   Product   @relation(fields: [productId], references: [id])
-  extra     Extra     @relation(fields: [extraId], references: [id])
+  product   Product    @relation(fields: [productId], references: [id])
+  extra     Extra      @relation(fields: [extraId], references: [id])
   @@id([productId, extraId, type])
 }
 
-// 附加项与原料的关联
 model ExtraIngredient {
   ratio        Float
   extraId      String

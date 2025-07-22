@@ -1,8 +1,15 @@
 /**
  * 文件路径: src/tasks/dto/create-task.dto.ts
- * 文件描述: 定义了创建一个新制作任务所需的数据结构。
+ * 文件描述: (已重构) 添加了完整的 class-validator 验证装饰器。
  */
+import { IsString, IsNotEmpty, IsInt, IsPositive } from 'class-validator';
+
 export class CreateTaskDto {
-  productId: string; // 要制作的最终产品的ID
-  plannedQuantity: number; // 计划生产的数量
+  @IsString()
+  @IsNotEmpty()
+  productId: string;
+
+  @IsInt()
+  @IsPositive()
+  plannedQuantity: number;
 }

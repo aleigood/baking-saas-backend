@@ -1,9 +1,11 @@
 /**
  * 文件路径: src/tasks/dto/update-task-status.dto.ts
- * 文件描述: 定义了更新任务状态所需的数据结构。
+ * 文件描述: (已重构) 添加了完整的 class-validator 验证装饰器。
  */
+import { IsEnum } from 'class-validator';
 import { ProductionTaskStatus } from '@prisma/client';
 
 export class UpdateTaskStatusDto {
-  status: ProductionTaskStatus; // 目标状态，如 'COMPLETED' 或 'CANCELED'
+  @IsEnum(ProductionTaskStatus)
+  status: ProductionTaskStatus;
 }
