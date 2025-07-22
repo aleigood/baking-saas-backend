@@ -12,6 +12,7 @@ import { MembersModule } from './members/members.module';
 import { StatsModule } from './stats/stats.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { CostingModule } from './costing/costing.module';
+import { SuperAdminModule } from './super-admin/super-admin.module'; // [新增] 导入SuperAdminModule
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { CostingModule } from './costing/costing.module';
     StatsModule,
     InvitationsModule,
     CostingModule,
+    SuperAdminModule, // [新增] 注册SuperAdminModule
   ],
   controllers: [AppController],
   providers: [AppService],

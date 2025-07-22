@@ -37,10 +37,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    * @returns 返回一个包含用户身份信息的对象，该对象将被附加到请求的 user 属性上。
    */
   validate(payload: JwtPayload): UserPayload {
+    // [修改] 将 systemRole 从 payload 中解构出来并返回
     return {
       userId: payload.sub,
       tenantId: payload.tenantId,
       role: payload.role,
+      systemRole: payload.systemRole, // 新增
     };
   }
 }

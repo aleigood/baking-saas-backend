@@ -1,4 +1,4 @@
-// prisma/schema.prisma (Version 11.0 - Recipe Versioning & Loss Ratio)
+// prisma/schema.prisma (Version 11.1 - Super Admin Support)
 // 数据库提供商和连接 URL
 datasource db {
   provider = "postgresql"
@@ -11,7 +11,11 @@ generator client {
 }
 
 // --- Enums ---
-// 枚举类型定义保持不变
+// [新增] 系统级角色枚举
+enum SystemRole {
+  SUPER_ADMIN
+}
+
 enum IngredientType {
   STANDARD
   UNTRACKED
@@ -57,6 +61,8 @@ model Tenant {
 model User {
   id                 String       @id @default(uuid())
   name               String
+  // [新增] 增加系统级角色字段，用于区分超级管理员
+  systemRole         SystemRole?
   wechatOpenId       String?      @unique
   email              String?      @unique
   passwordHash       String?
@@ -154,7 +160,7 @@ model ConsumptionRecord {
   ingredient            Ingredient @relation(fields: [ingredientId], references: [id])
 }
 
-// --- [更新] 配方模型 ---
+// --- 配方模型 ---
 
 model RecipeFamily {
   id        String          @id @default(uuid())
@@ -163,11 +169,9 @@ model RecipeFamily {
   updatedAt DateTime        @updatedAt
   tenantId  String
   tenant    Tenant          @relation(fields: [tenantId], references: [id])
-  // [更新] 关联到版本，而不是直接关联到面团和产品
   versions  RecipeVersion[]
 }
 
-// [新增] 配方版本模型
 model RecipeVersion {
   id             String      @id @default(uuid())
   versionNumber  Int
@@ -188,8 +192,7 @@ model Dough {
   name            String
   isPreDough      Boolean           @default(false)
   targetTemp      Float?
-  lossRatio       Float             @default(0) // [新增] 生产损耗率
-  // [更新] 关联到 RecipeVersion
+  lossRatio       Float             @default(0) // 生产损耗率
   recipeVersionId String
   recipeVersion   RecipeVersion     @relation(fields: [recipeVersionId], references: [id])
   ingredients     DoughIngredient[]
@@ -201,7 +204,6 @@ model Product {
   weight          Float
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
-  // [更新] 关联到 RecipeVersion
   recipeVersionId String
   recipeVersion   RecipeVersion  @relation(fields: [recipeVersionId], references: [id])
   mixIns          ProductMixIn[]
@@ -213,7 +215,7 @@ model Product {
 model Extra {
   id            String            @id @default(uuid())
   name          String
-  lossRatio     Float             @default(0) // [新增] 生产损耗率
+  lossRatio     Float             @default(0) // 生产损耗率
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   tenantId      String
@@ -229,7 +231,6 @@ model Procedure {
   step            Int
   name            String
   description     String
-  // [更新] 关联到 RecipeVersion
   recipeVersionId String?
   recipeVersion   RecipeVersion? @relation(fields: [recipeVersionId], references: [id])
   productId       String?

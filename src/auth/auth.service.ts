@@ -12,7 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto, LoginDto, WechatLoginDto } from './dto/auth.dto';
 import * as bcrypt from 'bcrypt';
-import { Role } from '@prisma/client';
+import { Role, SystemRole } from '@prisma/client';
 import { InvitationsService } from '../invitations/invitations.service';
 
 /**
@@ -98,6 +98,14 @@ export class AuthService {
       user.passwordHash,
     );
     if (!isPasswordMatching) throw new UnauthorizedException('邮箱或密码错误');
+
+    // [修改] 增加超级管理员登录逻辑
+    if (user.systemRole === SystemRole.SUPER_ADMIN) {
+      // 超级管理员不属于任何店铺，tenantId可以为空字符串或特定标识
+      // [类型修正] 为 role 参数传递一个有效的 Role 枚举值，因为超级管理员的权限由 systemRole 控制，此处的 role 仅为占位。
+      return this.generateJwtToken(user.id, '', Role.BAKER, user.systemRole);
+    }
+
     // 默认登录到用户的第一个门店
     const firstTenantUser = user.tenants[0];
     if (!firstTenantUser)
@@ -107,6 +115,7 @@ export class AuthService {
       user.id,
       firstTenantUser.tenantId,
       firstTenantUser.role,
+      user.systemRole || undefined, // [类型修正] 确保 null 值被转换为 undefined
     );
   }
 
@@ -189,7 +198,12 @@ export class AuthService {
     });
     if (!tenantUserInfo)
       throw new UnauthorizedException('无法找到用户在该门店的角色信息');
-    return this.generateJwtToken(user.id, targetTenantId, tenantUserInfo.role);
+    return this.generateJwtToken(
+      user.id,
+      targetTenantId,
+      tenantUserInfo.role,
+      user.systemRole || undefined, // [类型修正] 确保 null 值被转换为 undefined
+    );
   }
 
   async getProfile(userId: string) {
@@ -205,8 +219,19 @@ export class AuthService {
     return result;
   }
 
-  private generateJwtToken(userId: string, tenantId: string, role: Role) {
-    const payload = { sub: userId, tenantId: tenantId, role: role };
+  // [修改] 增加 systemRole 参数
+  private generateJwtToken(
+    userId: string,
+    tenantId: string,
+    role: Role,
+    systemRole?: SystemRole,
+  ) {
+    const payload = {
+      sub: userId,
+      tenantId: tenantId,
+      role: role,
+      systemRole: systemRole,
+    };
     return { access_token: this.jwtService.sign(payload) };
   }
 }
