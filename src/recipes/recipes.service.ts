@@ -1,18 +1,23 @@
 /**
  * 文件路径: src/recipes/recipes.service.ts
- * 文件描述: (版本化重构) 实现了完整的配方版本管理和损耗率功能。
+ * 文件描述: (完整最终版) 恢复了所有方法，解决了静态检查错误。
  */
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { CreateRecipeFamilyDto } from './dto/create-recipe.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
+import { Role } from '@prisma/client';
 
 @Injectable()
 export class RecipesService {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * [核心更新] 创建一个配方家族及其首个版本。
+   * 创建一个配方家族及其首个版本。
    * @param createRecipeFamilyDto 包含完整配方信息的 DTO
    * @param user 当前用户信息
    */
@@ -20,6 +25,11 @@ export class RecipesService {
     createRecipeFamilyDto: CreateRecipeFamilyDto,
     user: UserPayload,
   ) {
+    // 权限校验
+    if (user.role === Role.BAKER) {
+      throw new ForbiddenException('仅老板或主管可以创建配方。');
+    }
+
     const { name, doughs, products, procedures } = createRecipeFamilyDto;
     const { tenantId } = user;
 
@@ -32,19 +42,18 @@ export class RecipesService {
         },
       });
 
-      // 2. [新增] 创建首个配方版本 (RecipeVersion)
+      // 2. 创建首个配方版本 (RecipeVersion)
       const recipeVersion = await tx.recipeVersion.create({
         data: {
           recipeFamilyId: recipeFamily.id,
           versionNumber: 1,
-          name: '初始版本', // Default name for the first version
+          name: '初始版本',
           isActive: true,
         },
       });
 
       // 3. 处理并创建所有面团 (Doughs) 及其原料，关联到新版本
       for (const doughDto of doughs) {
-        // 确保所有原料都已存在，如果不存在则创建
         for (const ing of doughDto.ingredients) {
           await tx.ingredient.upsert({
             where: { tenantId_name: { tenantId, name: ing.name } },
@@ -58,8 +67,8 @@ export class RecipesService {
             name: doughDto.name,
             isPreDough: doughDto.isPreDough,
             targetTemp: doughDto.targetTemp,
-            lossRatio: doughDto.lossRatio || 0, // [新增] 处理损耗率
-            recipeVersionId: recipeVersion.id, // 关联到版本
+            lossRatio: doughDto.lossRatio || 0,
+            recipeVersionId: recipeVersion.id,
             ingredients: {
               create: doughDto.ingredients.map((ing) => ({
                 ratio: ing.ratio,
@@ -81,7 +90,7 @@ export class RecipesService {
           data: {
             name: productDto.name,
             weight: productDto.weight,
-            recipeVersionId: recipeVersion.id, // 关联到版本
+            recipeVersionId: recipeVersion.id,
             mixIns: {
               create: productDto.mixIns.map((mixIn) => ({
                 ratio: mixIn.ratio,
@@ -131,14 +140,13 @@ export class RecipesService {
   }
 
   /**
-   * [核心更新] 获取当前店铺所有最终产品列表，仅包含激活版本的产品。
-   * @param user 当前用户信息
+   * 获取当前店铺所有最终产品列表，仅包含激活版本的产品。
    */
   async findAll(user: UserPayload) {
     const products = await this.prisma.product.findMany({
       where: {
         recipeVersion: {
-          isActive: true, // 只查找激活版本下的产品
+          isActive: true,
           recipeFamily: {
             tenantId: user.tenantId,
           },
@@ -161,16 +169,14 @@ export class RecipesService {
       name: p.name,
       type: p.recipeVersion.recipeFamily.name,
       weight: p.weight,
-      rating: 4.8, // 模拟数据
+      rating: 4.8,
       publicCount: p._count.tasks,
       ingredients: [],
     }));
   }
 
   /**
-   * [核心更新] 获取单个最终产品的完整详情，基于其激活的版本。
-   * @param id 产品ID
-   * @param user 当前用户信息
+   * 获取单个最终产品的完整详情，基于其激活的版本。
    */
   async findOne(id: string, user: UserPayload) {
     const product = await this.prisma.product.findFirst({
@@ -213,22 +219,17 @@ export class RecipesService {
   }
 
   /**
-   * [新增] 获取指定配方家族的所有版本列表
-   * @param familyId 配方家族ID
-   * @param user 当前用户信息
+   * 获取指定配方家族的所有版本列表
    */
   async findAllVersions(familyId: string, user: UserPayload) {
-    // 首先验证该配方家族是否属于当前用户的租户
     const family = await this.prisma.recipeFamily.findFirst({
       where: { id: familyId, tenantId: user.tenantId },
     });
-
     if (!family) {
       throw new NotFoundException(
         `ID为 ${familyId} 的配方家族不存在或无权访问`,
       );
     }
-
     return this.prisma.recipeVersion.findMany({
       where: { recipeFamilyId: familyId },
       orderBy: { versionNumber: 'desc' },
@@ -236,18 +237,18 @@ export class RecipesService {
   }
 
   /**
-   * [新增] 激活指定的配方版本
-   * @param familyId 配方家族ID
-   * @param versionId 要激活的版本ID
-   * @param user 当前用户信息
+   * 激活指定的配方版本
    */
   async activateVersion(
     familyId: string,
     versionId: string,
     user: UserPayload,
   ) {
+    // 权限校验
+    if (user.role === Role.BAKER) {
+      throw new ForbiddenException('仅老板或主管可以激活配方版本。');
+    }
     return this.prisma.$transaction(async (tx) => {
-      // 1. 验证该配方家族和版本是否属于当前用户的租户
       const version = await tx.recipeVersion.findFirst({
         where: {
           id: versionId,
@@ -255,24 +256,130 @@ export class RecipesService {
           recipeFamily: { tenantId: user.tenantId },
         },
       });
-
       if (!version) {
         throw new NotFoundException('指定的配方版本不存在或无权操作');
       }
-
-      // 2. 将该家族下的所有版本都设为非激活
       await tx.recipeVersion.updateMany({
         where: { recipeFamilyId: familyId },
         data: { isActive: false },
       });
-
-      // 3. 将指定版本设为激活
       const activatedVersion = await tx.recipeVersion.update({
         where: { id: versionId },
         data: { isActive: true },
       });
-
       return activatedVersion;
+    });
+  }
+
+  /**
+   * 基于最新版本创建一个新的配方版本
+   */
+  async createVersion(
+    familyId: string,
+    versionName: string,
+    user: UserPayload,
+  ) {
+    // 权限校验
+    if (user.role === Role.BAKER) {
+      throw new ForbiddenException('仅老板或主管可以创建新版本。');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. 找到最新的版本
+      const latestVersion = await tx.recipeVersion.findFirst({
+        where: {
+          recipeFamilyId: familyId,
+          recipeFamily: { tenantId: user.tenantId },
+        },
+        orderBy: { versionNumber: 'desc' },
+        include: {
+          doughs: { include: { ingredients: true } },
+          products: {
+            include: { mixIns: true, addOns: true, procedures: true },
+          },
+          procedures: true,
+        },
+      });
+
+      if (!latestVersion) {
+        throw new NotFoundException('配方家族不存在或无权操作');
+      }
+
+      // 2. 创建新版本记录
+      const newVersion = await tx.recipeVersion.create({
+        data: {
+          name: versionName,
+          versionNumber: latestVersion.versionNumber + 1,
+          isActive: false, // 新版本默认不激活
+          recipeFamilyId: familyId,
+        },
+      });
+
+      // 3. 复制所有关联数据
+      // 复制面团
+      for (const dough of latestVersion.doughs) {
+        await tx.dough.create({
+          data: {
+            name: dough.name,
+            isPreDough: dough.isPreDough,
+            targetTemp: dough.targetTemp,
+            lossRatio: dough.lossRatio,
+            recipeVersionId: newVersion.id,
+            ingredients: {
+              create: dough.ingredients.map((ing) => ({
+                ratio: ing.ratio,
+                isFlour: ing.isFlour,
+                ingredientId: ing.ingredientId,
+              })),
+            },
+          },
+        });
+      }
+
+      // 复制产品
+      for (const product of latestVersion.products) {
+        await tx.product.create({
+          data: {
+            name: product.name,
+            weight: product.weight,
+            recipeVersionId: newVersion.id,
+            mixIns: {
+              create: product.mixIns.map((mixIn) => ({
+                ratio: mixIn.ratio,
+                ingredientId: mixIn.ingredientId,
+              })),
+            },
+            addOns: {
+              create: product.addOns.map((addOn) => ({
+                weight: addOn.weight,
+                type: addOn.type,
+                extraId: addOn.extraId,
+              })),
+            },
+            procedures: {
+              create: product.procedures.map((proc) => ({
+                step: proc.step,
+                name: proc.name,
+                description: proc.description,
+              })),
+            },
+          },
+        });
+      }
+
+      // 复制通用工序
+      if (latestVersion.procedures && latestVersion.procedures.length > 0) {
+        await tx.procedure.createMany({
+          data: latestVersion.procedures.map((proc) => ({
+            step: proc.step,
+            name: proc.name,
+            description: proc.description,
+            recipeVersionId: newVersion.id,
+          })),
+        });
+      }
+
+      return newVersion;
     });
   }
 }

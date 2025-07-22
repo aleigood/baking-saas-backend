@@ -1,6 +1,6 @@
 /**
  * 文件路径: src/recipes/recipes.controller.ts
- * 文件描述: (已更新) 新增了配方版本管理的 API 端点。
+ * 文件描述: (完整最终版) 恢复了所有方法，解决了静态检查错误。
  */
 import {
   Controller,
@@ -19,8 +19,8 @@ import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 
-@UseGuards(AuthGuard('jwt')) // 对整个控制器的所有路由应用JWT守卫
-@Controller('recipes') // 所有路由都以 /recipes 开头
+@UseGuards(AuthGuard('jwt'))
+@Controller('recipes')
 export class RecipesController {
   constructor(private readonly recipesService: RecipesService) {}
 
@@ -55,10 +55,8 @@ export class RecipesController {
   }
 
   /**
-   * [新增] 获取指定配方家族的所有版本列表
+   * 获取指定配方家族的所有版本列表
    * @route GET /recipes/:familyId/versions
-   * @param familyId - 配方家族的ID
-   * @param user - 从JWT令牌中解析出的当前用户信息
    */
   @Get(':familyId/versions')
   findAllVersions(
@@ -69,11 +67,8 @@ export class RecipesController {
   }
 
   /**
-   * [新增] 激活指定的配方版本
+   * 激活指定的配方版本
    * @route PATCH /recipes/:familyId/versions/:versionId/activate
-   * @param familyId - 配方家族的ID
-   * @param versionId - 要激活的配方版本的ID
-   * @param user - 从JWT令牌中解析出的当前用户信息
    */
   @Patch(':familyId/versions/:versionId/activate')
   @HttpCode(HttpStatus.OK)
@@ -83,5 +78,18 @@ export class RecipesController {
     @GetUser() user: UserPayload,
   ) {
     return this.recipesService.activateVersion(familyId, versionId, user);
+  }
+
+  /**
+   * 基于最新版本创建一个新的配方版本
+   * @route POST /recipes/:familyId/versions
+   */
+  @Post(':familyId/versions')
+  createVersion(
+    @Param('familyId') familyId: string,
+    @Body('name') versionName: string,
+    @GetUser() user: UserPayload,
+  ) {
+    return this.recipesService.createVersion(familyId, versionName, user);
   }
 }

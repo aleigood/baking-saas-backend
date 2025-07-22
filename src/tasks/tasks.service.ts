@@ -1,37 +1,38 @@
 /**
  * 文件路径: src/tasks/tasks.service.ts
- * 文件描述: (功能完善) 实现了创建任务时，自动计算并生成原料消耗记录的逻辑。
+ * 文件描述: (权限更新) 增加了创建任务时的角色校验。
  */
 import {
   Injectable,
   NotFoundException,
   InternalServerErrorException,
-  BadRequestException, // 引入 BadRequestException
+  BadRequestException,
+  ForbiddenException, // 引入 ForbiddenException
 } from '@nestjs/common';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
-import { ProductionTaskStatus } from '@prisma/client';
+import { ProductionTaskStatus, Role } from '@prisma/client'; // 引入 Role
 
 @Injectable()
 export class TasksService {
   constructor(private prisma: PrismaService) {}
 
-  /**
-   * [核心更新] 创建一个新的生产任务，并自动计算和生成原料消耗记录。
-   * @param createTaskDto 包含产品ID和计划数量的DTO
-   * @param user 当前用户信息
-   */
   async create(createTaskDto: CreateTaskDto, user: UserPayload) {
+    // [新增] 权限校验：只有老板和主管可以创建任务
+    if (user.role === Role.BAKER) {
+      throw new ForbiddenException('仅老板或主管可以创建生产任务。');
+    }
+
     const { productId, plannedQuantity } = createTaskDto;
     const { tenantId, userId } = user;
 
     // 1. 首先，获取产品的完整配方信息
     const productRecipe = await this.prisma.product.findFirst({
-      where: { id: productId, recipeFamily: { tenantId } },
+      where: { id: productId, recipeVersion: { recipeFamily: { tenantId } } },
       include: {
-        recipeFamily: {
+        recipeVersion: {
           include: {
             doughs: {
               include: {
@@ -59,10 +60,9 @@ export class TasksService {
 
     // 2. 计算每种原料的总需求量
     const ingredientConsumptionMap = new Map<string, number>();
-
     // 2a. 计算所有面团中的总面粉烘焙百分比
     let totalFlourRatio = 0;
-    productRecipe.recipeFamily.doughs.forEach((dough) => {
+    productRecipe.recipeVersion.doughs.forEach((dough) => {
       dough.ingredients.forEach((ing) => {
         if (ing.isFlour) {
           totalFlourRatio += ing.ratio;
@@ -79,7 +79,7 @@ export class TasksService {
     // 2b. 计算单个产品的总面粉重量（克）
     // 假设：产品克重(product.weight) = 所有面团原料 + 所有混入料原料的总重量
     let totalRatio = 0;
-    productRecipe.recipeFamily.doughs.forEach((d) =>
+    productRecipe.recipeVersion.doughs.forEach((d) =>
       d.ingredients.forEach((i) => (totalRatio += i.ratio)),
     );
     productRecipe.mixIns.forEach((m) => (totalRatio += m.ratio));
@@ -105,7 +105,7 @@ export class TasksService {
       });
     };
 
-    productRecipe.recipeFamily.doughs.forEach((d) =>
+    productRecipe.recipeVersion.doughs.forEach((d) =>
       calculateConsumption(d.ingredients),
     );
     calculateConsumption(productRecipe.mixIns);
