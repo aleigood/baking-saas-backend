@@ -39,24 +39,6 @@ export class SuperAdminController {
   }
 
   /**
-   * [新增] 创建新老板账号并关联到店铺的API端点
-   * @route POST /super-admin/users/owner
-   */
-  @Post('users/owner')
-  createOwner(@Body() createOwnerDto: CreateOwnerDto) {
-    return this.superAdminService.createOwner(createOwnerDto);
-  }
-
-  /**
-   * [新增] 获取所有店铺列表的API端点
-   * @route GET /super-admin/tenants
-   */
-  @Get('tenants')
-  findAllTenants() {
-    return this.superAdminService.findAllTenants();
-  }
-
-  /**
    * [新增] 更新店铺信息的API端点
    * @route PATCH /super-admin/tenants/:id
    */
@@ -76,6 +58,33 @@ export class SuperAdminController {
   @HttpCode(HttpStatus.NO_CONTENT)
   deactivateTenant(@Param('id') id: string) {
     return this.superAdminService.deactivateTenant(id);
+  }
+
+  /**
+   * [新增] 重新激活店铺的API端点
+   * @route PATCH /super-admin/tenants/:id/reactivate
+   */
+  @Patch('tenants/:id/reactivate')
+  reactivateTenant(@Param('id') id: string) {
+    return this.superAdminService.reactivateTenant(id);
+  }
+
+  /**
+   * [新增] 获取所有店铺列表的API端点
+   * @route GET /super-admin/tenants
+   */
+  @Get('tenants')
+  findAllTenants() {
+    return this.superAdminService.findAllTenants();
+  }
+
+  /**
+   * [新增] 创建新老板账号并关联到店铺的API端点
+   * @route POST /super-admin/users/owner
+   */
+  @Post('users/owner')
+  createOwner(@Body() createOwnerDto: CreateOwnerDto) {
+    return this.superAdminService.createOwner(createOwnerDto);
   }
 
   /**

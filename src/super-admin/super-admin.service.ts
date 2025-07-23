@@ -15,7 +15,7 @@ import { Role, TenantStatus } from '@prisma/client';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { RecipesService } from '../recipes/recipes.service';
 import { CreateRecipeFamilyDto } from '../recipes/dto/create-recipe.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto'; // [新增] 导入 UpdateUserDto
 
 @Injectable()
 export class SuperAdminService {
