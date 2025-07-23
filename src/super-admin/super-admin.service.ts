@@ -11,12 +11,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateOwnerDto } from './dto/create-owner.dto';
 import * as bcrypt from 'bcrypt';
-import { Role, TenantStatus } from '@prisma/client';
+import { Prisma, Role, TenantStatus } from '@prisma/client';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { RecipesService } from '../recipes/recipes.service';
 import { CreateRecipeFamilyDto } from '../recipes/dto/create-recipe.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { DashboardStatsDto } from './dto/dashboard-stats.dto'; // [新增] 导入 DTO
+import { DashboardStatsDto } from './dto/dashboard-stats.dto';
+import { PaginationQueryDto } from './dto/query.dto';
 
 @Injectable()
 export class SuperAdminService {
@@ -107,14 +108,48 @@ export class SuperAdminService {
   }
 
   /**
-   * [新增] 获取所有店铺的列表
+   * [修改] 获取所有店铺的列表，支持分页、搜索和排序
    */
-  async findAllTenants() {
-    return this.prisma.tenant.findMany({
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+  async findAllTenants(queryDto: PaginationQueryDto) {
+    const { page = 1, limit = 10, search, sortBy } = queryDto;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.TenantWhereInput = search
+      ? {
+          name: {
+            contains: search,
+            mode: 'insensitive', // 忽略大小写
+          },
+        }
+      : {};
+
+    const orderBy: Prisma.TenantOrderByWithRelationInput = {};
+    if (sortBy) {
+      const [field, direction] = sortBy.split(':');
+      if (field && (direction === 'asc' || direction === 'desc')) {
+        orderBy[field] = direction;
+      }
+    } else {
+      orderBy.createdAt = 'desc'; // 默认排序
+    }
+
+    // 使用事务同时执行查询和计数，保证数据一致性
+    const [tenants, total] = await this.prisma.$transaction([
+      this.prisma.tenant.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy,
+      }),
+      this.prisma.tenant.count({ where }),
+    ]);
+
+    return {
+      data: tenants,
+      total,
+      page,
+      limit,
+    };
   }
 
   /**
@@ -285,7 +320,7 @@ export class SuperAdminService {
           step: 1,
           name: '混合',
           description:
-            '混合主面团所有材料，慢速搅拌3分钟，快速搅拌5分钟至扩展阶段。',
+            '混合主面团所有材料，慢速搅拌3分钟，快速搅拌至面筋完全扩展。',
         },
         {
           step: 2,

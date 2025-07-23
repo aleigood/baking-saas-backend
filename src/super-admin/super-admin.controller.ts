@@ -13,6 +13,7 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  Query,
 } from '@nestjs/common';
 import { SuperAdminService } from './super-admin.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
@@ -22,6 +23,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateRecipeFamilyDto } from '../recipes/dto/create-recipe.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { PaginationQueryDto } from './dto/query.dto';
 
 // 使用两个守卫：首先验证JWT令牌有效性，然后验证是否为超级管理员
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
@@ -79,12 +81,12 @@ export class SuperAdminController {
   }
 
   /**
-   * [新增] 获取所有店铺列表的API端点
+   * [修改] 获取所有店铺列表的API端点，支持查询参数
    * @route GET /super-admin/tenants
    */
   @Get('tenants')
-  findAllTenants() {
-    return this.superAdminService.findAllTenants();
+  findAllTenants(@Query() queryDto: PaginationQueryDto) {
+    return this.superAdminService.findAllTenants(queryDto);
   }
 
   /**
