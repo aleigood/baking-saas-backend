@@ -20,6 +20,8 @@ import { SuperAdminGuard } from './guards/super-admin.guard';
 import { CreateOwnerDto } from './dto/create-owner.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { CreateRecipeFamilyDto } from '../recipes/dto/create-recipe.dto';
+import { UpdateUserDto } from './dto/update-user.dto'; // [新增] 导入 UpdateUserDto
 
 // 使用两个守卫：首先验证JWT令牌有效性，然后验证是否为超级管理员
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
@@ -83,5 +85,35 @@ export class SuperAdminController {
   @Get('users')
   findAllUsers() {
     return this.superAdminService.findAllUsers();
+  }
+
+  /**
+   * [新增] 更新用户信息的API端点
+   * @route PATCH /super-admin/users/:id
+   */
+  @Patch('users/:id')
+  updateUser(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
+    return this.superAdminService.updateUser(id, updateUserDto);
+  }
+
+  /**
+   * [新增] 获取配方导入模板的API端点
+   * @route GET /super-admin/recipes/template
+   */
+  @Get('recipes/template')
+  getRecipeTemplate() {
+    return this.superAdminService.getRecipeTemplateJson();
+  }
+
+  /**
+   * [新增] 为指定店铺导入配方的API端点
+   * @route POST /super-admin/tenants/:tenantId/recipes/import
+   */
+  @Post('tenants/:tenantId/recipes/import')
+  importRecipe(
+    @Param('tenantId') tenantId: string,
+    @Body() recipeDto: CreateRecipeFamilyDto,
+  ) {
+    return this.superAdminService.importRecipe(tenantId, recipeDto);
   }
 }
