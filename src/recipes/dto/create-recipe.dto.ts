@@ -1,6 +1,6 @@
 /**
  * 文件路径: src/recipes/dto/create-recipe.dto.ts
- * 文件描述: (已更新) 为 CreateDoughDto 添加了 lossRatio 和 procedures 字段。
+ * 文件描述: (已更新) 将 isFlour 和 isPreDough 设为可选字段以符合需求。
  */
 import {
   IsString,
@@ -40,8 +40,10 @@ class CreateDoughIngredientDto {
   @IsNumber()
   ratio: number;
 
+  // [修改] 将 isFlour 设为可选。如果未提供，服务层会将其默认为 false。
+  @IsOptional()
   @IsBoolean()
-  isFlour: boolean;
+  isFlour?: boolean;
 }
 
 class CreateDoughDto {
@@ -49,8 +51,10 @@ class CreateDoughDto {
   @IsNotEmpty()
   name: string;
 
+  // [修改] 将 isPreDough 设为可选。如果未提供，服务层会将其默认为 false。
+  @IsOptional()
   @IsBoolean()
-  isPreDough: boolean;
+  isPreDough?: boolean;
 
   @IsNumber()
   @IsOptional()

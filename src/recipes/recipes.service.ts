@@ -1,6 +1,6 @@
 /**
  * 文件路径: src/recipes/recipes.service.ts
- * 文件描述: (已更新) 增加了面粉比例校验和对嵌套操作步骤的处理。
+ * 文件描述: (已更新) 修正了面粉比例校验逻辑，确保所有面团的面粉总比例为100%。
  */
 import {
   Injectable,
@@ -34,21 +34,21 @@ export class RecipesService {
     const { name, doughs, products, procedures } = createRecipeFamilyDto;
     const { tenantId } = user;
 
-    // [新增] 面粉比例校验逻辑
+    // [核心修正] 校验整个配方中所有面粉的总比例
+    let totalFlourRatio = 0;
     for (const dough of doughs) {
-      const flourIngredients = dough.ingredients.filter((ing) => ing.isFlour);
-      if (flourIngredients.length > 0) {
-        const totalFlourRatio = flourIngredients.reduce(
-          (sum, ing) => sum + ing.ratio,
-          0,
-        );
-        // 使用一个小的容差来处理浮点数精度问题
-        if (Math.abs(totalFlourRatio - 100) > 0.001) {
-          throw new BadRequestException(
-            `配方错误：面团 "${dough.name}" 中的面粉总比例必须为 100%，当前为 ${totalFlourRatio}%。`,
-          );
+      for (const ingredient of dough.ingredients) {
+        if (ingredient.isFlour) {
+          totalFlourRatio += ingredient.ratio;
         }
       }
+    }
+
+    // 使用一个小的容差来处理浮点数精度问题
+    if (Math.abs(totalFlourRatio - 100) > 0.001) {
+      throw new BadRequestException(
+        `配方不合法：所有面团中的面粉总比例必须为 100%，当前计算总和为 ${totalFlourRatio}%。`,
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -76,21 +76,27 @@ export class RecipesService {
           await tx.ingredient.upsert({
             where: { tenantId_name: { tenantId, name: ing.name } },
             update: {},
-            create: { name: ing.name, tenantId },
+            create: {
+              name: ing.name,
+              tenantId,
+              hydration: ing.isFlour ? 0 : undefined,
+            },
           });
         }
 
         await tx.dough.create({
           data: {
             name: doughDto.name,
-            isPreDough: doughDto.isPreDough,
+            // [修改] 使用 ?? false 来处理可选的 isPreDough 字段
+            isPreDough: doughDto.isPreDough ?? false,
             targetTemp: doughDto.targetTemp,
             lossRatio: doughDto.lossRatio || 0,
             recipeVersionId: recipeVersion.id,
             ingredients: {
               create: doughDto.ingredients.map((ing) => ({
                 ratio: ing.ratio,
-                isFlour: ing.isFlour,
+                // [修改] 使用 ?? false 来处理可选的 isFlour 字段
+                isFlour: ing.isFlour ?? false,
                 ingredient: {
                   connect: {
                     tenantId_name: { tenantId, name: ing.name },
@@ -120,7 +126,7 @@ export class RecipesService {
             weight: productDto.weight,
             recipeVersionId: recipeVersion.id,
             mixIns: {
-              create: productDto.mixIns.map((mixIn) => ({
+              create: productDto.mixIns?.map((mixIn) => ({
                 ratio: mixIn.ratio,
                 ingredient: {
                   connectOrCreate: {
@@ -131,7 +137,7 @@ export class RecipesService {
               })),
             },
             addOns: {
-              create: productDto.addOns.map((addOn) => ({
+              create: productDto.addOns?.map((addOn) => ({
                 weight: addOn.weight,
                 type: addOn.type,
                 extra: {
@@ -143,7 +149,7 @@ export class RecipesService {
               })),
             },
             procedures: {
-              create: productDto.procedures.map((proc) => ({
+              create: productDto.procedures?.map((proc) => ({
                 step: proc.step,
                 name: proc.name,
                 description: proc.description,
