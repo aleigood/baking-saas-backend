@@ -24,6 +24,9 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateRecipeFamilyDto } from '../recipes/dto/create-recipe.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { PaginationQueryDto } from './dto/query.dto';
+import { GetUser } from '../auth/decorators/get-user.decorator'; // [新增] 导入 GetUser
+import { UserPayload } from '../auth/interfaces/user-payload.interface'; // [新增] 导入 UserPayload
+import { UpdateUserStatusDto } from './dto/update-user-status.dto'; // [新增] 导入 DTO
 
 // 使用两个守卫：首先验证JWT令牌有效性，然后验证是否为超级管理员
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
@@ -99,21 +102,42 @@ export class SuperAdminController {
   }
 
   /**
-   * [新增] 获取所有用户列表的API端点
+   * [修改] 获取所有用户列表的API端点，支持查询参数
    * @route GET /super-admin/users
    */
   @Get('users')
-  findAllUsers() {
-    return this.superAdminService.findAllUsers();
+  findAllUsers(@Query() queryDto: PaginationQueryDto) {
+    return this.superAdminService.findAllUsers(queryDto);
   }
 
   /**
-   * [新增] 更新用户信息的API端点
+   * [修改] 更新用户信息的API端点，增加 currentUser 传递
    * @route PATCH /super-admin/users/:id
    */
   @Patch('users/:id')
-  updateUser(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.superAdminService.updateUser(id, updateUserDto);
+  updateUser(
+    @Param('id') id: string,
+    @Body() updateUserDto: UpdateUserDto,
+    @GetUser() currentUser: UserPayload, // [新增] 获取当前用户信息
+  ) {
+    return this.superAdminService.updateUser(id, updateUserDto, currentUser);
+  }
+
+  /**
+   * [新增] 更新用户状态的API端点
+   * @route PATCH /super-admin/users/:id/status
+   */
+  @Patch('users/:id/status')
+  updateUserStatus(
+    @Param('id') id: string,
+    @Body() updateUserStatusDto: UpdateUserStatusDto,
+    @GetUser() currentUser: UserPayload,
+  ) {
+    return this.superAdminService.updateUserStatus(
+      id,
+      updateUserStatusDto.status,
+      currentUser,
+    );
   }
 
   /**

@@ -6,18 +6,20 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateOwnerDto } from './dto/create-owner.dto';
 import * as bcrypt from 'bcrypt';
-import { Prisma, Role, TenantStatus } from '@prisma/client';
+import { Prisma, Role, TenantStatus, UserStatus } from '@prisma/client';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { RecipesService } from '../recipes/recipes.service';
 import { CreateRecipeFamilyDto } from '../recipes/dto/create-recipe.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { DashboardStatsDto } from './dto/dashboard-stats.dto';
 import { PaginationQueryDto } from './dto/query.dto';
+import { UserPayload } from '../auth/interfaces/user-payload.interface';
 
 @Injectable()
 export class SuperAdminService {
@@ -190,40 +192,69 @@ export class SuperAdminService {
   }
 
   /**
-   * [新增] 获取所有用户的列表
+   * [修改] 获取所有用户的列表，现在返回分页数据
    */
-  async findAllUsers() {
-    return this.prisma.user.findMany({
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        systemRole: true,
-        createdAt: true,
-        tenants: {
-          select: {
-            role: true,
-            tenant: {
-              select: {
-                id: true,
-                name: true,
-              },
+  async findAllUsers(queryDto: PaginationQueryDto) {
+    const { page = 1, limit = 10, search, sortBy } = queryDto;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.UserWhereInput = search
+      ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
+          ],
+        }
+      : {};
+
+    const orderBy: Prisma.UserOrderByWithRelationInput = {};
+    if (sortBy) {
+      const [field, direction] = sortBy.split(':');
+      if (field && (direction === 'asc' || direction === 'desc')) {
+        orderBy[field] = direction;
+      }
+    } else {
+      orderBy.createdAt = 'desc';
+    }
+
+    const [users, total] = await this.prisma.$transaction([
+      this.prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          systemRole: true,
+          status: true, // [新增] 返回用户状态
+          createdAt: true,
+          tenants: {
+            select: {
+              role: true,
+              tenant: { select: { id: true, name: true } },
             },
           },
         },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+        skip,
+        take: limit,
+        orderBy,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return { data: users, total, page, limit };
   }
 
   /**
-   * [新增] 更新用户信息
-   * @param userId 用户ID
-   * @param updateUserDto 包含更新数据的DTO
+   * [修改] 更新用户信息，增加自我操作校验
    */
-  async updateUser(userId: string, updateUserDto: UpdateUserDto) {
+  async updateUser(
+    userId: string,
+    updateUserDto: UpdateUserDto,
+    currentUser: UserPayload,
+  ) {
+    if (userId === currentUser.userId) {
+      throw new ForbiddenException('无法编辑自己的账户信息。');
+    }
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException(`ID为 ${userId} 的用户不存在`);
@@ -231,6 +262,27 @@ export class SuperAdminService {
     return this.prisma.user.update({
       where: { id: userId },
       data: updateUserDto,
+    });
+  }
+
+  /**
+   * [新增] 更新用户状态（停用/激活）
+   */
+  async updateUserStatus(
+    userId: string,
+    status: UserStatus,
+    currentUser: UserPayload,
+  ) {
+    if (userId === currentUser.userId) {
+      throw new ForbiddenException('无法更改自己的账户状态。');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`ID为 ${userId} 的用户不存在`);
+    }
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { status },
     });
   }
 

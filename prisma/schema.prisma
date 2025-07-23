@@ -1,4 +1,4 @@
-// prisma/schema.prisma (Version 11.2 - Add Tenant Status)
+// prisma/schema.prisma (Version 11.3 - Add User Status)
 // 数据库提供商和连接 URL
 datasource db {
   provider = "postgresql"
@@ -11,8 +11,13 @@ generator client {
 }
 
 // --- Enums ---
-// [新增] 店铺状态枚举
 enum TenantStatus {
+  ACTIVE
+  INACTIVE
+}
+
+// [新增] 用户全局状态枚举
+enum UserStatus {
   ACTIVE
   INACTIVE
 }
@@ -53,7 +58,7 @@ enum ProductionTaskStatus {
 model Tenant {
   id              String           @id @default(uuid())
   name            String
-  status          TenantStatus     @default(ACTIVE) // [新增] 店铺状态
+  status          TenantStatus     @default(ACTIVE)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   users           TenantUser[]
@@ -68,6 +73,7 @@ model User {
   id                 String       @id @default(uuid())
   name               String
   systemRole         SystemRole?
+  status             UserStatus   @default(ACTIVE) // [新增] 用户全局状态
   wechatOpenId       String?      @unique
   email              String?      @unique
   passwordHash       String?
