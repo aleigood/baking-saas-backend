@@ -12,7 +12,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateOwnerDto } from './dto/create-owner.dto';
 import * as bcrypt from 'bcrypt';
-import { Prisma, Role, TenantStatus, UserStatus } from '@prisma/client';
+import {
+  Prisma,
+  Role,
+  SystemRole,
+  TenantStatus,
+  UserStatus,
+} from '@prisma/client';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { RecipesService } from '../recipes/recipes.service';
 import { CreateRecipeFamilyDto } from '../recipes/dto/create-recipe.dto';
@@ -266,7 +272,7 @@ export class SuperAdminService {
   }
 
   /**
-   * [新增] 更新用户状态（停用/激活）
+   * [修改] 更新用户状态，增加对最后一个超级管理员的保护
    */
   async updateUserStatus(
     userId: string,
@@ -276,10 +282,29 @@ export class SuperAdminService {
     if (userId === currentUser.userId) {
       throw new ForbiddenException('无法更改自己的账户状态。');
     }
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    const userToUpdate = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!userToUpdate) {
       throw new NotFoundException(`ID为 ${userId} 的用户不存在`);
     }
+
+    // [新增] 安全校验：防止停用最后一个超级管理员
+    if (
+      userToUpdate.systemRole === SystemRole.SUPER_ADMIN &&
+      status === UserStatus.INACTIVE
+    ) {
+      const adminCount = await this.prisma.user.count({
+        where: {
+          systemRole: SystemRole.SUPER_ADMIN,
+          status: UserStatus.ACTIVE,
+        },
+      });
+      if (adminCount <= 1) {
+        throw new ForbiddenException('无法停用系统中最后一位超级管理员。');
+      }
+    }
+
     return this.prisma.user.update({
       where: { id: userId },
       data: { status },
