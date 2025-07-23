@@ -2,12 +2,24 @@
  * 文件路径: src/super-admin/super-admin.controller.ts
  * 文件描述: [新增] 处理所有与超级管理后台相关的API请求。
  */
-import { Controller, Post, Body, UseGuards, Get } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Get,
+  Param,
+  Patch,
+  Delete,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { SuperAdminService } from './super-admin.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { SuperAdminGuard } from './guards/super-admin.guard';
 import { CreateOwnerDto } from './dto/create-owner.dto';
 import { AuthGuard } from '@nestjs/passport';
+import { UpdateTenantDto } from './dto/update-tenant.dto';
 
 // 使用两个守卫：首先验证JWT令牌有效性，然后验证是否为超级管理员
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
@@ -40,5 +52,36 @@ export class SuperAdminController {
   @Get('tenants')
   findAllTenants() {
     return this.superAdminService.findAllTenants();
+  }
+
+  /**
+   * [新增] 更新店铺信息的API端点
+   * @route PATCH /super-admin/tenants/:id
+   */
+  @Patch('tenants/:id')
+  updateTenant(
+    @Param('id') id: string,
+    @Body() updateTenantDto: UpdateTenantDto,
+  ) {
+    return this.superAdminService.updateTenant(id, updateTenantDto);
+  }
+
+  /**
+   * [新增] 停用店铺（软删除）的API端点
+   * @route DELETE /super-admin/tenants/:id
+   */
+  @Delete('tenants/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deactivateTenant(@Param('id') id: string) {
+    return this.superAdminService.deactivateTenant(id);
+  }
+
+  /**
+   * [新增] 获取所有用户列表的API端点
+   * @route GET /super-admin/users
+   */
+  @Get('users')
+  findAllUsers() {
+    return this.superAdminService.findAllUsers();
   }
 }

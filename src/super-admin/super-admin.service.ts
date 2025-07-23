@@ -11,7 +11,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateOwnerDto } from './dto/create-owner.dto';
 import * as bcrypt from 'bcrypt';
-import { Role } from '@prisma/client'; // [类型修正] 移除了未使用的 SystemRole
+import { Role, TenantStatus } from '@prisma/client';
+import { UpdateTenantDto } from './dto/update-tenant.dto';
 
 @Injectable()
 export class SuperAdminService {
@@ -88,5 +89,72 @@ export class SuperAdminService {
         createdAt: 'desc',
       },
     });
+  }
+
+  /**
+   * [新增] 更新店铺信息
+   * @param tenantId 店铺ID
+   * @param updateTenantDto 包含更新数据的DTO
+   */
+  async updateTenant(tenantId: string, updateTenantDto: UpdateTenantDto) {
+    await this.findTenantOrThrow(tenantId);
+    return this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: updateTenantDto,
+    });
+  }
+
+  /**
+   * [新增] 停用一个店铺（软删除）
+   * @param tenantId 店铺ID
+   */
+  async deactivateTenant(tenantId: string) {
+    await this.findTenantOrThrow(tenantId);
+    return this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { status: TenantStatus.INACTIVE },
+    });
+  }
+
+  /**
+   * [新增] 获取所有用户的列表
+   */
+  async findAllUsers() {
+    return this.prisma.user.findMany({
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        systemRole: true,
+        createdAt: true,
+        tenants: {
+          select: {
+            role: true,
+            tenant: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  /**
+   * 辅助函数：查找店铺，如果不存在则抛出异常
+   */
+  private async findTenantOrThrow(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant) {
+      throw new NotFoundException(`ID为 ${tenantId} 的店铺不存在`);
+    }
+    return tenant;
   }
 }
