@@ -1,11 +1,12 @@
 /**
  * 文件路径: src/recipes/recipes.service.ts
- * 文件描述: (完整最终版) 恢复了所有方法，解决了静态检查错误。
+ * 文件描述: (已更新) 增加了面粉比例校验和对嵌套操作步骤的处理。
  */
 import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException, // [新增] 导入 BadRequestException
 } from '@nestjs/common';
 import { CreateRecipeFamilyDto } from './dto/create-recipe.dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -33,6 +34,23 @@ export class RecipesService {
     const { name, doughs, products, procedures } = createRecipeFamilyDto;
     const { tenantId } = user;
 
+    // [新增] 面粉比例校验逻辑
+    for (const dough of doughs) {
+      const flourIngredients = dough.ingredients.filter((ing) => ing.isFlour);
+      if (flourIngredients.length > 0) {
+        const totalFlourRatio = flourIngredients.reduce(
+          (sum, ing) => sum + ing.ratio,
+          0,
+        );
+        // 使用一个小的容差来处理浮点数精度问题
+        if (Math.abs(totalFlourRatio - 100) > 0.001) {
+          throw new BadRequestException(
+            `配方错误：面团 "${dough.name}" 中的面粉总比例必须为 100%，当前为 ${totalFlourRatio}%。`,
+          );
+        }
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
       // 1. 创建配方家族 (RecipeFamily)
       const recipeFamily = await tx.recipeFamily.create({
@@ -52,7 +70,7 @@ export class RecipesService {
         },
       });
 
-      // 3. 处理并创建所有面团 (Doughs) 及其原料，关联到新版本
+      // 3. 处理并创建所有面团 (Doughs) 及其原料和步骤
       for (const doughDto of doughs) {
         for (const ing of doughDto.ingredients) {
           await tx.ingredient.upsert({
@@ -80,11 +98,21 @@ export class RecipesService {
                 },
               })),
             },
+            // [新增] 创建关联到面团的操作步骤
+            procedures: doughDto.procedures
+              ? {
+                  create: doughDto.procedures.map((proc) => ({
+                    step: proc.step,
+                    name: proc.name,
+                    description: proc.description,
+                  })),
+                }
+              : undefined,
           },
         });
       }
 
-      // 4. 处理并创建所有最终产品 (Products) 及其关联项，关联到新版本
+      // 4. 处理并创建所有最终产品 (Products) 及其关联项
       for (const productDto of products) {
         await tx.product.create({
           data: {
@@ -200,13 +228,14 @@ export class RecipesService {
                     ingredient: true,
                   },
                 },
+                procedures: true, // [新增] 同时获取面团的操作步骤
               },
             },
             procedures: true,
           },
         },
         mixIns: { include: { ingredient: true } },
-        addOns: { include: { extra: true } },
+        addOns: { include: { extra: { include: { procedures: true } } } }, // [新增] 同时获取附加项的操作步骤
         procedures: true,
       },
     });
@@ -293,7 +322,7 @@ export class RecipesService {
         },
         orderBy: { versionNumber: 'desc' },
         include: {
-          doughs: { include: { ingredients: true } },
+          doughs: { include: { ingredients: true, procedures: true } }, // [修改] 包含 procedures
           products: {
             include: { mixIns: true, addOns: true, procedures: true },
           },
@@ -330,6 +359,14 @@ export class RecipesService {
                 ratio: ing.ratio,
                 isFlour: ing.isFlour,
                 ingredientId: ing.ingredientId,
+              })),
+            },
+            // [新增] 复制面团的操作步骤
+            procedures: {
+              create: dough.procedures.map((proc) => ({
+                step: proc.step,
+                name: proc.name,
+                description: proc.description,
               })),
             },
           },

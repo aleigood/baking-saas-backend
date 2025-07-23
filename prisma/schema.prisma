@@ -207,6 +207,7 @@ model Dough {
   recipeVersionId String
   recipeVersion   RecipeVersion     @relation(fields: [recipeVersionId], references: [id])
   ingredients     DoughIngredient[]
+  procedures      Procedure[] // [新增] 关联到Dough的操作步骤
 }
 
 model Product {
@@ -233,6 +234,7 @@ model Extra {
   tenant        Tenant            @relation(fields: [tenantId], references: [id])
   ingredients   ExtraIngredient[]
   productAddOns ProductAddOn[]
+  procedures    Procedure[] // [新增] 关联到Extra的操作步骤
 
   @@unique([tenantId, name])
 }
@@ -246,6 +248,11 @@ model Procedure {
   recipeVersion   RecipeVersion? @relation(fields: [recipeVersionId], references: [id])
   productId       String?
   product         Product?       @relation(fields: [productId], references: [id])
+  // [新增] 增加与 Dough 和 Extra 的关联字段
+  doughId         String?
+  dough           Dough?         @relation(fields: [doughId], references: [id])
+  extraId         String?
+  extra           Extra?         @relation(fields: [extraId], references: [id])
 }
 
 // --- Relation Tables ---

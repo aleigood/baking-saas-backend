@@ -1,6 +1,6 @@
 /**
  * 文件路径: src/recipes/dto/create-recipe.dto.ts
- * 文件描述: (已更新) 为 CreateDoughDto 添加了 lossRatio 字段。
+ * 文件描述: (已更新) 为 CreateDoughDto 添加了 lossRatio 和 procedures 字段。
  */
 import {
   IsString,
@@ -18,6 +18,19 @@ import { Type } from 'class-transformer';
 import { AddOnType } from '@prisma/client';
 
 // 注意：为了让 @ValidateNested 生效，所有嵌套的 DTO 也必须是 class 并有验证装饰器。
+
+class CreateProcedureDto {
+  @IsNumber()
+  step: number;
+
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsString()
+  @IsNotEmpty()
+  description: string;
+}
 
 class CreateDoughIngredientDto {
   @IsString()
@@ -43,7 +56,6 @@ class CreateDoughDto {
   @IsOptional()
   targetTemp?: number;
 
-  // [新增] 允许前端传入损耗率
   @IsNumber()
   @IsOptional()
   lossRatio?: number;
@@ -52,6 +64,13 @@ class CreateDoughDto {
   @ValidateNested({ each: true })
   @Type(() => CreateDoughIngredientDto)
   ingredients: CreateDoughIngredientDto[];
+
+  // [新增] 允许为每个面团/酵头定义专属的操作步骤
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProcedureDto)
+  @IsOptional()
+  procedures?: CreateProcedureDto[];
 }
 
 class CreateProductMixInDto {
@@ -74,19 +93,6 @@ class CreateProductAddOnDto {
 
   @IsEnum(AddOnType)
   type: AddOnType;
-}
-
-class CreateProcedureDto {
-  @IsNumber()
-  step: number;
-
-  @IsString()
-  @IsNotEmpty()
-  name: string;
-
-  @IsString()
-  @IsNotEmpty()
-  description: string;
 }
 
 class CreateProductDto {
