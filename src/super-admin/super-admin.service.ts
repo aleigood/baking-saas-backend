@@ -15,7 +15,8 @@ import { Role, TenantStatus } from '@prisma/client';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { RecipesService } from '../recipes/recipes.service';
 import { CreateRecipeFamilyDto } from '../recipes/dto/create-recipe.dto';
-import { UpdateUserDto } from './dto/update-user.dto'; // [新增] 导入 UpdateUserDto
+import { UpdateUserDto } from './dto/update-user.dto';
+import { DashboardStatsDto } from './dto/dashboard-stats.dto'; // [新增] 导入 DTO
 
 @Injectable()
 export class SuperAdminService {
@@ -23,6 +24,25 @@ export class SuperAdminService {
     private prisma: PrismaService,
     private recipesService: RecipesService,
   ) {}
+
+  /**
+   * [新增] 获取仪表盘的核心统计数据
+   */
+  async getDashboardStats(): Promise<DashboardStatsDto> {
+    const totalTenants = await this.prisma.tenant.count();
+    const activeTenants = await this.prisma.tenant.count({
+      where: { status: 'ACTIVE' },
+    });
+    const totalUsers = await this.prisma.user.count({
+      where: { systemRole: null }, // 只统计普通用户，不包括超管
+    });
+
+    return {
+      totalTenants,
+      activeTenants,
+      totalUsers,
+    };
+  }
 
   /**
    * [新增] 创建一个新的店铺
@@ -265,7 +285,7 @@ export class SuperAdminService {
           step: 1,
           name: '混合',
           description:
-            '混合主面团所有材料，慢速搅拌3分钟，快速搅拌至面筋完全扩展。',
+            '混合主面团所有材料，慢速搅拌3分钟，快速搅拌5分钟至扩展阶段。',
         },
         {
           step: 2,

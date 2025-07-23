@@ -21,13 +21,22 @@ import { CreateOwnerDto } from './dto/create-owner.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateRecipeFamilyDto } from '../recipes/dto/create-recipe.dto';
-import { UpdateUserDto } from './dto/update-user.dto'; // [新增] 导入 UpdateUserDto
+import { UpdateUserDto } from './dto/update-user.dto';
 
 // 使用两个守卫：首先验证JWT令牌有效性，然后验证是否为超级管理员
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
 @Controller('super-admin')
 export class SuperAdminController {
   constructor(private readonly superAdminService: SuperAdminService) {}
+
+  /**
+   * [新增] 获取仪表盘统计数据的API端点
+   * @route GET /super-admin/stats
+   */
+  @Get('stats')
+  getDashboardStats() {
+    return this.superAdminService.getDashboardStats();
+  }
 
   /**
    * [新增] 创建新店铺的API端点
