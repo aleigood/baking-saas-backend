@@ -1,4 +1,13 @@
 -- CreateEnum
+CREATE TYPE "TenantStatus" AS ENUM ('ACTIVE', 'INACTIVE');
+
+-- CreateEnum
+CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'INACTIVE');
+
+-- CreateEnum
+CREATE TYPE "SystemRole" AS ENUM ('SUPER_ADMIN');
+
+-- CreateEnum
 CREATE TYPE "IngredientType" AS ENUM ('STANDARD', 'UNTRACKED');
 
 -- CreateEnum
@@ -17,6 +26,7 @@ CREATE TYPE "ProductionTaskStatus" AS ENUM ('IN_PROGRESS', 'COMPLETED', 'CANCELE
 CREATE TABLE "Tenant" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "status" "TenantStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -27,6 +37,8 @@ CREATE TABLE "Tenant" (
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "systemRole" "SystemRole",
+    "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
     "wechatOpenId" TEXT,
     "email" TEXT,
     "passwordHash" TEXT,
@@ -184,6 +196,8 @@ CREATE TABLE "Procedure" (
     "description" TEXT NOT NULL,
     "recipeVersionId" TEXT,
     "productId" TEXT,
+    "doughId" TEXT,
+    "extraId" TEXT,
 
     CONSTRAINT "Procedure_pkey" PRIMARY KEY ("id")
 );
@@ -306,6 +320,12 @@ ALTER TABLE "Procedure" ADD CONSTRAINT "Procedure_recipeVersionId_fkey" FOREIGN 
 
 -- AddForeignKey
 ALTER TABLE "Procedure" ADD CONSTRAINT "Procedure_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Procedure" ADD CONSTRAINT "Procedure_doughId_fkey" FOREIGN KEY ("doughId") REFERENCES "Dough"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Procedure" ADD CONSTRAINT "Procedure_extraId_fkey" FOREIGN KEY ("extraId") REFERENCES "Extra"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "DoughIngredient" ADD CONSTRAINT "DoughIngredient_doughId_fkey" FOREIGN KEY ("doughId") REFERENCES "Dough"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
