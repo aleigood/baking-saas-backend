@@ -1,6 +1,6 @@
 /**
  * 文件路径: src/super-admin/super-admin.service.ts
- * 文件描述: [新增] 包含超级管理员功能的核心业务逻辑。
+ * 文件描述: [修改] 调整店铺与老板的关联逻辑，并为店铺列表返回老板信息。
  */
 import {
   Injectable,
@@ -18,6 +18,7 @@ import {
   SystemRole,
   TenantStatus,
   UserStatus,
+  User, // [新增] 导入 User 类型
 } from '@prisma/client';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { RecipesService } from '../recipes/recipes.service';
@@ -26,6 +27,20 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { DashboardStatsDto } from './dto/dashboard-stats.dto';
 import { PaginationQueryDto } from './dto/query.dto';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
+// [新增] 导入 CreateUserDto
+import { CreateUserDto } from './dto/create-user.dto';
+
+// [新增] 定义允许排序的字段白名单，增强类型安全
+const allowedTenantSortFields: (keyof Prisma.TenantOrderByWithRelationInput)[] =
+  ['name', 'createdAt'];
+const allowedUserSortFields: (keyof Prisma.UserOrderByWithRelationInput)[] = [
+  'name',
+  'email',
+  'createdAt',
+];
+
+// [新增] 定义一个不包含密码哈希的用户类型，用于返回给客户端
+type SafeUser = Omit<User, 'passwordHash'>;
 
 @Injectable()
 export class SuperAdminService {
@@ -54,22 +69,81 @@ export class SuperAdminService {
   }
 
   /**
-   * [新增] 创建一个新的店铺
-   * @param createTenantDto - 包含店铺名称的DTO
+   * [修改] 创建一个新店铺，并将其关联到一位已存在的老板用户
+   * @param createTenantDto - 包含店铺名称和老板ID的DTO
    */
   async createTenant(createTenantDto: CreateTenantDto) {
-    return this.prisma.tenant.create({
-      data: {
-        name: createTenantDto.name,
-      },
+    const { name, ownerId } = createTenantDto;
+
+    // 检查要关联的老板用户是否存在
+    const owner = await this.prisma.user.findUnique({
+      where: { id: ownerId },
+    });
+    if (!owner) {
+      throw new NotFoundException(`ID为 ${ownerId} 的用户不存在`);
+    }
+
+    // [逻辑修正] 移除一个用户只能拥有一个店铺的限制
+
+    // 使用事务确保原子性
+    return this.prisma.$transaction(async (tx) => {
+      // 1. 创建店铺
+      const tenant = await tx.tenant.create({
+        data: {
+          name,
+        },
+      });
+
+      // 2. 将老板用户关联到新创建的店铺
+      await tx.tenantUser.create({
+        data: {
+          tenantId: tenant.id,
+          userId: owner.id,
+          role: Role.OWNER,
+        },
+      });
+
+      return tenant;
     });
   }
 
   /**
-   * [新增] 创建一个老板(OWNER)用户并将其关联到指定店铺
+   * [新增] 创建一个独立的用户账号
+   * @param createUserDto - 包含用户信息的DTO
+   */
+  async createUser(createUserDto: CreateUserDto): Promise<SafeUser> {
+    const { email, password, name } = createUserDto;
+
+    // 检查邮箱是否已被注册
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email },
+    });
+    if (existingUser) {
+      throw new ConflictException('该邮箱已被注册');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        name,
+        passwordHash: hashedPassword,
+      },
+    });
+
+    // [修复] 使用 delete 操作符移除敏感信息，避免 ESLint 警告
+    const result = { ...user };
+    delete (result as { passwordHash?: string | null }).passwordHash;
+    return result;
+  }
+
+  /**
+   * [废弃] 此方法逻辑已被新的工作流替代
+   * @deprecated
    * @param createOwnerDto - 包含老板用户信息的DTO
    */
-  async createOwner(createOwnerDto: CreateOwnerDto) {
+  async createOwner(createOwnerDto: CreateOwnerDto): Promise<SafeUser> {
     const { email, password, name, tenantId } = createOwnerDto;
 
     // 检查店铺是否存在
@@ -91,32 +165,34 @@ export class SuperAdminService {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // 使用事务确保用户创建和关联操作的原子性
-    return this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
+    const user = await this.prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
         data: {
           email,
           name,
           passwordHash: hashedPassword,
-          // 注意：此处不设置 systemRole，默认为普通用户
         },
       });
 
       await tx.tenantUser.create({
         data: {
           tenantId: tenant.id,
-          userId: user.id,
-          role: Role.OWNER, // 将用户角色设置为老板
+          userId: newUser.id,
+          role: Role.OWNER,
         },
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { passwordHash, ...result } = user;
-      return result;
+      return newUser;
     });
+
+    // [修复] 使用 delete 操作符移除敏感信息
+    const result = { ...user };
+    delete (result as { passwordHash?: string | null }).passwordHash;
+    return result;
   }
 
   /**
-   * [修改] 获取所有店铺的列表，支持分页、搜索和排序
+   * [修改] 获取所有店铺的列表，并在返回结果中包含老板信息
    */
   async findAllTenants(queryDto: PaginationQueryDto) {
     const { page = 1, limit = 10, search, sortBy } = queryDto;
@@ -133,18 +209,40 @@ export class SuperAdminService {
 
     const orderBy: Prisma.TenantOrderByWithRelationInput = {};
     if (sortBy) {
-      const [field, direction] = sortBy.split(':');
-      if (field && (direction === 'asc' || direction === 'desc')) {
+      const [field, direction] = sortBy.split(':') as [
+        keyof Prisma.TenantOrderByWithRelationInput,
+        'asc' | 'desc',
+      ];
+      if (
+        allowedTenantSortFields.includes(field) &&
+        (direction === 'asc' || direction === 'desc')
+      ) {
         orderBy[field] = direction;
       }
     } else {
       orderBy.createdAt = 'desc'; // 默认排序
     }
 
-    // 使用事务同时执行查询和计数，保证数据一致性
     const [tenants, total] = await this.prisma.$transaction([
       this.prisma.tenant.findMany({
         where,
+        include: {
+          // [新增] 关联查询出店铺的老板信息
+          users: {
+            where: {
+              role: Role.OWNER,
+            },
+            select: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+            },
+          },
+        },
         skip,
         take: limit,
         orderBy,
@@ -152,8 +250,21 @@ export class SuperAdminService {
       this.prisma.tenant.count({ where }),
     ]);
 
+    // [新增] 格式化返回数据，将老板信息提取到顶层
+    const formattedTenants = tenants.map((tenant) => {
+      const ownerInfo = tenant.users[0]?.user;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { users, ...rest } = tenant;
+      return {
+        ...rest,
+        owner: ownerInfo
+          ? { name: ownerInfo.name, email: ownerInfo.email }
+          : null,
+      };
+    });
+
     return {
-      data: tenants,
+      data: formattedTenants,
       total,
       page,
       limit,
@@ -215,8 +326,15 @@ export class SuperAdminService {
 
     const orderBy: Prisma.UserOrderByWithRelationInput = {};
     if (sortBy) {
-      const [field, direction] = sortBy.split(':');
-      if (field && (direction === 'asc' || direction === 'desc')) {
+      const [field, direction] = sortBy.split(':') as [
+        keyof Prisma.UserOrderByWithRelationInput,
+        'asc' | 'desc',
+      ];
+      // [修复] 检查字段是否在白名单内，确保类型安全
+      if (
+        allowedUserSortFields.includes(field) &&
+        (direction === 'asc' || direction === 'desc')
+      ) {
         orderBy[field] = direction;
       }
     } else {

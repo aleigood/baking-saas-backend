@@ -1,6 +1,6 @@
 /**
  * 文件路径: src/super-admin/super-admin.controller.ts
- * 文件描述: [新增] 处理所有与超级管理后台相关的API请求。
+ * 文件描述: [修改] 新增创建独立用户的端点，并调整创建店铺的流程。
  */
 import {
   Controller,
@@ -24,9 +24,11 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateRecipeFamilyDto } from '../recipes/dto/create-recipe.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { PaginationQueryDto } from './dto/query.dto';
-import { GetUser } from '../auth/decorators/get-user.decorator'; // [新增] 导入 GetUser
-import { UserPayload } from '../auth/interfaces/user-payload.interface'; // [新增] 导入 UserPayload
-import { UpdateUserStatusDto } from './dto/update-user-status.dto'; // [新增] 导入 DTO
+import { GetUser } from '../auth/decorators/get-user.decorator';
+import { UserPayload } from '../auth/interfaces/user-payload.interface';
+import { UpdateUserStatusDto } from './dto/update-user-status.dto';
+// [新增] 导入 CreateUserDto
+import { CreateUserDto } from './dto/create-user.dto';
 
 // 使用两个守卫：首先验证JWT令牌有效性，然后验证是否为超级管理员
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
@@ -44,7 +46,7 @@ export class SuperAdminController {
   }
 
   /**
-   * [新增] 创建新店铺的API端点
+   * [修改] 创建新店铺并关联老板的API端点
    * @route POST /super-admin/tenants
    */
   @Post('tenants')
@@ -93,7 +95,17 @@ export class SuperAdminController {
   }
 
   /**
-   * [新增] 创建新老板账号并关联到店铺的API端点
+   * [新增] 创建一个独立的用户账号（不立即关联店铺）
+   * @route POST /super-admin/users
+   */
+  @Post('users')
+  createUser(@Body() createUserDto: CreateUserDto) {
+    return this.superAdminService.createUser(createUserDto);
+  }
+
+  /**
+   * [废弃] 此端点逻辑已合并到创建店铺流程中，或由新的工作流替代
+   * @deprecated
    * @route POST /super-admin/users/owner
    */
   @Post('users/owner')
