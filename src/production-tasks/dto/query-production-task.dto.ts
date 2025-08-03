@@ -1,32 +1,17 @@
-import {
-  IsOptional,
-  IsEnum,
-  IsDateString,
-  IsNumberString,
-} from 'class-validator';
 import { ProductionTaskStatus } from '@prisma/client';
+// [FIX] 导入 IsDateString 验证器
+import { IsDateString, IsEnum, IsOptional } from 'class-validator';
 
-/**
- * 查询生产任务列表的查询参数DTO
- */
 export class QueryProductionTaskDto {
-  @IsOptional()
   @IsEnum(ProductionTaskStatus)
-  status?: ProductionTaskStatus; // 按任务状态过滤
-
   @IsOptional()
+  status?: ProductionTaskStatus;
+
+  /**
+   * [FIX] 新增 plannedDate 属性以支持按日期筛选
+   * 使用 IsDateString 确保传入的是有效的日期字符串
+   */
   @IsDateString()
-  dateFrom?: string; // 按计划日期的起始范围过滤
-
   @IsOptional()
-  @IsDateString()
-  dateTo?: string; // 按计划日期的结束范围过滤
-
-  @IsOptional()
-  @IsNumberString()
-  page?: string = '1'; // 页码
-
-  @IsOptional()
-  @IsNumberString()
-  limit?: string = '10'; // 每页数量
+  plannedDate?: string;
 }

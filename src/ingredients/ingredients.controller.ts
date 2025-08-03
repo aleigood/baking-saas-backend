@@ -7,74 +7,64 @@ import {
   Param,
   Delete,
   UseGuards,
-  ParseUUIDPipe,
 } from '@nestjs/common';
 import { IngredientsService } from './ingredients.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
+import { GetUser } from 'src/auth/decorators/get-user.decorator';
+import { UserPayload } from 'src/auth/interfaces/user-payload.interface';
+// [FIX] 修复守卫的使用方式，与项目中其他控制器保持一致
 import { AuthGuard } from '@nestjs/passport';
-import { GetUser } from '../auth/decorators/get-user.decorator';
-import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { CreateSkuDto } from './dto/create-sku.dto';
-import { SetDefaultSkuDto } from './dto/set-default-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
+import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 
+// [FIX] 使用 NestJS 内置的 AuthGuard('jwt')，而不是不存在的自定义 JwtAuthGuard
 @UseGuards(AuthGuard('jwt'))
-@Controller() // 使用空的Controller路径，在方法上定义完整路径
+@Controller('ingredients')
 export class IngredientsController {
   constructor(private readonly ingredientsService: IngredientsService) {}
 
-  // --- Endpoints for Ingredients ---
-  @Post('ingredients')
-  createIngredient(
+  @Post()
+  create(
     @GetUser() user: UserPayload,
     @Body() createIngredientDto: CreateIngredientDto,
   ) {
-    return this.ingredientsService.createIngredient(
-      user.tenantId,
-      createIngredientDto,
-    );
+    return this.ingredientsService.create(user.tenantId, createIngredientDto);
   }
 
-  @Get('ingredients')
-  findAllIngredients(@GetUser() user: UserPayload) {
-    return this.ingredientsService.findAllIngredients(user.tenantId);
+  @Get()
+  findAll(@GetUser() user: UserPayload) {
+    return this.ingredientsService.findAll(user.tenantId);
   }
 
-  @Get('ingredients/:id')
-  findOneIngredient(
+  @Get(':id')
+  findOne(@GetUser() user: UserPayload, @Param('id') id: string) {
+    return this.ingredientsService.findOne(user.tenantId, id);
+  }
+
+  @Patch(':id')
+  update(
     @GetUser() user: UserPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    return this.ingredientsService.findOneIngredient(user.tenantId, id);
-  }
-
-  @Patch('ingredients/:id')
-  updateIngredient(
-    @GetUser() user: UserPayload,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() updateIngredientDto: UpdateIngredientDto,
   ) {
-    return this.ingredientsService.updateIngredient(
+    return this.ingredientsService.update(
       user.tenantId,
       id,
       updateIngredientDto,
     );
   }
 
-  @Delete('ingredients/:id')
-  removeIngredient(
-    @GetUser() user: UserPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    return this.ingredientsService.removeIngredient(user.tenantId, id);
+  @Delete(':id')
+  remove(@GetUser() user: UserPayload, @Param('id') id: string) {
+    return this.ingredientsService.remove(user.tenantId, id);
   }
 
-  // --- Endpoints for SKUs (nested under ingredients) ---
-  @Post('ingredients/:ingredientId/skus')
+  @Post(':ingredientId/skus')
   createSku(
     @GetUser() user: UserPayload,
-    @Param('ingredientId', ParseUUIDPipe) ingredientId: string,
+    @Param('ingredientId') ingredientId: string,
     @Body() createSkuDto: CreateSkuDto,
   ) {
     return this.ingredientsService.createSku(
@@ -84,27 +74,31 @@ export class IngredientsController {
     );
   }
 
-  @Post('ingredients/:ingredientId/default-sku')
-  setDefaultSku(
+  /**
+   * [V2.1 接口变更] 设置激活的SKU
+   */
+  @Post(':ingredientId/active-sku')
+  setActiveSku(
     @GetUser() user: UserPayload,
-    @Param('ingredientId', ParseUUIDPipe) ingredientId: string,
-    @Body() setDefaultSkuDto: SetDefaultSkuDto,
+    @Param('ingredientId') ingredientId: string,
+    @Body() setActiveSkuDto: SetActiveSkuDto,
   ) {
-    return this.ingredientsService.setDefaultSku(
+    return this.ingredientsService.setActiveSku(
       user.tenantId,
       ingredientId,
-      setDefaultSkuDto,
+      setActiveSkuDto,
     );
   }
 
-  // --- Endpoint for Procurements ---
-  @Post('procurements')
+  @Post('skus/:skuId/procurements')
   createProcurement(
     @GetUser() user: UserPayload,
+    @Param('skuId') skuId: string,
     @Body() createProcurementDto: CreateProcurementDto,
   ) {
     return this.ingredientsService.createProcurement(
       user.tenantId,
+      skuId,
       createProcurementDto,
     );
   }

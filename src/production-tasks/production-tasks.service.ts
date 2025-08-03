@@ -1,285 +1,252 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
-  BadRequestException,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateProductionTaskDto } from './dto/create-production-task.dto';
 import { UpdateProductionTaskDto } from './dto/update-production-task.dto';
-import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
-import { ProductionTaskStatus, Prisma } from '@prisma/client';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
+// [FIX] 导入 Prisma 类型以增强类型安全
+import { Prisma, ProductionTaskStatus } from '@prisma/client';
+import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
+import { CostingService } from 'src/costing/costing.service';
 
 @Injectable()
 export class ProductionTasksService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // 注入成本计算服务，用于获取配方成分
+    private readonly costingService: CostingService,
+  ) {}
 
-  // ... create 方法保持不变 ...
-  async create(tenantId: string, createDto: CreateProductionTaskDto) {
-    const { recipeVersionId, productId, quantity, unit, plannedDate, notes } =
-      createDto;
+  /**
+   * [V2.1 逻辑修改] 创建生产任务
+   * @param tenantId 租户ID
+   * @param createProductionTaskDto DTO
+   */
+  async create(
+    tenantId: string,
+    createProductionTaskDto: CreateProductionTaskDto,
+  ) {
+    const { productId, quantity, unit, plannedDate, notes } =
+      createProductionTaskDto;
 
-    const recipeVersion = await this.prisma.recipeVersion.findFirst({
-      where: { id: recipeVersionId, family: { tenantId: tenantId } },
+    // 验证目标产品是否存在且属于该租户
+    const product = await this.prisma.product.findFirst({
+      where: {
+        id: productId,
+        recipeVersion: {
+          family: {
+            tenantId,
+          },
+        },
+      },
     });
-    if (!recipeVersion) {
-      throw new NotFoundException(
-        `ID为 ${recipeVersionId} 的配方版本不存在或不属于该租户。`,
-      );
+
+    if (!product) {
+      throw new NotFoundException('目标产品不存在');
     }
 
-    if (productId) {
-      const product = await this.prisma.product.findFirst({
-        where: { id: productId, recipeVersionId: recipeVersionId },
-      });
-      if (!product) {
-        throw new NotFoundException(
-          `ID为 ${productId} 的产品不存在或不属于该配方版本。`,
-        );
-      }
-    }
+    // [FIX] 当使用 connect 关联一个字段时，其他关联字段也需要使用 connect
+    const data: Prisma.ProductionTaskCreateInput = {
+      quantity,
+      unit,
+      plannedDate,
+      notes,
+      tenant: {
+        connect: {
+          id: tenantId,
+        },
+      },
+      product: {
+        connect: {
+          id: productId,
+        },
+      },
+    };
 
     return this.prisma.productionTask.create({
-      data: {
+      data,
+    });
+  }
+
+  // 查询生产任务列表
+  async findAll(tenantId: string, query: QueryProductionTaskDto) {
+    const { status, plannedDate } = query;
+    // [FIX] 为 'where' 对象提供精确的 Prisma 类型，以解决所有相关的 ESLint 错误
+    const where: Prisma.ProductionTaskWhereInput = {
+      tenantId,
+      deletedAt: null,
+    };
+
+    if (status) {
+      where.status = status;
+    }
+
+    if (plannedDate) {
+      const startOfDay = new Date(plannedDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(plannedDate);
+      endOfDay.setHours(23, 59, 59, 999);
+      where.plannedDate = {
+        gte: startOfDay,
+        lte: endOfDay,
+      };
+    }
+
+    return this.prisma.productionTask.findMany({
+      where,
+      include: {
+        product: {
+          include: {
+            recipeVersion: {
+              include: {
+                family: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        plannedDate: 'asc',
+      },
+    });
+  }
+
+  // 查询单个生产任务详情
+  async findOne(tenantId: string, id: string) {
+    const task = await this.prisma.productionTask.findFirst({
+      where: {
+        id,
         tenantId,
-        recipeVersionId,
-        productId,
-        quantity,
-        unit,
-        plannedDate: new Date(plannedDate),
-        notes,
+        deletedAt: null,
+      },
+      include: {
+        product: {
+          include: {
+            recipeVersion: {
+              include: {
+                family: true,
+              },
+            },
+          },
+        },
+        log: {
+          include: {
+            consumptionLogs: {
+              include: {
+                ingredient: true,
+                sku: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!task) {
+      throw new NotFoundException('生产任务不存在');
+    }
+    return task;
+  }
+
+  // 更新生产任务
+  async update(
+    tenantId: string,
+    id: string,
+    updateProductionTaskDto: UpdateProductionTaskDto,
+  ) {
+    await this.findOne(tenantId, id);
+    return this.prisma.productionTask.update({
+      where: { id },
+      data: updateProductionTaskDto,
+    });
+  }
+
+  // 软删除生产任务
+  async remove(tenantId: string, id: string) {
+    await this.findOne(tenantId, id);
+    return this.prisma.productionTask.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
       },
     });
   }
 
   /**
-   * 查询指定租户的所有生产任务（支持过滤和分页）
+   * [V2.1 核心逻辑重写] 完成生产任务，记录日志并扣减库存
    * @param tenantId 租户ID
-   * @param queryDto 查询参数
-   * @returns 分页后的生产任务列表及元数据
+   * @param id 任务ID
+   * @param completeProductionTaskDto DTO
    */
-  async findAll(tenantId: string, queryDto: QueryProductionTaskDto) {
-    const { status, dateFrom, dateTo, page = '1', limit = '10' } = queryDto;
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
-    const skip = (pageNum - 1) * limitNum;
-
-    // 构建动态查询条件
-    const where: Prisma.ProductionTaskWhereInput = {
-      tenantId,
-      deletedAt: null,
-      ...(status && { status }),
-      ...(dateFrom &&
-        dateTo && {
-          plannedDate: {
-            gte: new Date(dateFrom),
-            lte: new Date(dateTo),
-          },
-        }),
-    };
-
-    const [tasks, total] = await this.prisma.$transaction([
-      this.prisma.productionTask.findMany({
-        where,
-        include: {
-          recipeVersion: {
-            include: {
-              family: {
-                select: { name: true },
-              },
-            },
-          },
-          product: {
-            select: { name: true },
-          },
-        },
-        orderBy: { plannedDate: 'asc' },
-        skip,
-        take: limitNum,
-      }),
-      this.prisma.productionTask.count({ where }),
-    ]);
-
-    return {
-      data: tasks,
-      meta: {
-        total,
-        page: pageNum,
-        limit: limitNum,
-        lastPage: Math.ceil(total / limitNum),
-      },
-    };
-  }
-
-  // ... findOne, update, complete, remove 方法保持不变 ...
-  async findOne(tenantId: string, id: string) {
-    const task = await this.prisma.productionTask.findFirst({
-      where: { id, tenantId, deletedAt: null },
-      include: {
-        recipeVersion: {
-          include: {
-            family: true,
-            doughs: { include: { ingredients: true } },
-          },
-        },
-        product: true,
-      },
-    });
-    if (!task) {
-      throw new NotFoundException(`ID为 ${id} 的生产任务不存在。`);
-    }
-    return task;
-  }
-
-  async update(
-    tenantId: string,
-    id: string,
-    updateDto: UpdateProductionTaskDto,
-  ) {
-    await this.findOne(tenantId, id);
-    return this.prisma.productionTask.update({
-      where: { id },
-      data: { status: updateDto.status },
-    });
-  }
-
   async complete(
     tenantId: string,
     id: string,
-    completeDto: CompleteProductionTaskDto,
+    completeProductionTaskDto: CompleteProductionTaskDto,
   ) {
-    const task = await this.prisma.productionTask.findFirst({
-      where: { id, tenantId },
-      include: {
-        product: true,
-        recipeVersion: {
-          include: {
-            doughs: {
-              include: {
-                ingredients: {
-                  include: {
-                    linkedPreDough: {
-                      include: {
-                        versions: {
-                          where: { isActive: true },
-                          take: 1,
-                          include: {
-                            doughs: {
-                              include: {
-                                ingredients: true,
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
+    const task = await this.findOne(tenantId, id);
 
-    if (!task) {
-      throw new NotFoundException(`ID为 ${id} 的生产任务不存在。`);
-    }
-    if (task.status === 'COMPLETED') {
-      throw new BadRequestException('该任务已完成，无法重复操作。');
+    if (task.status !== ProductionTaskStatus.PENDING) {
+      throw new BadRequestException('只有待处理状态的任务才能被完成');
     }
 
-    const { actualQuantity, notes } = completeDto;
-    const mainDough = task.recipeVersion.doughs[0];
-    if (!mainDough) {
-      throw new BadRequestException('配方数据不完整，缺少面团定义。');
-    }
+    const { actualQuantity, notes } = completeProductionTaskDto;
 
-    const totalFlourRatio = mainDough.ingredients
-      .filter((ing) => ing.isFlour)
-      .reduce((sum, ing) => sum + ing.ratio, 0);
+    // 1. 获取该产品配方的所有原料消耗明细
+    const consumptions = await this.costingService.calculateProductConsumptions(
+      tenantId,
+      task.productId,
+      actualQuantity,
+    );
 
-    if (totalFlourRatio === 0) {
-      throw new BadRequestException('配方中未定义面粉，无法计算消耗。');
-    }
-
-    let totalFlourWeight = 0;
-    if (task.unit === '件' && task.product) {
-      totalFlourWeight =
-        (task.product.baseDoughWeight / totalFlourRatio) * 100 * actualQuantity;
-    } else if (task.unit === '克') {
-      totalFlourWeight = actualQuantity;
-    } else {
-      throw new BadRequestException('未知的任务单位或缺少产品信息。');
-    }
-
-    const consumptionMap = new Map<string, number>();
-
-    for (const ingredient of mainDough.ingredients) {
-      const consumedWeight = (ingredient.ratio / 100) * totalFlourWeight;
-
-      if (ingredient.linkedPreDough && ingredient.linkedPreDough.versions[0]) {
-        const preDoughVersion = ingredient.linkedPreDough.versions[0];
-        const preDoughDef = preDoughVersion.doughs[0];
-        const preDoughTotalRatio = preDoughDef.ingredients.reduce(
-          (sum, ing) => sum + ing.ratio,
-          0,
-        );
-
-        for (const preDoughIng of preDoughDef.ingredients) {
-          const finalConsumed =
-            consumedWeight *
-            (preDoughIng.ratio / preDoughTotalRatio) *
-            (1 + (preDoughDef.lossRatio || 0));
-          consumptionMap.set(
-            preDoughIng.name,
-            (consumptionMap.get(preDoughIng.name) || 0) + finalConsumed,
-          );
-        }
-      } else {
-        const finalConsumed = consumedWeight * (1 + (mainDough.lossRatio || 0));
-        consumptionMap.set(
-          ingredient.name,
-          (consumptionMap.get(ingredient.name) || 0) + finalConsumed,
-        );
-      }
-    }
-
+    // 2. 使用数据库事务来保证数据一致性
     return this.prisma.$transaction(async (tx) => {
+      // 2.1 更新任务状态为“已完成”
       await tx.productionTask.update({
         where: { id },
         data: { status: ProductionTaskStatus.COMPLETED },
       });
 
+      // 2.2 创建生产日志
       const productionLog = await tx.productionLog.create({
-        data: { taskId: id, actualQuantity, notes },
+        data: {
+          taskId: id,
+          actualQuantity,
+          notes,
+        },
       });
 
-      for (const [name, quantityInGrams] of consumptionMap.entries()) {
-        const ingredientRecord = await tx.ingredient.findFirst({
-          where: { tenantId, name },
+      // 2.3 遍历消耗列表，创建消耗日志并扣减库存
+      for (const consumption of consumptions) {
+        // 如果没有激活的SKU ID，说明是无需追踪的原料或未设置，直接跳过
+        if (!consumption.activeSkuId) {
+          continue;
+        }
+
+        // 创建原料消耗日志
+        await tx.ingredientConsumptionLog.create({
+          data: {
+            productionLogId: productionLog.id,
+            ingredientId: consumption.ingredientId,
+            skuId: consumption.activeSkuId, // 记录消耗时使用的是哪个SKU
+            quantityInGrams: consumption.totalConsumed,
+          },
         });
 
-        if (ingredientRecord) {
-          await tx.ingredientConsumptionLog.create({
-            data: {
-              productionLogId: productionLog.id,
-              ingredientId: ingredientRecord.id,
-              skuId: ingredientRecord.defaultSkuId,
-              quantityInGrams,
+        // 扣减对应激活SKU的实时库存
+        await tx.ingredientSKU.update({
+          where: { id: consumption.activeSkuId },
+          data: {
+            currentStockInGrams: {
+              decrement: consumption.totalConsumed,
             },
-          });
-        }
+          },
+        });
       }
-      return productionLog;
-    });
-  }
 
-  async remove(tenantId: string, id: string) {
-    await this.findOne(tenantId, id);
-    return this.prisma.productionTask.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+      return this.findOne(tenantId, id);
     });
   }
 }

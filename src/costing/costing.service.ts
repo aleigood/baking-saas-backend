@@ -1,38 +1,35 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from 'src/prisma/prisma.service';
 import { Decimal } from '@prisma/client/runtime/library';
+// [FIX] 明确导入 Prisma 类型，以增强类型安全
+import { Ingredient, IngredientSKU } from '@prisma/client';
 
-// 修复：导出CostDetail接口，以便其他文件可以导入
-export interface CostDetail {
+// [FIX] 为 getIngredientsWithActiveSku 的返回类型定义一个明确的接口
+// 这有助于 TypeScript 理解我们查询的数据结构，并解决类型推断错误
+type IngredientWithActiveSku = Ingredient & {
+  activeSku: IngredientSKU | null;
+};
+
+// 定义一个内部接口，用于在计算过程中传递消耗信息
+interface ConsumptionDetail {
+  ingredientId: string;
   ingredientName: string;
-  consumedGrams: number | string;
-  costPerGram: number | string;
-  totalCost: number | string;
-  note?: string;
+  activeSkuId: string | null;
+  totalConsumed: number;
 }
 
 @Injectable()
 export class CostingService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * 分析单个产品的理论成本
-   * @param tenantId 租户ID
-   * @param productId 产品ID
-   * @returns 成本分析报告
-   */
-  async analyzeProductCost(tenantId: string, productId: string) {
-    // 1. 获取产品及其当前激活的配方版本
+  // 计算单个产品的成本
+  async calculateProductCost(tenantId: string, productId: string) {
     const product = await this.prisma.product.findFirst({
       where: {
         id: productId,
-        recipeVersion: {
-          isActive: true,
-          family: {
-            tenantId,
-          },
-        },
+        recipeVersion: { family: { tenantId } },
       },
+      // 包含计算所需的所有关联数据
       include: {
         recipeVersion: {
           include: {
@@ -43,103 +40,188 @@ export class CostingService {
             },
           },
         },
+        ingredients: true,
       },
     });
 
-    if (!product || !product.recipeVersion) {
-      throw new NotFoundException(
-        `ID为 ${productId} 的产品或其激活的配方未找到。`,
-      );
+    if (!product) {
+      throw new NotFoundException('产品不存在');
     }
 
-    const mainDough = product.recipeVersion.doughs[0];
-    if (!mainDough) {
-      throw new NotFoundException('配方数据不完整，缺少面团定义。');
-    }
+    const ingredientsMap = await this.getIngredientsWithActiveSku(tenantId);
 
-    // 2. 计算生产一个单位产品所需的总面粉量
-    const totalFlourRatio = mainDough.ingredients
-      .filter((ing) => ing.isFlour)
-      .reduce((sum, ing) => sum + ing.ratio, 0);
-
-    if (totalFlourRatio === 0) {
-      throw new NotFoundException('配方中未定义面粉，无法计算成本。');
-    }
-    // 单个产品的总面团重量 / 面粉在总配料中的占比 = 单个产品所需的总面粉克数
-    const totalFlourWeightPerUnit =
-      (product.baseDoughWeight / totalFlourRatio) * 100;
-
-    // 3. 遍历所有原料，计算其成本
-    const costDetails: CostDetail[] = []; // 明确指定数组类型
     let totalCost = new Decimal(0);
 
-    for (const ingredient of mainDough.ingredients) {
-      const ingredientRecord = await this.prisma.ingredient.findFirst({
-        where: { name: ingredient.name, tenantId },
-        include: { defaultSku: true },
-      });
-
-      if (!ingredientRecord || !ingredientRecord.defaultSkuId) {
-        // 如果原料或其默认SKU未设置，则成本计为0
-        costDetails.push({
-          ingredientName: ingredient.name,
-          consumedGrams: 0,
-          costPerGram: 0,
-          totalCost: 0,
-          note: '原料未在系统中定义或未设置默认SKU',
-        });
-        continue;
+    // 1. 计算所有面团的成本
+    for (const dough of product.recipeVersion.doughs) {
+      let totalFlourWeight = 0;
+      for (const ingredient of dough.ingredients) {
+        if (ingredient.isFlour) {
+          totalFlourWeight += product.baseDoughWeight;
+        }
       }
 
-      // 获取最新一次的采购记录以确定价格
-      const latestProcurement = await this.prisma.procurementRecord.findFirst({
-        where: { skuId: ingredientRecord.defaultSkuId },
-        orderBy: { purchaseDate: 'desc' },
-      });
+      for (const doughIngredient of dough.ingredients) {
+        const ingredientInfo = ingredientsMap.get(doughIngredient.name);
+        // [FIX] 增加健壮性检查，仅当原料信息和其激活的SKU都存在时才计算成本
+        if (ingredientInfo?.activeSku) {
+          const pricePerGram = new Decimal(
+            ingredientInfo.activeSku.currentPricePerPackage,
+          ).div(ingredientInfo.activeSku.specWeightInGrams);
 
-      if (!latestProcurement) {
-        // 如果没有采购记录，成本也计为0
-        costDetails.push({
-          ingredientName: ingredient.name,
-          consumedGrams: 0,
-          costPerGram: 0,
-          totalCost: 0,
-          note: '缺少采购记录，无法确定价格',
-        });
-        continue;
+          const weight =
+            (totalFlourWeight * doughIngredient.ratio) / (1 - dough.lossRatio);
+          const cost = pricePerGram.mul(weight);
+          totalCost = totalCost.add(cost);
+        }
       }
+    }
 
-      const sku = ingredientRecord.defaultSku;
-      if (!sku) {
-        // 理论上不会发生，因为我们已经检查了defaultSkuId
-        continue;
+    // 2. 计算所有附加原料的成本
+    for (const productIngredient of product.ingredients) {
+      const ingredientInfo = ingredientsMap.get(productIngredient.name);
+      // [FIX] 增加健壮性检查
+      if (ingredientInfo?.activeSku && productIngredient.weightInGrams) {
+        const pricePerGram = new Decimal(
+          ingredientInfo.activeSku.currentPricePerPackage,
+        ).div(ingredientInfo.activeSku.specWeightInGrams);
+
+        const cost = pricePerGram.mul(productIngredient.weightInGrams);
+        totalCost = totalCost.add(cost);
       }
-
-      // 计算每克成本
-      const pricePerGram = latestProcurement.pricePerPackage.dividedBy(
-        sku.specWeightInGrams,
-      );
-
-      // 计算该原料的消耗量（克）
-      const consumedGrams = (ingredient.ratio / 100) * totalFlourWeightPerUnit;
-
-      // 计算该原料的总成本
-      const ingredientTotalCost = pricePerGram.times(consumedGrams);
-      totalCost = totalCost.plus(ingredientTotalCost);
-
-      costDetails.push({
-        ingredientName: ingredient.name,
-        consumedGrams: consumedGrams.toFixed(2),
-        costPerGram: pricePerGram.toFixed(4),
-        totalCost: ingredientTotalCost.toFixed(4),
-      });
     }
 
     return {
+      productId: product.id,
       productName: product.name,
-      recipeVersion: product.recipeVersion.version,
       totalCost: totalCost.toFixed(4),
-      costDetails,
     };
+  }
+
+  /**
+   * [FIX] 重构此方法以解决类型错误并优化逻辑
+   * 计算生产指定数量产品所需的所有原料消耗量
+   * @param tenantId 租户ID
+   * @param productId 产品ID
+   * @param quantity 生产数量
+   * @returns 消耗详情列表
+   */
+  async calculateProductConsumptions(
+    tenantId: string,
+    productId: string,
+    quantity: number,
+  ): Promise<ConsumptionDetail[]> {
+    const product = await this.prisma.product.findFirst({
+      where: {
+        id: productId,
+        recipeVersion: { family: { tenantId } },
+      },
+      include: {
+        recipeVersion: {
+          include: {
+            doughs: { include: { ingredients: true } },
+          },
+        },
+        ingredients: true,
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('产品不存在');
+    }
+
+    // 步骤 1: 创建一个简单的Map来聚合每种原料名称的总消耗量
+    const consumptionWeightMap = new Map<string, number>();
+
+    // 计算面团原料消耗
+    for (const dough of product.recipeVersion.doughs) {
+      let totalFlourWeight = 0;
+      for (const ingredient of dough.ingredients) {
+        if (ingredient.isFlour) {
+          totalFlourWeight += product.baseDoughWeight;
+        }
+      }
+
+      for (const doughIngredient of dough.ingredients) {
+        const weight =
+          ((totalFlourWeight * doughIngredient.ratio) / (1 - dough.lossRatio)) *
+          quantity;
+
+        const currentWeight =
+          consumptionWeightMap.get(doughIngredient.name) || 0;
+        consumptionWeightMap.set(doughIngredient.name, currentWeight + weight);
+      }
+    }
+
+    // 计算附加原料消耗
+    for (const productIngredient of product.ingredients) {
+      if (productIngredient.weightInGrams) {
+        const weight = productIngredient.weightInGrams * quantity;
+        const currentWeight =
+          consumptionWeightMap.get(productIngredient.name) || 0;
+        consumptionWeightMap.set(
+          productIngredient.name,
+          currentWeight + weight,
+        );
+      }
+    }
+
+    // 步骤 2: 从数据库中一次性获取所有涉及到的原料的ID和激活SKU ID
+    const ingredientNames = Array.from(consumptionWeightMap.keys());
+    if (ingredientNames.length === 0) {
+      return [];
+    }
+
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: {
+        tenantId,
+        name: { in: ingredientNames },
+      },
+      select: {
+        id: true,
+        name: true,
+        activeSkuId: true,
+      },
+    });
+
+    // 步骤 3: 组合消耗量和原料信息，生成最终结果
+    const result: ConsumptionDetail[] = [];
+    for (const ingredient of ingredients) {
+      const totalConsumed = consumptionWeightMap.get(ingredient.name);
+      if (totalConsumed) {
+        result.push({
+          ingredientId: ingredient.id,
+          ingredientName: ingredient.name,
+          activeSkuId: ingredient.activeSkuId,
+          totalConsumed,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * [FIX] 修复类型定义并添加注释
+   * 预加载租户的所有原料及其激活的SKU
+   * @param tenantId 租户ID
+   * @returns Map<ingredientName, IngredientWithActiveSku>
+   */
+  private async getIngredientsWithActiveSku(
+    tenantId: string,
+  ): Promise<Map<string, IngredientWithActiveSku>> {
+    // 注意：如果此处仍然报错，提示 'activeSku' 不存在，
+    // 请务必在终端中运行 'npx prisma generate' 命令。
+    // 这是因为 schema.prisma 文件更新后，需要重新生成 Prisma Client 类型定义。
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { tenantId, deletedAt: null },
+      include: {
+        activeSku: true,
+      },
+    });
+
+    return new Map(
+      ingredients.map((i) => [i.name, i as IngredientWithActiveSku]),
+    );
   }
 }

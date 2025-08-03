@@ -1,130 +1,246 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { CreateSkuDto } from './dto/create-sku.dto';
-import { SetDefaultSkuDto } from './dto/set-default-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
+import { SkuStatus } from '@prisma/client';
+import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 
 @Injectable()
 export class IngredientsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  // --- Ingredient (原料品类) Management ---
-
-  async createIngredient(tenantId: string, dto: CreateIngredientDto) {
+  // 创建原料品类
+  async create(tenantId: string, createIngredientDto: CreateIngredientDto) {
     return this.prisma.ingredient.create({
       data: {
+        ...createIngredientDto,
         tenantId,
-        name: dto.name,
-        type: dto.type,
       },
     });
   }
 
-  async findAllIngredients(tenantId: string) {
+  // 查询租户下的所有原料
+  async findAll(tenantId: string) {
     return this.prisma.ingredient.findMany({
-      where: { tenantId, deletedAt: null },
-      include: {
-        skus: true,
-        defaultSku: true,
+      where: {
+        tenantId,
+        deletedAt: null,
       },
-      orderBy: { name: 'asc' },
+      include: {
+        // V2.1 优化: 查询时总是包含激活的SKU信息
+        activeSku: true,
+        skus: {
+          orderBy: {
+            brand: 'asc',
+          },
+        },
+      },
+      orderBy: {
+        name: 'asc',
+      },
     });
   }
 
-  async findOneIngredient(tenantId: string, id: string) {
+  // 查询单个原料详情
+  async findOne(tenantId: string, id: string) {
     const ingredient = await this.prisma.ingredient.findFirst({
-      where: { id, tenantId, deletedAt: null },
-      include: { skus: true, defaultSku: true },
+      where: {
+        id,
+        tenantId,
+        deletedAt: null,
+      },
+      include: {
+        // V2.1 优化: 查询时总是包含激活的SKU信息
+        activeSku: true,
+        skus: {
+          include: {
+            procurementRecords: {
+              orderBy: {
+                purchaseDate: 'desc',
+              },
+            },
+          },
+          orderBy: {
+            brand: 'asc',
+          },
+        },
+      },
     });
+
     if (!ingredient) {
-      throw new NotFoundException(`ID为 ${id} 的原料不存在。`);
+      throw new NotFoundException('原料不存在');
     }
+
     return ingredient;
   }
 
-  async updateIngredient(
+  // 更新原料品类信息
+  async update(
     tenantId: string,
     id: string,
-    dto: UpdateIngredientDto,
+    updateIngredientDto: UpdateIngredientDto,
   ) {
-    await this.findOneIngredient(tenantId, id);
-    // 修复：直接传递修复后的、类型安全的DTO
+    // 确保该原料存在且属于该租户
+    await this.findOne(tenantId, id);
     return this.prisma.ingredient.update({
       where: { id },
-      data: dto,
+      data: updateIngredientDto,
     });
   }
 
-  async removeIngredient(tenantId: string, id: string) {
-    await this.findOneIngredient(tenantId, id);
+  // 软删除原料品类
+  async remove(tenantId: string, id: string) {
+    // 确保该原料存在且属于该租户
+    await this.findOne(tenantId, id);
     return this.prisma.ingredient.update({
       where: { id },
-      data: { deletedAt: new Date() },
-    });
-  }
-
-  // --- IngredientSKU (商品规格) Management ---
-
-  async createSku(tenantId: string, ingredientId: string, dto: CreateSkuDto) {
-    await this.findOneIngredient(tenantId, ingredientId);
-    return this.prisma.ingredientSKU.create({
       data: {
-        ingredientId,
-        brand: dto.brand,
-        specName: dto.specName,
-        specWeightInGrams: dto.specWeightInGrams,
+        deletedAt: new Date(),
       },
     });
   }
 
-  async setDefaultSku(
+  // 为原料创建新的SKU
+  async createSku(
     tenantId: string,
     ingredientId: string,
-    dto: SetDefaultSkuDto,
+    createSkuDto: CreateSkuDto,
   ) {
-    await this.findOneIngredient(tenantId, ingredientId);
-    const sku = await this.prisma.ingredientSKU.findFirst({
-      where: { id: dto.skuId, ingredientId: ingredientId },
-    });
-    if (!sku) {
-      throw new NotFoundException(
-        `ID为 ${dto.skuId} 的SKU不存在或不属于该原料。`,
-      );
-    }
-
-    return this.prisma.ingredient.update({
-      where: { id: ingredientId },
-      data: { defaultSkuId: dto.skuId },
+    // 确保该原料存在且属于该租户
+    await this.findOne(tenantId, ingredientId);
+    return this.prisma.ingredientSKU.create({
+      data: {
+        ...createSkuDto,
+        ingredientId,
+        // V2.1 优化: 新创建的SKU默认为未启用状态
+        status: SkuStatus.INACTIVE,
+      },
     });
   }
 
-  // --- Procurement (采购) Management ---
+  /**
+   * [V2.1 核心逻辑重写] 设置某个SKU为原料的激活SKU
+   * @param tenantId 租户ID
+   * @param ingredientId 原料ID
+   * @param setActiveSkuDto DTO，包含skuId
+   */
+  async setActiveSku(
+    tenantId: string,
+    ingredientId: string,
+    setActiveSkuDto: SetActiveSkuDto,
+  ) {
+    const { skuId } = setActiveSkuDto;
 
-  async createProcurement(tenantId: string, dto: CreateProcurementDto) {
-    const { skuId, packagesPurchased, pricePerPackage, purchaseDate } = dto;
+    // 1. 验证原料和目标SKU是否存在且属于该租户
+    const ingredient = await this.findOne(tenantId, ingredientId);
+    const skuToActivate = await this.prisma.ingredientSKU.findFirst({
+      where: { id: skuId, ingredientId },
+    });
 
+    if (!skuToActivate) {
+      throw new NotFoundException('指定的SKU不存在或不属于该原料');
+    }
+
+    // 如果目标SKU已经是激活状态，则无需任何操作
+    if (ingredient.activeSkuId === skuId) {
+      return ingredient;
+    }
+
+    // 2. 使用数据库事务来保证数据一致性
+    return this.prisma.$transaction(async (tx) => {
+      // 2.1 如果当前已有激活的SKU，则将其状态置为 INACTIVE
+      if (ingredient.activeSkuId) {
+        await tx.ingredientSKU.update({
+          where: { id: ingredient.activeSkuId },
+          data: { status: SkuStatus.INACTIVE },
+        });
+      }
+
+      // 2.2 将新的SKU状态置为 ACTIVE
+      await tx.ingredientSKU.update({
+        where: { id: skuId },
+        data: { status: SkuStatus.ACTIVE },
+      });
+
+      // 2.3 更新原料品类，将其 activeSkuId 指向新的SKU
+      const updatedIngredient = await tx.ingredient.update({
+        where: { id: ingredientId },
+        data: { activeSkuId: skuId },
+        include: {
+          activeSku: true,
+        },
+      });
+
+      return updatedIngredient;
+    });
+  }
+
+  /**
+   * [V2.1 核心逻辑重写] 创建采购记录并更新库存
+   * @param tenantId 租户ID
+   * @param skuId SKU ID
+   * @param createProcurementDto DTO
+   */
+  async createProcurement(
+    tenantId: string,
+    skuId: string,
+    createProcurementDto: CreateProcurementDto,
+  ) {
+    // 1. 查找SKU，并确保它属于该租户
     const sku = await this.prisma.ingredientSKU.findFirst({
       where: {
         id: skuId,
         ingredient: {
-          tenantId: tenantId,
+          tenantId,
         },
       },
     });
 
     if (!sku) {
-      throw new NotFoundException(`ID为 ${skuId} 的SKU不存在或不属于该租户。`);
+      throw new NotFoundException('SKU不存在');
     }
 
-    return this.prisma.procurementRecord.create({
-      data: {
-        skuId,
-        packagesPurchased,
-        pricePerPackage,
-        purchaseDate: new Date(purchaseDate),
-      },
+    // 2. V2.1 业务规则: 只有激活的SKU才能进行采购入库
+    if (sku.status !== SkuStatus.ACTIVE) {
+      throw new BadRequestException('只有激活状态的SKU才能进行采购入库');
+    }
+
+    const { packagesPurchased, pricePerPackage } = createProcurementDto;
+
+    // 3. 计算本次入库的总克数
+    const stockIncrease = packagesPurchased * sku.specWeightInGrams;
+
+    // 4. 使用数据库事务来保证数据一致性
+    return this.prisma.$transaction(async (tx) => {
+      // 4.1 创建采购历史记录
+      await tx.procurementRecord.create({
+        data: {
+          skuId,
+          packagesPurchased,
+          pricePerPackage,
+        },
+      });
+
+      // 4.2 更新SKU的实时库存和当前单价
+      const updatedSku = await tx.ingredientSKU.update({
+        where: { id: skuId },
+        data: {
+          // 增加实时库存
+          currentStockInGrams: {
+            increment: stockIncrease,
+          },
+          // 更新为最新的采购单价
+          currentPricePerPackage: pricePerPackage,
+        },
+      });
+
+      return updatedSku;
     });
   }
 }

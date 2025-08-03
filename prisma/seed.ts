@@ -4,8 +4,8 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 async function main() {
-  const adminPhone = process.env.SUPER_ADMIN_PHONE || '13800138000';
-  const adminPassword = process.env.SUPER_ADMIN_PASSWORD || 'password123';
+  const adminPhone = process.env.SUPER_ADMIN_PHONE || '13955555555';
+  const adminPassword = process.env.SUPER_ADMIN_PASSWORD || 'admin';
 
   if (!adminPhone || !adminPassword) {
     throw new Error(
