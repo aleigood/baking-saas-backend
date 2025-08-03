@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -9,6 +9,7 @@ import { QueryDto } from './dto/query.dto';
 import { CreateRecipeDto } from '../recipes/dto/create-recipe.dto';
 import { RecipesService } from '../recipes/recipes.service';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 
 @Injectable()
 export class SuperAdminService {
@@ -23,6 +24,7 @@ export class SuperAdminService {
         const totalUsers = await this.prisma.user.count({
             where: { role: { not: Role.SUPER_ADMIN } },
         });
+        // [新增] 获取配方和任务总数
         const totalRecipes = await this.prisma.recipeFamily.count({
             where: { deletedAt: null },
         });
@@ -58,7 +60,6 @@ export class SuperAdminService {
 
         const data = tenants.map((tenant) => {
             const ownerInfo = tenant.members[0]?.user;
-            // 修复：显式构建返回对象，而不是使用解构来排除字段
             return {
                 id: tenant.id,
                 name: tenant.name,
@@ -80,8 +81,31 @@ export class SuperAdminService {
         };
     }
 
+    // [修复] 在创建店铺的同时，利用 Prisma 的关联写入功能，将指定用户设为老板
     async createTenant(dto: CreateTenantDto) {
-        return this.prisma.tenant.create({ data: { name: dto.name } });
+        const { name, ownerId } = dto;
+
+        // 验证 ownerId 是否存在
+        const ownerExists = await this.prisma.user.findUnique({
+            where: { id: ownerId },
+        });
+
+        if (!ownerExists) {
+            throw new NotFoundException(`ID为 ${ownerId} 的用户不存在`);
+        }
+
+        return this.prisma.tenant.create({
+            data: {
+                name,
+                members: {
+                    create: {
+                        userId: ownerId,
+                        role: Role.OWNER,
+                        status: 'ACTIVE',
+                    },
+                },
+            },
+        });
     }
 
     async updateTenant(id: string, dto: UpdateTenantDto) {
@@ -89,7 +113,11 @@ export class SuperAdminService {
     }
 
     async deleteTenant(id: string) {
-        return this.prisma.tenant.delete({ where: { id } });
+        // [修改] 使用事务删除关联的 TenantUser 记录，然后再删除 Tenant
+        return this.prisma.$transaction(async (tx) => {
+            await tx.tenantUser.deleteMany({ where: { tenantId: id } });
+            return tx.tenant.delete({ where: { id } });
+        });
     }
 
     // --- User Management ---
@@ -98,10 +126,17 @@ export class SuperAdminService {
         const pageNum = parseInt(page, 10);
         const limitNum = parseInt(limit, 10);
 
-        const where: Prisma.UserWhereInput = search ? { phone: { contains: search, mode: 'insensitive' } } : {};
+        const where: Prisma.UserWhereInput = search ? { phone: { contains: search } } : {};
 
         const users = await this.prisma.user.findMany({
             where,
+            include: {
+                tenants: {
+                    include: {
+                        tenant: true,
+                    },
+                },
+            },
             orderBy: { [sortBy]: order },
             skip: (pageNum - 1) * limitNum,
             take: limitNum,
@@ -118,6 +153,14 @@ export class SuperAdminService {
                 status: user.status,
                 createdAt: user.createdAt,
                 updatedAt: user.updatedAt,
+                // 必须包含处理过的 tenants 数组
+                tenants: user.tenants.map((tenantUser) => ({
+                    role: tenantUser.role,
+                    tenant: {
+                        id: tenantUser.tenant.id,
+                        name: tenantUser.tenant.name,
+                    },
+                })),
             })),
             meta: {
                 total,
@@ -151,8 +194,20 @@ export class SuperAdminService {
         return this.prisma.user.update({ where: { id }, data });
     }
 
+    // [新增] 单独更新用户状态的方法
+    async updateUserStatus(id: string, dto: UpdateUserStatusDto) {
+        return this.prisma.user.update({
+            where: { id },
+            data: { status: dto.status },
+        });
+    }
+
     async deleteUser(id: string) {
-        return this.prisma.user.delete({ where: { id } });
+        // [修改] 使用事务删除关联的 TenantUser 记录，然后再删除 User
+        return this.prisma.$transaction(async (tx) => {
+            await tx.tenantUser.deleteMany({ where: { userId: id } });
+            return tx.user.delete({ where: { id } });
+        });
     }
 
     // --- Recipe Management ---

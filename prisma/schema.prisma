@@ -9,8 +9,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
   // directUrl = env("DIRECT_URL")
 }
 
@@ -72,7 +72,6 @@ enum SkuStatus {
   INACTIVE // 未启用
 }
 
-
 // ================================================================= //
 //                         CORE AUTH & TENANCY                       //
 // ================================================================= //
@@ -98,7 +97,7 @@ model Tenant {
   members         TenantUser[]
   invitations     Invitation[]
   ingredients     Ingredient[]
-  recipeFamilies  RecipeFamily[]   // 一个店铺可以有多个配方族
+  recipeFamilies  RecipeFamily[] // 一个店铺可以有多个配方族
   productionTasks ProductionTask[] // 一个店铺可以有多个生产任务
 }
 
@@ -136,19 +135,19 @@ model Invitation {
 // 配方族：用于管理一个配方的所有版本
 // 例如，“甜面团”是一个Family，它可能有V1, V2等多个Version
 model RecipeFamily {
-  id        String   @id @default(uuid())
+  id        String     @id @default(uuid())
   name      String // 配方名称，如“甜面团”、“烫种”
   tenantId  String
   type      RecipeType // 配方类型 (主配方, 预制面团, 或附加项)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
   deletedAt DateTime?
 
-  tenant   Tenant            @relation(fields: [tenantId], references: [id])
+  tenant   Tenant          @relation(fields: [tenantId], references: [id])
   versions RecipeVersion[] // 一个配方族包含多个版本
 
   // 当此配方作为预制面团在其他配方中使用时
-  usedInDoughs DoughIngredient[] @relation("PreDoughLink")
+  usedInDoughs   DoughIngredient[]   @relation("PreDoughLink")
   // 当此配方作为附加项(馅料/装饰)在其他配方中使用时
   usedInProducts ProductIngredient[] @relation("ExtraLink")
 
@@ -158,17 +157,17 @@ model RecipeFamily {
 
 // 配方版本：记录配方的具体版本信息
 model RecipeVersion {
-  id       String    @id @default(uuid())
-  familyId String // 所属配方族ID
-  version  Int // 版本号
-  notes    String? // 版本备注，如“夏季版，减少水量”
-  isActive Boolean   @default(true) // 是否为当前激活版本
+  id        String   @id @default(uuid())
+  familyId  String // 所属配方族ID
+  version   Int // 版本号
+  notes     String? // 版本备注，如“夏季版，减少水量”
+  isActive  Boolean  @default(true) // 是否为当前激活版本
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   family   RecipeFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  doughs   Dough[]      // 该版本包含的面团 (可以是主面团、预制面团等)
-  products Product[]    // 该版本包含的最终产品 (仅MAIN类型的配方有)
+  doughs   Dough[] // 该版本包含的面团 (可以是主面团、预制面团等)
+  products Product[] // 该版本包含的最终产品 (仅MAIN类型的配方有)
 
   @@unique([familyId, version])
   @@index([familyId])
@@ -191,12 +190,12 @@ model Dough {
 
 // 面团中的原料
 model DoughIngredient {
-  id        String  @id @default(uuid())
-  doughId   String // 所属面团ID
-  name      String // 原料名称
-  ratio     Float // 基于总面粉的百分比
-  isFlour   Boolean @default(false) // 是否为面粉
-  waterContent Float? @default(0) // 含水量百分比 (仅湿性材料)
+  id           String  @id @default(uuid())
+  doughId      String // 所属面团ID
+  name         String // 原料名称
+  ratio        Float // 基于总面粉的百分比
+  isFlour      Boolean @default(false) // 是否为面粉
+  waterContent Float?  @default(0) // 含水量百分比 (仅湿性材料)
 
   // 如果这个原料本身是一个预制面团配方，这里会有关联
   linkedPreDoughId String?
@@ -217,16 +216,16 @@ model Product {
   baseDoughWeight Float // 基础面团克重 (不含mixIn)
   procedure       String[] // 制作流程要点 (如烘烤参数)
 
-  recipeVersion RecipeVersion       @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
-  ingredients   ProductIngredient[] // 产品的附加原料 (搅拌、馅料、装饰)
-  productionTasks ProductionTask[]    // 关联到生产此产品的任务
+  recipeVersion   RecipeVersion       @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  ingredients     ProductIngredient[] // 产品的附加原料 (搅拌、馅料、装饰)
+  productionTasks ProductionTask[] // 关联到生产此产品的任务
 
   @@index([recipeVersionId])
 }
 
 // 产品的附加原料：搅拌、馅料、装饰
 model ProductIngredient {
-  id        String  @id @default(uuid())
+  id        String                @id @default(uuid())
   productId String // 所属产品ID
   name      String // 原料名称
   type      ProductIngredientType // 原料类型 (搅拌/馅料/装饰)
@@ -246,49 +245,48 @@ model ProductIngredient {
   @@index([linkedExtraId])
 }
 
-
 // ================================================================= //
 //                  INGREDIENTS & STOCK           //
 // ================================================================= //
 
 // 原料品类模型
 model Ingredient {
-  id        String   @id @default(uuid())
-  tenantId  String
-  name      String // e.g., "High-gluten flour"
-  type      IngredientType @default(STANDARD)
+  id          String         @id @default(uuid())
+  tenantId    String
+  name        String // e.g., "High-gluten flour"
+  type        IngredientType @default(STANDARD)
   // 指向当前启用的SKU
   activeSkuId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
 
   tenant          Tenant                     @relation(fields: [tenantId], references: [id])
   skus            IngredientSKU[]
   consumptionLogs IngredientConsumptionLog[] // 关联到该原料的消耗记录
+  activeSku       IngredientSKU?             @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([tenantId, name, deletedAt])
-  activeSku IngredientSKU? @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 // 原料SKU模型
 model IngredientSKU {
-  id                  String   @id @default(uuid())
-  brand               String?
-  specName            String // e.g., "1kg bag"
-  specWeightInGrams   Float
-  ingredientId        String
-  
-  // SKU状态 (启用/未启用)
-  status SkuStatus @default(INACTIVE)
-  // 当前实时库存（克）
-  currentStockInGrams Float @default(0)
-  // 当前采购单价
-  currentPricePerPackage Decimal @default(0)
+  id                String  @id @default(uuid())
+  brand             String?
+  specName          String // e.g., "1kg bag"
+  specWeightInGrams Float
+  ingredientId      String
 
-  ingredient          Ingredient                 @relation(fields: [ingredientId], references: [id])
-  procurementRecords  ProcurementRecord[]
-  consumptionLogs     IngredientConsumptionLog[] // 关联到该SKU的消耗记录
+  // SKU状态 (启用/未启用)
+  status                 SkuStatus @default(INACTIVE)
+  // 当前实时库存（克）
+  currentStockInGrams    Float     @default(0)
+  // 当前采购单价
+  currentPricePerPackage Decimal   @default(0)
+
+  ingredient         Ingredient                 @relation(fields: [ingredientId], references: [id])
+  procurementRecords ProcurementRecord[]
+  consumptionLogs    IngredientConsumptionLog[] // 关联到该SKU的消耗记录
 
   // Foreign key for the active SKU relation
   activeForIngredients Ingredient[] @relation("ActiveSKU")
@@ -305,7 +303,6 @@ model ProcurementRecord {
   sku IngredientSKU @relation(fields: [skuId], references: [id])
 }
 
-
 // ================================================================= //
 //                  PRODUCTION & TASKS              //
 // ================================================================= //
@@ -313,7 +310,7 @@ model ProcurementRecord {
 // 生产任务模型
 // 任务直接关联到最终产品，使计划更精确
 model ProductionTask {
-  id          String   @id @default(uuid())
+  id          String               @id @default(uuid())
   tenantId    String
   // 直接关联目标产品
   productId   String
@@ -322,8 +319,8 @@ model ProductionTask {
   status      ProductionTaskStatus @default(PENDING)
   plannedDate DateTime
   notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt 
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
   deletedAt   DateTime?
 
   tenant  Tenant         @relation(fields: [tenantId], references: [id])
