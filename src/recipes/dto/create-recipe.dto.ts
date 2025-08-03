@@ -1,60 +1,97 @@
-/**
- * 文件路径: src/recipes/dto/create-recipe.dto.ts
- * 文件描述: (已更新) 将 isFlour 和 isPreDough 设为可选字段以符合需求。
- */
 import {
   IsString,
   IsNotEmpty,
+  IsArray,
+  ValidateNested,
+  IsOptional,
   IsNumber,
   IsBoolean,
-  IsOptional,
   IsEnum,
-  ValidateNested,
-  IsArray,
-  ArrayMinSize,
-  IsPositive,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { AddOnType } from '@prisma/client';
+import { ProductIngredientType, RecipeType } from '@prisma/client';
 
-// 注意：为了让 @ValidateNested 生效，所有嵌套的 DTO 也必须是 class 并有验证装饰器。
-
-class CreateProcedureDto {
-  @IsNumber()
-  step: number;
-
+// 用于产品中附加原料（搅拌、馅料、装饰）的DTO
+class ProductIngredientDto {
   @IsString()
   @IsNotEmpty()
   name: string;
 
-  @IsString()
+  @IsEnum(ProductIngredientType)
   @IsNotEmpty()
-  description: string;
+  type: ProductIngredientType; // 'MIX_IN', 'FILLING', 'TOPPING'
+
+  @IsNumber()
+  @IsOptional()
+  ratio?: number; // 搅拌类原料的百分比
+
+  @IsNumber()
+  @IsOptional()
+  weightInGrams?: number; // 馅料/装饰类原料的克重
 }
 
-class CreateDoughIngredientDto {
+// 用于最终产品的DTO
+class ProductDto {
   @IsString()
   @IsNotEmpty()
   name: string;
 
   @IsNumber()
+  @IsNotEmpty()
+  weight: number; // 基础面团克重
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductIngredientDto)
+  @IsOptional()
+  fillings?: ProductIngredientDto[]; // 馅料
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductIngredientDto)
+  @IsOptional()
+  mixIn?: ProductIngredientDto[]; // 搅拌加入的原料
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductIngredientDto)
+  @IsOptional()
+  toppings?: ProductIngredientDto[]; // 表面装饰
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  procedure?: string[]; // 制作流程
+}
+
+// 用于面团中原料的DTO
+class DoughIngredientDto {
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsNumber()
+  @IsNotEmpty()
   ratio: number;
 
-  // [修改] 将 isFlour 设为可选。如果未提供，服务层会将其默认为 false。
-  @IsOptional()
   @IsBoolean()
+  @IsOptional()
   isFlour?: boolean;
+
+  @IsNumber()
+  @IsOptional()
+  waterContent?: number;
 }
 
-class CreateDoughDto {
+// 主创建DTO
+export class CreateRecipeDto {
   @IsString()
   @IsNotEmpty()
   name: string;
 
-  // [修改] 将 isPreDough 设为可选。如果未提供，服务层会将其默认为 false。
+  @IsEnum(RecipeType)
   @IsOptional()
-  @IsBoolean()
-  isPreDough?: boolean;
+  type?: RecipeType; // 'MAIN', 'PRE_DOUGH', 'EXTRA'
 
   @IsNumber()
   @IsOptional()
@@ -66,87 +103,17 @@ class CreateDoughDto {
 
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => CreateDoughIngredientDto)
-  ingredients: CreateDoughIngredientDto[];
+  @Type(() => DoughIngredientDto)
+  ingredients: DoughIngredientDto[];
 
-  // [新增] 允许为每个面团/酵头定义专属的操作步骤
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => CreateProcedureDto)
+  @Type(() => ProductDto)
   @IsOptional()
-  procedures?: CreateProcedureDto[];
-}
-
-class CreateProductMixInDto {
-  @IsString()
-  @IsNotEmpty()
-  name: string;
-
-  @IsNumber()
-  ratio: number;
-}
-
-class CreateProductAddOnDto {
-  @IsString()
-  @IsNotEmpty()
-  name: string;
-
-  @IsNumber()
-  @IsPositive()
-  weight: number;
-
-  @IsEnum(AddOnType)
-  type: AddOnType;
-}
-
-class CreateProductDto {
-  @IsString()
-  @IsNotEmpty()
-  name: string;
-
-  @IsNumber()
-  @IsPositive()
-  weight: number;
+  products?: ProductDto[];
 
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CreateProductMixInDto)
+  @IsString({ each: true })
   @IsOptional()
-  mixIns: CreateProductMixInDto[];
-
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CreateProductAddOnDto)
-  @IsOptional()
-  addOns: CreateProductAddOnDto[];
-
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CreateProcedureDto)
-  @IsOptional()
-  procedures: CreateProcedureDto[];
-}
-
-export class CreateRecipeFamilyDto {
-  @IsString()
-  @IsNotEmpty()
-  name: string;
-
-  @IsArray()
-  @ArrayMinSize(1)
-  @ValidateNested({ each: true })
-  @Type(() => CreateDoughDto)
-  doughs: CreateDoughDto[];
-
-  @IsArray()
-  @ArrayMinSize(1)
-  @ValidateNested({ each: true })
-  @Type(() => CreateProductDto)
-  products: CreateProductDto[];
-
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CreateProcedureDto)
-  @IsOptional()
-  procedures: CreateProcedureDto[];
+  procedure?: string[];
 }

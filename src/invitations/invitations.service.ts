@@ -1,59 +1,67 @@
-/**
- * 文件路径: src/invitations/invitations.service.ts
- * 文件描述: 邀请功能的核心业务逻辑。
- */
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
-import { Role } from '@prisma/client';
-import { randomBytes } from 'crypto';
+import { Role, InvitationStatus, UserStatus } from '@prisma/client'; // 修复：导入 UserStatus 枚举
 
 @Injectable()
 export class InvitationsService {
   constructor(private prisma: PrismaService) {}
 
-  /**
-   * 创建一个新的邀请码
-   * @param currentUser 发起邀请的用户
-   */
-  async create(currentUser: UserPayload) {
-    // 权限校验：只有老板和主管可以创建邀请
-    if (currentUser.role === Role.BAKER) {
-      throw new ForbiddenException('Bakers cannot create invitations.');
+  async create(tenantId: string, phone: string, currentUser: UserPayload) {
+    if (currentUser.role === Role.MEMBER) {
+      throw new ForbiddenException('只有管理员或所有者才能发送邀请。');
     }
 
-    const code = randomBytes(8).toString('hex'); // 生成一个16位的随机码
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24小时后过期
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7); // 邀请7天后过期
 
     const invitation = await this.prisma.invitation.create({
       data: {
-        code,
+        tenantId,
+        phone,
+        role: Role.MEMBER, // 新邀请的用户默认为 MEMBER 角色
         expiresAt,
-        tenantId: currentUser.tenantId,
-        creatorId: currentUser.userId,
       },
     });
 
     return {
-      invitationCode: invitation.code,
-      expiresAt: invitation.expiresAt,
+      message: '邀请已发送',
+      invitationId: invitation.id,
     };
   }
 
-  /**
-   * 验证邀请码的有效性
-   * @param code 邀请码
-   * @returns 返回邀请信息，如果无效则返回 null
-   */
-  async validate(code: string) {
+  async accept(invitationId: string, user: UserPayload) {
     const invitation = await this.prisma.invitation.findUnique({
-      where: { code },
+      where: { id: invitationId },
     });
 
-    if (!invitation || invitation.expiresAt < new Date()) {
-      return null; // 邀请码不存在或已过期
+    if (
+      !invitation ||
+      invitation.status !== InvitationStatus.PENDING ||
+      invitation.expiresAt < new Date()
+    ) {
+      throw new NotFoundException('邀请无效或已过期。');
     }
 
-    return invitation;
+    // 在事务中更新邀请状态并创建租户成员关系
+    return this.prisma.$transaction(async (tx) => {
+      await tx.invitation.update({
+        where: { id: invitationId },
+        data: { status: InvitationStatus.ACCEPTED },
+      });
+
+      return tx.tenantUser.create({
+        data: {
+          tenantId: invitation.tenantId,
+          userId: user.sub,
+          role: invitation.role,
+          status: UserStatus.ACTIVE, // 修复：现在 UserStatus 已被正确导入
+        },
+      });
+    });
   }
 }

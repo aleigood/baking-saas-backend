@@ -1,35 +1,18 @@
-/**
- * 文件路径: src/super-admin/guards/super-admin.guard.ts
- * 文件描述: [新增] 一个自定义守卫，用于验证用户是否为超级管理员。
- */
-import {
-  Injectable,
-  CanActivate,
-  ExecutionContext,
-  ForbiddenException,
-} from '@nestjs/common';
-import { SystemRole } from '@prisma/client';
+import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import { UserPayload } from '../../auth/interfaces/user-payload.interface';
-import { Request } from 'express'; // [新增] 导入 Express 的 Request 类型
-
-// [新增] 定义一个带有 user 属性的请求类型接口
-interface RequestWithUser extends Request {
-  user: UserPayload;
-}
+import { Role } from '@prisma/client';
+import { Request } from 'express';
 
 @Injectable()
 export class SuperAdminGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
-    // [类型修正] 明确 request 的类型，解决 ESLint 报错
-    const request = context.switchToHttp().getRequest<RequestWithUser>();
-    const user = request.user;
-
-    // 检查JWT payload中是否存在systemRole且其值是否为SUPER_ADMIN
-    if (user && user.systemRole === SystemRole.SUPER_ADMIN) {
-      return true;
-    }
-
-    // 如果不是超级管理员，则抛出禁止访问异常
-    throw new ForbiddenException('仅超级管理员可以访问此资源');
+  canActivate(
+    context: ExecutionContext,
+  ): boolean | Promise<boolean> | Observable<boolean> {
+    // 修复：为 request 对象添加明确的类型
+    const request = context.switchToHttp().getRequest<Request>();
+    const user = request.user as UserPayload;
+    // 修复：使用 globalRole 进行判断，并确保 user 对象存在
+    return !!user && user.globalRole === Role.SUPER_ADMIN;
   }
 }

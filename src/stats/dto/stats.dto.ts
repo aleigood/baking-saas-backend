@@ -1,9 +1,11 @@
-export class RecipeStatDto {
-  name: string;
-  count: number;
-}
+import { IsDateString, IsNotEmpty } from 'class-validator';
 
-export class IngredientStatDto {
-  name: string;
-  consumed: number;
+export class StatsDto {
+  @IsDateString()
+  @IsNotEmpty()
+  startDate: string;
+
+  @IsDateString()
+  @IsNotEmpty()
+  endDate: string;
 }

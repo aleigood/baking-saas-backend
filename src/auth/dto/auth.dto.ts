@@ -1,39 +1,43 @@
-import { IsString, IsNotEmpty, IsEmail, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
+/**
+ * [已恢复并适配] 用于新用户注册并创建店铺的DTO
+ */
 export class RegisterDto {
-  @IsEmail()
+  @IsString()
   @IsNotEmpty()
-  email: string;
+  phone: string;
 
   @IsString()
   @IsNotEmpty()
   password: string;
-
-  @IsString()
-  @IsNotEmpty()
-  name: string;
 
   @IsString()
   @IsNotEmpty()
   tenantName: string;
 }
 
-export class LoginDto {
-  @IsEmail()
+/**
+ * [已恢复并适配] 用于手机号密码登录的DTO
+ */
+export class AuthDto {
+  @IsString()
   @IsNotEmpty()
-  email: string;
+  phone: string;
 
   @IsString()
   @IsNotEmpty()
   password: string;
 }
 
+/**
+ * [已恢复] 用于微信登录的DTO
+ */
 export class WechatLoginDto {
   @IsString()
   @IsNotEmpty()
   code: string;
 
-  // [核心修复] 添加 invitationCode 字段以接收邀请码
   @IsString()
   @IsOptional()
   invitationCode?: string;

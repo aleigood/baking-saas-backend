@@ -1,15 +1,13 @@
-/**
- * 文件路径: src/ingredients/dto/create-ingredient.dto.ts
- * 文件描述: (已重构) 添加了完整的 class-validator 验证装饰器。
- */
-import { IsString, IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IngredientType } from '@prisma/client';
 
 export class CreateIngredientDto {
   @IsString()
   @IsNotEmpty()
   name: string;
 
-  @IsNumber()
+  // 修复：添加 type 字段以匹配 service 逻辑
+  @IsEnum(IngredientType)
   @IsOptional()
-  hydration?: number;
+  type?: IngredientType;
 }

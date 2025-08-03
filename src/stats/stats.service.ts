@@ -1,77 +1,70 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { RecipeStatDto, IngredientStatDto } from './dto/stats.dto';
+import { StatsDto } from './dto/stats.dto';
 
 @Injectable()
 export class StatsService {
   constructor(private prisma: PrismaService) {}
 
-  async findRecipeStats(tenantId: string): Promise<RecipeStatDto[]> {
-    const stats = await this.prisma.productionTask.groupBy({
-      by: ['productId'],
-      where: { tenantId, status: 'COMPLETED' },
-      _count: {
-        productId: true,
-      },
-      orderBy: {
-        _count: {
-          productId: 'desc',
+  async getProductionStats(tenantId: string, dto: StatsDto) {
+    const { startDate, endDate } = dto;
+
+    const completedTasks = await this.prisma.productionTask.findMany({
+      where: {
+        tenantId,
+        status: 'COMPLETED',
+        log: {
+          completedAt: {
+            gte: new Date(startDate),
+            lte: new Date(endDate),
+          },
         },
+      },
+      include: {
+        log: true,
+        product: { select: { name: true } },
       },
     });
 
-    if (stats.length === 0) return [];
+    const productStatsMap = new Map<string, { name: string; count: number }>();
+    for (const task of completedTasks) {
+      if (task.productId && task.log) {
+        const existing = productStatsMap.get(task.productId);
+        const name = task.product?.name || '未知产品';
+        const count = (existing?.count || 0) + task.log.actualQuantity;
+        productStatsMap.set(task.productId, { name, count });
+      }
+    }
 
-    const productIds = stats.map((s) => s.productId);
-    const products = await this.prisma.product.findMany({
-      where: {
-        id: { in: productIds },
-      },
-      select: {
-        id: true,
-        name: true,
-      },
-    });
-
-    const productMap = new Map(products.map((p) => [p.id, p.name]));
-
-    return stats.map((s) => ({
-      name: productMap.get(s.productId) || '未知产品',
-      count: s._count.productId,
-    }));
-  }
-
-  async findIngredientStats(tenantId: string): Promise<IngredientStatDto[]> {
-    const stats = await this.prisma.consumptionRecord.groupBy({
-      by: ['ingredientId'],
-      where: {
-        task: {
-          tenantId: tenantId,
-        },
-      },
-      _sum: {
-        amountConsumedInGrams: true,
-      },
-      orderBy: {
+    const consumptionStats = await this.prisma.ingredientConsumptionLog.groupBy(
+      {
+        by: ['ingredientId'],
         _sum: {
-          amountConsumedInGrams: 'desc',
+          quantityInGrams: true,
+        },
+        where: {
+          productionLog: {
+            taskId: {
+              in: completedTasks.map((t) => t.id),
+            },
+          },
         },
       },
-    });
+    );
 
-    if (stats.length === 0) return [];
-
-    const ingredientIds = stats.map((s) => s.ingredientId);
+    const ingredientIds = consumptionStats.map((s) => s.ingredientId);
     const ingredients = await this.prisma.ingredient.findMany({
       where: { id: { in: ingredientIds } },
       select: { id: true, name: true },
     });
-
     const ingredientMap = new Map(ingredients.map((i) => [i.id, i.name]));
 
-    return stats.map((s) => ({
-      name: ingredientMap.get(s.ingredientId) || '未知原料',
-      consumed: (s._sum.amountConsumedInGrams || 0) / 1000, // 转换为 kg
-    }));
+    return {
+      productStats: Array.from(productStatsMap.values()),
+      ingredientConsumption: consumptionStats.map((s) => ({
+        name: ingredientMap.get(s.ingredientId) || '未知原料',
+        consumedGrams: s._sum.quantityInGrams || 0,
+      })),
+    };
   }
 }

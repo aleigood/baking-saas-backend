@@ -1,24 +1,18 @@
-/**
- * 文件路径: src/members/members.controller.ts
- * 文件描述: (已更新) 增加了角色更新和员工删除的API端点。
- */
 import {
   Controller,
   Get,
-  UseGuards,
   Patch,
   Param,
   Body,
   Delete,
-  HttpCode,
-  HttpStatus,
+  UseGuards,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { MembersService } from './members.service';
 import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
-import { MemberDto } from './dto/member.dto';
-import { UpdateMemberRoleDto } from './dto/update-member.dto';
+import { UpdateMemberDto } from './dto/update-member.dto'; // 修复：使用正确的DTO名称
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('members')
@@ -26,35 +20,29 @@ export class MembersController {
   constructor(private readonly membersService: MembersService) {}
 
   @Get()
-  findAll(@GetUser() user: UserPayload): Promise<MemberDto[]> {
-    return this.membersService.findAllForTenant(user.tenantId);
+  findAll(@GetUser() user: UserPayload) {
+    return this.membersService.findAll(user.tenantId);
   }
 
-  /**
-   * [新增] 更新成员角色的端点
-   * @route PATCH /members/:id/role
-   * @param id - 目标成员的用户ID
-   * @param updateMemberRoleDto - 包含新角色的请求体
-   * @param user - 发起操作的当前用户
-   */
-  @Patch(':id/role')
-  updateRole(
-    @Param('id') id: string,
-    @Body() updateMemberRoleDto: UpdateMemberRoleDto,
+  @Get(':id')
+  findOne(
     @GetUser() user: UserPayload,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.membersService.updateRole(id, updateMemberRoleDto.role, user);
+    return this.membersService.findOne(user.tenantId, id);
   }
 
-  /**
-   * [新增] "软删除"一个成员的端点
-   * @route DELETE /members/:id
-   * @param id - 目标成员的用户ID
-   * @param user - 发起操作的当前用户
-   */
+  @Patch(':id')
+  update(
+    @GetUser() user: UserPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateMemberDto: UpdateMemberDto,
+  ) {
+    return this.membersService.update(user.tenantId, id, updateMemberDto, user);
+  }
+
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string, @GetUser() user: UserPayload) {
-    return this.membersService.remove(id, user);
+  remove(@GetUser() user: UserPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.membersService.remove(user.tenantId, id, user);
   }
 }

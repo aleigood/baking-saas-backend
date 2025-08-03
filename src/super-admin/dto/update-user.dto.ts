@@ -1,14 +1,21 @@
-/**
- * 文件路径: src/super-admin/dto/update-user.dto.ts
- * 文件描述: [新增] 定义超级管理员更新用户信息时所需的数据结构。
- */
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { Role, UserStatus } from '@prisma/client';
 
+// 修复：适配新的 User 模型，提供所有可更新字段
 export class UpdateUserDto {
   @IsString()
-  @IsNotEmpty()
   @IsOptional()
-  name?: string;
+  phone?: string;
 
-  // 未来可以扩展更多可编辑字段，如重置密码等
+  @IsString()
+  @IsOptional()
+  password?: string;
+
+  @IsEnum(Role)
+  @IsOptional()
+  role?: Role;
+
+  @IsEnum(UserStatus)
+  @IsOptional()
+  status?: UserStatus;
 }

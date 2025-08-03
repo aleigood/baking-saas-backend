@@ -1,84 +1,111 @@
-/**
- * 文件路径: src/ingredients/ingredients.controller.ts
- * 文件描述: (已更新) 增加了更新原料和设置默认SKU的API端点。
- */
 import {
   Controller,
   Get,
   Post,
   Body,
-  Param,
-  UseGuards,
   Patch,
+  Param,
+  Delete,
+  UseGuards,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { IngredientsService } from './ingredients.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
-import { CreateSkuDto } from './dto/create-sku.dto';
-import { CreateProcurementDto } from './dto/create-procurement.dto';
+import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
-import { UpdateIngredientDto } from './dto/update-ingredient.dto';
+import { CreateSkuDto } from './dto/create-sku.dto';
 import { SetDefaultSkuDto } from './dto/set-default-sku.dto';
+import { CreateProcurementDto } from './dto/create-procurement.dto';
 
 @UseGuards(AuthGuard('jwt'))
-@Controller('ingredients')
+@Controller() // 使用空的Controller路径，在方法上定义完整路径
 export class IngredientsController {
   constructor(private readonly ingredientsService: IngredientsService) {}
 
-  @Post()
-  create(
-    @Body() createIngredientDto: CreateIngredientDto,
+  // --- Endpoints for Ingredients ---
+  @Post('ingredients')
+  createIngredient(
     @GetUser() user: UserPayload,
+    @Body() createIngredientDto: CreateIngredientDto,
   ) {
-    return this.ingredientsService.create(createIngredientDto, user.tenantId);
+    return this.ingredientsService.createIngredient(
+      user.tenantId,
+      createIngredientDto,
+    );
   }
 
-  @Get()
-  findAll(@GetUser() user: UserPayload) {
-    return this.ingredientsService.findAllForTenant(user.tenantId);
+  @Get('ingredients')
+  findAllIngredients(@GetUser() user: UserPayload) {
+    return this.ingredientsService.findAllIngredients(user.tenantId);
   }
 
-  @Post(':ingredientId/skus')
+  @Get('ingredients/:id')
+  findOneIngredient(
+    @GetUser() user: UserPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.ingredientsService.findOneIngredient(user.tenantId, id);
+  }
+
+  @Patch('ingredients/:id')
+  updateIngredient(
+    @GetUser() user: UserPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateIngredientDto: UpdateIngredientDto,
+  ) {
+    return this.ingredientsService.updateIngredient(
+      user.tenantId,
+      id,
+      updateIngredientDto,
+    );
+  }
+
+  @Delete('ingredients/:id')
+  removeIngredient(
+    @GetUser() user: UserPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.ingredientsService.removeIngredient(user.tenantId, id);
+  }
+
+  // --- Endpoints for SKUs (nested under ingredients) ---
+  @Post('ingredients/:ingredientId/skus')
   createSku(
-    @Param('ingredientId') ingredientId: string,
+    @GetUser() user: UserPayload,
+    @Param('ingredientId', ParseUUIDPipe) ingredientId: string,
     @Body() createSkuDto: CreateSkuDto,
   ) {
-    return this.ingredientsService.createSku(ingredientId, createSkuDto);
+    return this.ingredientsService.createSku(
+      user.tenantId,
+      ingredientId,
+      createSkuDto,
+    );
   }
 
-  @Post('procurements')
-  createProcurement(@Body() createProcurementDto: CreateProcurementDto) {
-    return this.ingredientsService.createProcurement(createProcurementDto);
-  }
-
-  /**
-   * [新增] 更新原料信息（如含水率）
-   * @route PATCH /ingredients/:id
-   */
-  @Patch(':id')
-  update(
-    @Param('id') id: string,
-    @Body() updateIngredientDto: UpdateIngredientDto,
-    @GetUser() user: UserPayload,
-  ) {
-    return this.ingredientsService.update(id, updateIngredientDto, user);
-  }
-
-  /**
-   * [新增] 设置原料的默认SKU
-   * @route PATCH /ingredients/:id/default-sku
-   */
-  @Patch(':id/default-sku')
+  @Post('ingredients/:ingredientId/default-sku')
   setDefaultSku(
-    @Param('id') id: string,
-    @Body() setDefaultSkuDto: SetDefaultSkuDto,
     @GetUser() user: UserPayload,
+    @Param('ingredientId', ParseUUIDPipe) ingredientId: string,
+    @Body() setDefaultSkuDto: SetDefaultSkuDto,
   ) {
     return this.ingredientsService.setDefaultSku(
-      id,
-      setDefaultSkuDto.skuId,
-      user,
+      user.tenantId,
+      ingredientId,
+      setDefaultSkuDto,
+    );
+  }
+
+  // --- Endpoint for Procurements ---
+  @Post('procurements')
+  createProcurement(
+    @GetUser() user: UserPayload,
+    @Body() createProcurementDto: CreateProcurementDto,
+  ) {
+    return this.ingredientsService.createProcurement(
+      user.tenantId,
+      createProcurementDto,
     );
   }
 }

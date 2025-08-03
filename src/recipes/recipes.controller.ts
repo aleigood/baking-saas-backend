@@ -1,20 +1,16 @@
-/**
- * 文件路径: src/recipes/recipes.controller.ts
- * 文件描述: (完整最终版) 恢复了所有方法，解决了静态检查错误。
- */
 import {
   Controller,
   Get,
   Post,
   Body,
-  UseGuards,
   Param,
-  Patch,
-  HttpCode,
-  HttpStatus,
+  Delete,
+  UseGuards,
+  Query,
+  NotFoundException,
 } from '@nestjs/common';
 import { RecipesService } from './recipes.service';
-import { CreateRecipeFamilyDto } from './dto/create-recipe.dto';
+import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
@@ -25,71 +21,51 @@ export class RecipesController {
   constructor(private readonly recipesService: RecipesService) {}
 
   /**
-   * 创建一个新配方家族及其首个版本
-   * @route POST /recipes
+   * 导入或创建一个新配方。
+   * 如果是已存在的配方，则会创建一个新版本。
    */
   @Post()
   create(
-    @Body() createRecipeFamilyDto: CreateRecipeFamilyDto,
     @GetUser() user: UserPayload,
+    @Body() createRecipeDto: CreateRecipeDto,
   ) {
-    return this.recipesService.create(createRecipeFamilyDto, user);
+    // 从JWT token中获取tenantId
+    const tenantId = user.tenantId;
+    return this.recipesService.create(tenantId, createRecipeDto);
   }
 
   /**
-   * 获取当前租户的所有产品列表（仅限激活版本）
-   * @route GET /recipes
+   * 获取当前租户的所有配方族（及其激活版本）。
    */
   @Get()
   findAll(@GetUser() user: UserPayload) {
-    return this.recipesService.findAll(user);
+    const tenantId = user.tenantId;
+    return this.recipesService.findAll(tenantId);
   }
 
   /**
-   * 获取单个产品的完整详情（仅限激活版本）
-   * @route GET /recipes/:id
+   * 根据配方族ID获取配方的详细信息。
+   * @param id 配方族ID
+   * @param version 可选查询参数，用于获取特定版本，不提供则返回激活版本
    */
   @Get(':id')
-  findOne(@Param('id') id: string, @GetUser() user: UserPayload) {
-    return this.recipesService.findOne(id, user);
+  async findOne(@Param('id') id: string, @Query('version') version?: string) {
+    const versionNumber = version ? parseInt(version, 10) : undefined;
+    const recipe = await this.recipesService.findOne(id, versionNumber);
+    if (!recipe || recipe.versions.length === 0) {
+      throw new NotFoundException(
+        `ID为 ${id} 且版本为 ${version || '激活'} 的配方未找到`,
+      );
+    }
+    return recipe;
   }
 
   /**
-   * 获取指定配方家族的所有版本列表
-   * @route GET /recipes/:familyId/versions
+   * 软删除一个配方族。
+   * @param id 配方族ID
    */
-  @Get(':familyId/versions')
-  findAllVersions(
-    @Param('familyId') familyId: string,
-    @GetUser() user: UserPayload,
-  ) {
-    return this.recipesService.findAllVersions(familyId, user);
-  }
-
-  /**
-   * 激活指定的配方版本
-   * @route PATCH /recipes/:familyId/versions/:versionId/activate
-   */
-  @Patch(':familyId/versions/:versionId/activate')
-  @HttpCode(HttpStatus.OK)
-  activateVersion(
-    @Param('familyId') familyId: string,
-    @Param('versionId') versionId: string,
-    @GetUser() user: UserPayload,
-  ) {
-    return this.recipesService.activateVersion(familyId, versionId, user);
-  }
-
-  /**
-   * 基于最新版本创建一个新的配方版本
-   * @route POST /recipes/:familyId/versions
-   */
-  @Post(':familyId/versions')
-  createVersion(
-    @Param('familyId') familyId: string,
-    @Body('name') versionName: string,
-    @GetUser() user: UserPayload,
-  ) {
-    return this.recipesService.createVersion(familyId, versionName, user);
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.recipesService.remove(id);
   }
 }

@@ -1,12 +1,14 @@
-/**
- * 文件路径: src/ingredients/dto/update-ingredient.dto.ts
- * 文件描述: 定义了更新原料信息（如含水率）所需的数据结构。
- */
-import { IsNumber, IsOptional, Min } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IngredientType } from '@prisma/client';
 
+// 修复：移除对 @nestjs/mapped-types 的依赖，并手动定义可选字段
+// 这解决了 "Cannot find module" 的错误
 export class UpdateIngredientDto {
-  @IsNumber()
-  @Min(0)
+  @IsString()
   @IsOptional()
-  hydration?: number;
+  name?: string;
+
+  @IsEnum(IngredientType)
+  @IsOptional()
+  type?: IngredientType;
 }

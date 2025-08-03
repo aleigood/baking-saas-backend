@@ -1,16 +1,26 @@
-import { IsInt, IsNotEmpty, IsNumber, IsString } from 'class-validator';
-import { Decimal } from '@prisma/client/runtime/library';
+import {
+  IsDateString,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsString,
+} from 'class-validator';
 
 export class CreateProcurementDto {
+  @IsString()
+  @IsNotEmpty()
+  skuId: string;
+
   @IsInt()
   @IsNotEmpty()
   packagesPurchased: number;
 
   @IsNumber()
   @IsNotEmpty()
-  pricePerPackage: Decimal;
+  pricePerPackage: number;
 
-  @IsString()
+  // 修复：添加 purchaseDate 字段
+  @IsDateString()
   @IsNotEmpty()
-  skuId: string;
+  purchaseDate: string;
 }

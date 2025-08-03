@@ -1,48 +1,38 @@
-/**
- * 文件路径: src/auth/jwt.strategy.ts
- * 文件描述: (已重构) 从 ConfigService 获取 JWT 密钥。
- */
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Strategy, ExtractJwt } from 'passport-jwt';
+import { PrismaService } from '../prisma/prisma.service';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { UserPayload } from './interfaces/user-payload.interface';
-import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  /**
-   * 构造函数，配置JWT策略。
-   */
-  constructor(configService: ConfigService) {
-    const secretOrKey = configService.get<string>('JWT_SECRET');
-
-    // [核心修复] 增加安全校验，确保环境变量存在，这会解决TypeScript的类型错误
-    if (!secretOrKey) {
-      throw new Error(
-        'JWT_SECRET is not defined in the environment variables. Make sure it is set in your .env file.',
-      );
-    }
-
+  constructor(private prisma: PrismaService) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      ignoreExpiration: false,
-      secretOrKey: secretOrKey,
+      secretOrKey: process.env.JWT_SECRET || 'your-secret-key',
     });
   }
 
-  /**
-   * 验证通过后，此方法被调用。
-   * @param payload - 从JWT令牌中解码出的载荷
-   * @returns 返回一个包含用户身份信息的对象，该对象将被附加到请求的 user 属性上。
-   */
-  validate(payload: JwtPayload): UserPayload {
-    // [修改] 将 systemRole 从 payload 中解构出来并返回
+  async validate(
+    payload: JwtPayload & { iat: number; exp: number },
+  ): Promise<UserPayload> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('用户不存在或令牌无效');
+    }
+
+    // 返回的用户信息将附加到 Express 的 request.user 对象上
     return {
-      userId: payload.sub,
+      sub: payload.sub,
       tenantId: payload.tenantId,
       role: payload.role,
-      systemRole: payload.systemRole, // 新增
+      globalRole: payload.globalRole,
+      iat: payload.iat,
+      exp: payload.exp,
     };
   }
 }

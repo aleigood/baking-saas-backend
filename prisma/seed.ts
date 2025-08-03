@@ -1,29 +1,32 @@
-// prisma/seed.ts
-import { PrismaClient, SystemRole } from '@prisma/client';
+import { PrismaClient, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log(`开始植入种子数据...`);
+  const adminPhone = process.env.SUPER_ADMIN_PHONE || '13800138000';
+  const adminPassword = process.env.SUPER_ADMIN_PASSWORD || 'password123';
 
-  const adminEmail = 'admin@example.com';
-  const adminPassword = 'supersecretpassword'; // 请务必在生产环境中更换为更复杂的密码
+  if (!adminPhone || !adminPassword) {
+    throw new Error(
+      'SUPER_ADMIN_PHONE and SUPER_ADMIN_PASSWORD must be set in .env',
+    );
+  }
 
-  // 使用 upsert 避免重复创建
+  const hashedPassword = await bcrypt.hash(adminPassword, 10);
+
   const admin = await prisma.user.upsert({
-    where: { email: adminEmail },
+    where: { phone: adminPhone }, // 修复：使用 phone 代替 email
     update: {},
     create: {
-      email: adminEmail,
-      name: 'Super Admin',
-      passwordHash: await bcrypt.hash(adminPassword, 10),
-      systemRole: SystemRole.SUPER_ADMIN,
+      phone: adminPhone, // 修复：使用 phone 代替 email
+      password: hashedPassword, // 修复：使用 password 代替 passwordHash
+      role: Role.SUPER_ADMIN, // 修复：使用集成的 Role 枚举
+      status: 'ACTIVE',
     },
   });
 
-  console.log(`超级管理员已创建: ${admin.email}`);
-  console.log(`种子数据植入完成。`);
+  console.log(`超级管理员已创建: ${admin.phone}`); // 修复：使用 phone
 }
 
 main()
