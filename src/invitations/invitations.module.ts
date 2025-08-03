@@ -7,8 +7,8 @@ import { InvitationsService } from './invitations.service';
 import { InvitationsController } from './invitations.controller';
 
 @Module({
-  controllers: [InvitationsController],
-  providers: [InvitationsService],
-  exports: [InvitationsService], // 导出服务，以便Auth模块可以使用
+    controllers: [InvitationsController],
+    providers: [InvitationsService],
+    exports: [InvitationsService], // 导出服务，以便Auth模块可以使用
 })
 export class InvitationsModule {}

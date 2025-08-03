@@ -1,9 +1,9 @@
 import {
-  Injectable,
-  UnauthorizedException,
-  ConflictException,
-  NotFoundException,
-  NotImplementedException,
+    Injectable,
+    UnauthorizedException,
+    ConflictException,
+    NotFoundException,
+    NotImplementedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,164 +14,140 @@ import { JwtPayload } from './interfaces/jwt-payload.interface';
 
 @Injectable()
 export class AuthService {
-  constructor(
-    private prisma: PrismaService,
-    private jwtService: JwtService,
-  ) {}
+    constructor(
+        private prisma: PrismaService,
+        private jwtService: JwtService,
+    ) {}
 
-  private generateJwtToken(
-    userId: string,
-    tenantId: string,
-    roleInTenant: Role,
-    globalRole?: Role,
-  ): { accessToken: string } {
-    const payload: JwtPayload = {
-      sub: userId,
-      tenantId,
-      role: roleInTenant,
-      globalRole,
-    };
-    return {
-      accessToken: this.jwtService.sign(payload),
-    };
-  }
-
-  async register(registerDto: RegisterDto): Promise<{ accessToken: string }> {
-    const { phone, password, tenantName } = registerDto;
-
-    const existingUser = await this.prisma.user.findUnique({
-      where: { phone },
-    });
-    if (existingUser) {
-      throw new ConflictException('该手机号已被注册');
+    private generateJwtToken(
+        userId: string,
+        tenantId: string,
+        roleInTenant: Role,
+        globalRole?: Role,
+    ): { accessToken: string } {
+        const payload: JwtPayload = {
+            sub: userId,
+            tenantId,
+            role: roleInTenant,
+            globalRole,
+        };
+        return {
+            accessToken: this.jwtService.sign(payload),
+        };
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    async register(registerDto: RegisterDto): Promise<{ accessToken: string }> {
+        const { phone, password, tenantName } = registerDto;
 
-    const { user, tenantUser } = await this.prisma.$transaction(async (tx) => {
-      const newUser = await tx.user.create({
-        data: {
-          phone,
-          password: hashedPassword,
-        },
-      });
+        const existingUser = await this.prisma.user.findUnique({
+            where: { phone },
+        });
+        if (existingUser) {
+            throw new ConflictException('该手机号已被注册');
+        }
 
-      const newTenant = await tx.tenant.create({
-        data: {
-          name: tenantName,
-        },
-      });
+        const hashedPassword = await bcrypt.hash(password, 10);
 
-      const newTenantUser = await tx.tenantUser.create({
-        data: {
-          userId: newUser.id,
-          tenantId: newTenant.id,
-          role: Role.OWNER,
-          status: 'ACTIVE',
-        },
-      });
+        const { user, tenantUser } = await this.prisma.$transaction(async (tx) => {
+            const newUser = await tx.user.create({
+                data: {
+                    phone,
+                    password: hashedPassword,
+                },
+            });
 
-      return { user: newUser, tenantUser: newTenantUser };
-    });
+            const newTenant = await tx.tenant.create({
+                data: {
+                    name: tenantName,
+                },
+            });
 
-    return this.generateJwtToken(
-      user.id,
-      tenantUser.tenantId,
-      tenantUser.role,
-      user.role,
-    );
-  }
+            const newTenantUser = await tx.tenantUser.create({
+                data: {
+                    userId: newUser.id,
+                    tenantId: newTenant.id,
+                    role: Role.OWNER,
+                    status: 'ACTIVE',
+                },
+            });
 
-  async login(loginDto: AuthDto): Promise<{ accessToken: string }> {
-    const user = await this.prisma.user.findUnique({
-      where: { phone: loginDto.phone },
-      include: {
-        tenants: {
-          orderBy: { tenant: { createdAt: 'asc' } },
-        },
-      },
-    });
+            return { user: newUser, tenantUser: newTenantUser };
+        });
 
-    if (
-      !user ||
-      !user.password ||
-      !(await bcrypt.compare(loginDto.password, user.password))
-    ) {
-      throw new UnauthorizedException('手机号或密码错误');
+        return this.generateJwtToken(user.id, tenantUser.tenantId, tenantUser.role, user.role);
     }
 
-    if (user.role === Role.SUPER_ADMIN) {
-      return this.generateJwtToken(user.id, '', user.role, user.role);
+    async login(loginDto: AuthDto): Promise<{ accessToken: string }> {
+        const user = await this.prisma.user.findUnique({
+            where: { phone: loginDto.phone },
+            include: {
+                tenants: {
+                    orderBy: { tenant: { createdAt: 'asc' } },
+                },
+            },
+        });
+
+        if (!user || !user.password || !(await bcrypt.compare(loginDto.password, user.password))) {
+            throw new UnauthorizedException('手机号或密码错误');
+        }
+
+        if (user.role === Role.SUPER_ADMIN) {
+            return this.generateJwtToken(user.id, '', user.role, user.role);
+        }
+
+        const firstTenantUser = user.tenants[0];
+        if (!firstTenantUser) {
+            throw new UnauthorizedException('用户不属于任何店铺，无法登录。');
+        }
+
+        return this.generateJwtToken(user.id, firstTenantUser.tenantId, firstTenantUser.role, user.role);
     }
 
-    const firstTenantUser = user.tenants[0];
-    if (!firstTenantUser) {
-      throw new UnauthorizedException('用户不属于任何店铺，无法登录。');
+    loginByWechat(wechatLoginDto: WechatLoginDto): Promise<{ accessToken: string }> {
+        console.log(wechatLoginDto); // 临时使用一下参数避免lint错误
+        throw new NotImplementedException(
+            '微信登录功能需要数据库模型支持 wechatOpenId 字段，并需实现code换取openid的后端逻辑。',
+        );
     }
 
-    return this.generateJwtToken(
-      user.id,
-      firstTenantUser.tenantId,
-      firstTenantUser.role,
-      user.role,
-    );
-  }
+    async switchTenant(userId: string, tenantId: string): Promise<{ accessToken: string }> {
+        const tenantUser = await this.prisma.tenantUser.findUnique({
+            where: {
+                userId_tenantId: { userId, tenantId },
+            },
+            include: { user: true },
+        });
 
-  loginByWechat(
-    wechatLoginDto: WechatLoginDto,
-  ): Promise<{ accessToken: string }> {
-    console.log(wechatLoginDto); // 临时使用一下参数避免lint错误
-    throw new NotImplementedException(
-      '微信登录功能需要数据库模型支持 wechatOpenId 字段，并需实现code换取openid的后端逻辑。',
-    );
-  }
+        if (!tenantUser) {
+            throw new UnauthorizedException('您不属于该租户，无法切换。');
+        }
 
-  async switchTenant(
-    userId: string,
-    tenantId: string,
-  ): Promise<{ accessToken: string }> {
-    const tenantUser = await this.prisma.tenantUser.findUnique({
-      where: {
-        userId_tenantId: { userId, tenantId },
-      },
-      include: { user: true },
-    });
-
-    if (!tenantUser) {
-      throw new UnauthorizedException('您不属于该租户，无法切换。');
+        return this.generateJwtToken(userId, tenantId, tenantUser.role, tenantUser.user.role);
     }
 
-    return this.generateJwtToken(
-      userId,
-      tenantId,
-      tenantUser.role,
-      tenantUser.user.role,
-    );
-  }
+    async getProfile(userId: string) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                phone: true,
+                role: true,
+                status: true,
+                createdAt: true,
+                tenants: {
+                    where: { status: 'ACTIVE' },
+                    select: {
+                        tenant: { select: { id: true, name: true } },
+                        role: true,
+                    },
+                },
+            },
+        });
 
-  async getProfile(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        phone: true,
-        role: true,
-        status: true,
-        createdAt: true,
-        tenants: {
-          where: { status: 'ACTIVE' },
-          select: {
-            tenant: { select: { id: true, name: true } },
-            role: true,
-          },
-        },
-      },
-    });
+        if (!user) {
+            throw new NotFoundException('用户不存在');
+        }
 
-    if (!user) {
-      throw new NotFoundException('用户不存在');
+        return user;
     }
-
-    return user;
-  }
 }

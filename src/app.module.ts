@@ -14,20 +14,20 @@ import { StatsModule } from './stats/stats.module';
 import { ProductionTasksModule } from './production-tasks/production-tasks.module';
 
 @Module({
-  imports: [
-    PrismaModule,
-    AuthModule,
-    SuperAdminModule,
-    TenantsModule,
-    MembersModule,
-    InvitationsModule,
-    RecipesModule,
-    IngredientsModule,
-    CostingModule,
-    StatsModule,
-    ProductionTasksModule, // 新增：生产任务模块
-  ],
-  controllers: [AppController],
-  providers: [AppService],
+    imports: [
+        PrismaModule,
+        AuthModule,
+        SuperAdminModule,
+        TenantsModule,
+        MembersModule,
+        InvitationsModule,
+        RecipesModule,
+        IngredientsModule,
+        CostingModule,
+        StatsModule,
+        ProductionTasksModule, // 新增：生产任务模块
+    ],
+    controllers: [AppController],
+    providers: [AppService],
 })
 export class AppModule {}

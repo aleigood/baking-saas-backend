@@ -9,23 +9,17 @@ import { UserPayload } from 'src/auth/interfaces/user-payload.interface';
 @UseGuards(AuthGuard('jwt'))
 @Controller('costing')
 export class CostingController {
-  constructor(private readonly costingService: CostingService) {}
+    constructor(private readonly costingService: CostingService) {}
 
-  /**
-   * 计算指定产品的总成本
-   * @param user 认证用户
-   * @param productId 产品ID
-   * @returns 产品的成本分析
-   */
-  @Get('products/:productId')
-  async getProductCost(
-    @GetUser() user: UserPayload,
-    @Param('productId') productId: string,
-  ) {
-    // 调用服务方法并等待结果
-    return await this.costingService.calculateProductCost(
-      user.tenantId,
-      productId,
-    );
-  }
+    /**
+     * 计算指定产品的总成本
+     * @param user 认证用户
+     * @param productId 产品ID
+     * @returns 产品的成本分析
+     */
+    @Get('products/:productId')
+    async getProductCost(@GetUser() user: UserPayload, @Param('productId') productId: string) {
+        // 调用服务方法并等待结果
+        return await this.costingService.calculateProductCost(user.tenantId, productId);
+    }
 }

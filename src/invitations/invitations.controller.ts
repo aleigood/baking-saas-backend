@@ -7,31 +7,24 @@ import { IsNotEmpty, IsString } from 'class-validator';
 
 // 修复：创建一个新的DTO，使用 phone 代替 email
 export class CreateInvitationDto {
-  @IsString()
-  @IsNotEmpty()
-  phone: string;
+    @IsString()
+    @IsNotEmpty()
+    phone: string;
 }
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('invitations')
 export class InvitationsController {
-  constructor(private readonly invitationsService: InvitationsService) {}
+    constructor(private readonly invitationsService: InvitationsService) {}
 
-  @Post()
-  create(
-    @GetUser() user: UserPayload,
-    @Body() createInvitationDto: CreateInvitationDto,
-  ) {
-    // 修复：调用 service 时传递 phone
-    return this.invitationsService.create(
-      user.tenantId,
-      createInvitationDto.phone,
-      user,
-    );
-  }
+    @Post()
+    create(@GetUser() user: UserPayload, @Body() createInvitationDto: CreateInvitationDto) {
+        // 修复：调用 service 时传递 phone
+        return this.invitationsService.create(user.tenantId, createInvitationDto.phone, user);
+    }
 
-  @Post(':id/accept')
-  accept(@GetUser() user: UserPayload, @Param('id') id: string) {
-    return this.invitationsService.accept(id, user);
-  }
+    @Post(':id/accept')
+    accept(@GetUser() user: UserPayload, @Param('id') id: string) {
+        return this.invitationsService.accept(id, user);
+    }
 }

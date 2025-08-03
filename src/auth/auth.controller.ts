@@ -7,35 +7,32 @@ import { AuthGuard } from '@nestjs/passport';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+    constructor(private authService: AuthService) {}
 
-  @Post('register')
-  register(@Body() registerDto: RegisterDto): Promise<{ accessToken: string }> {
-    return this.authService.register(registerDto);
-  }
+    @Post('register')
+    register(@Body() registerDto: RegisterDto): Promise<{ accessToken: string }> {
+        return this.authService.register(registerDto);
+    }
 
-  @Post('login')
-  login(@Body() loginDto: AuthDto): Promise<{ accessToken: string }> {
-    return this.authService.login(loginDto);
-  }
+    @Post('login')
+    login(@Body() loginDto: AuthDto): Promise<{ accessToken: string }> {
+        return this.authService.login(loginDto);
+    }
 
-  @Post('wechat-login')
-  loginByWechat(@Body() wechatLoginDto: WechatLoginDto) {
-    return this.authService.loginByWechat(wechatLoginDto);
-  }
+    @Post('wechat-login')
+    loginByWechat(@Body() wechatLoginDto: WechatLoginDto) {
+        return this.authService.loginByWechat(wechatLoginDto);
+    }
 
-  @UseGuards(AuthGuard('jwt'))
-  @Post('switch-tenant/:tenantId')
-  switchTenant(
-    @GetUser() user: UserPayload,
-    @Param('tenantId') tenantId: string,
-  ): Promise<{ accessToken: string }> {
-    return this.authService.switchTenant(user.sub, tenantId);
-  }
+    @UseGuards(AuthGuard('jwt'))
+    @Post('switch-tenant/:tenantId')
+    switchTenant(@GetUser() user: UserPayload, @Param('tenantId') tenantId: string): Promise<{ accessToken: string }> {
+        return this.authService.switchTenant(user.sub, tenantId);
+    }
 
-  @UseGuards(AuthGuard('jwt'))
-  @Get('profile')
-  getProfile(@GetUser() user: UserPayload) {
-    return this.authService.getProfile(user.sub);
-  }
+    @UseGuards(AuthGuard('jwt'))
+    @Get('profile')
+    getProfile(@GetUser() user: UserPayload) {
+        return this.authService.getProfile(user.sub);
+    }
 }

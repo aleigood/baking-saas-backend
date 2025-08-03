@@ -8,16 +8,16 @@ import { TenantDataDto } from './dto/tenant-data.dto';
 @UseGuards(AuthGuard('jwt'))
 @Controller('tenants')
 export class TenantsController {
-  constructor(private readonly tenantsService: TenantsService) {}
+    constructor(private readonly tenantsService: TenantsService) {}
 
-  @Get()
-  findAllForUser(@GetUser() user: UserPayload) {
-    // 修复：用户ID在 'sub' 字段中
-    return this.tenantsService.findAllForUser(user.sub);
-  }
+    @Get()
+    findAllForUser(@GetUser() user: UserPayload) {
+        // 修复：用户ID在 'sub' 字段中
+        return this.tenantsService.findAllForUser(user.sub);
+    }
 
-  @Post()
-  create(@GetUser() user: UserPayload, @Body() tenantData: TenantDataDto) {
-    return this.tenantsService.create(user.sub, tenantData);
-  }
+    @Post()
+    create(@GetUser() user: UserPayload, @Body() tenantData: TenantDataDto) {
+        return this.tenantsService.create(user.sub, tenantData);
+    }
 }

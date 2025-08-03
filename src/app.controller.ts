@@ -6,17 +6,17 @@ import { UserPayload } from './auth/interfaces/user-payload.interface';
 
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+    constructor(private readonly appService: AppService) {}
 
-  @Get()
-  getHello(): string {
-    return this.appService.getHello();
-  }
+    @Get()
+    getHello(): string {
+        return this.appService.getHello();
+    }
 
-  @UseGuards(AuthGuard('jwt'))
-  @Get('profile')
-  getProfile(@GetUser() user: UserPayload) {
-    // 修复：使用 @GetUser() 装饰器以保持代码风格一致
-    return this.appService.getProfile(user);
-  }
+    @UseGuards(AuthGuard('jwt'))
+    @Get('profile')
+    getProfile(@GetUser() user: UserPayload) {
+        // 修复：使用 @GetUser() 装饰器以保持代码风格一致
+        return this.appService.getProfile(user);
+    }
 }

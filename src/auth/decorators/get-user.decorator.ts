@@ -8,13 +8,9 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 import { UserPayload } from '../interfaces/user-payload.interface';
 import { Request } from 'express'; // 导入Express的Request类型
 
-export const GetUser = createParamDecorator(
-  (data: unknown, ctx: ExecutionContext): UserPayload => {
+export const GetUser = createParamDecorator((data: unknown, ctx: ExecutionContext): UserPayload => {
     // 为 getRequest() 返回的对象提供了明确的类型。
     // 我们告诉TypeScript，这个request对象上会有一个user属性，且其类型为UserPayload。
-    const request: Request & { user: UserPayload } = ctx
-      .switchToHttp()
-      .getRequest();
+    const request: Request & { user: UserPayload } = ctx.switchToHttp().getRequest();
     return request.user;
-  },
-);
+});

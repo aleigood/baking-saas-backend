@@ -3,7 +3,7 @@
  * 文件描述: [新增] 定义仪表盘统计数据的结构。
  */
 export class DashboardStatsDto {
-  totalTenants: number;
-  activeTenants: number;
-  totalUsers: number;
+    totalTenants: number;
+    activeTenants: number;
+    totalUsers: number;
 }

@@ -3,7 +3,7 @@ import { TenantsController } from './tenants.controller';
 import { TenantsService } from './tenants.service';
 
 @Module({
-  controllers: [TenantsController],
-  providers: [TenantsService],
+    controllers: [TenantsController],
+    providers: [TenantsService],
 })
 export class TenantsModule {}

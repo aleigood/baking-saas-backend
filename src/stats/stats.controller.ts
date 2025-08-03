@@ -8,14 +8,11 @@ import { StatsDto } from './dto/stats.dto';
 @UseGuards(AuthGuard('jwt'))
 @Controller('stats')
 export class StatsController {
-  constructor(private readonly statsService: StatsService) {}
+    constructor(private readonly statsService: StatsService) {}
 
-  @Get('production')
-  getProductionStats(
-    @GetUser() user: UserPayload,
-    @Query() statsDto: StatsDto,
-  ) {
-    // 修复：调用新的统计方法
-    return this.statsService.getProductionStats(user.tenantId, statsDto);
-  }
+    @Get('production')
+    getProductionStats(@GetUser() user: UserPayload, @Query() statsDto: StatsDto) {
+        // 修复：调用新的统计方法
+        return this.statsService.getProductionStats(user.tenantId, statsDto);
+    }
 }

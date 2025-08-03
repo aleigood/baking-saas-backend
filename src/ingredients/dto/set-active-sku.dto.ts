@@ -6,7 +6,7 @@ import { IsNotEmpty, IsString } from 'class-validator';
  * 原来的 SetDefaultSkuDto 已被此类替换。
  */
 export class SetActiveSkuDto {
-  @IsString()
-  @IsNotEmpty()
-  skuId: string;
+    @IsString()
+    @IsNotEmpty()
+    skuId: string;
 }

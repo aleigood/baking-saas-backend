@@ -9,8 +9,8 @@ import { AuthModule } from '../auth/auth.module'; // 导入AuthModule以使用�
 import { RecipesModule } from '../recipes/recipes.module'; // [新增] 导入 RecipesModule
 
 @Module({
-  imports: [AuthModule, RecipesModule], // [修改] 添加 RecipesModule
-  controllers: [SuperAdminController],
-  providers: [SuperAdminService],
+    imports: [AuthModule, RecipesModule], // [修改] 添加 RecipesModule
+    controllers: [SuperAdminController],
+    providers: [SuperAdminService],
 })
 export class SuperAdminModule {}

@@ -4,8 +4,8 @@ import { ProductionTasksController } from './production-tasks.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
-  imports: [PrismaModule],
-  controllers: [ProductionTasksController],
-  providers: [ProductionTasksService],
+    imports: [PrismaModule],
+    controllers: [ProductionTasksController],
+    providers: [ProductionTasksService],
 })
 export class ProductionTasksModule {}
