@@ -1,12 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductionTaskDto } from './dto/create-production-task.dto';
 import { UpdateProductionTaskDto } from './dto/update-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
 // [FIX] 导入 Prisma 类型以增强类型安全
 import { Prisma, ProductionTaskStatus } from '@prisma/client';
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
-import { CostingService } from 'src/costing/costing.service';
+import { CostingService } from '../costing/costing.service';
 
 @Injectable()
 export class ProductionTasksService {
