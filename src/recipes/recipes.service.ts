@@ -46,6 +46,40 @@ export class RecipesService {
                 });
             }
 
+            // 导入配方时自动创建原料
+            // 步骤 1.1: 收集所有在配方中用到的原料名称
+            const allIngredientNames = new Set<string>();
+            ingredients.forEach((ing) => allIngredientNames.add(ing.name));
+            if (products) {
+                products.forEach((p) => {
+                    p.mixIn?.forEach((i) => allIngredientNames.add(i.name));
+                    p.fillings?.forEach((i) => allIngredientNames.add(i.name));
+                    p.toppings?.forEach((i) => allIngredientNames.add(i.name));
+                });
+            }
+
+            // 步骤 1.2: 遍历所有原料名称，如果不存在则创建
+            for (const ingredientName of allIngredientNames) {
+                // [修复] 使用先查找后创建的方式替代 upsert，以解决复合唯一键中 null 值的类型错误
+                const existingIngredient = await tx.ingredient.findFirst({
+                    where: {
+                        tenantId,
+                        name: ingredientName,
+                        deletedAt: null,
+                    },
+                });
+
+                if (!existingIngredient) {
+                    await tx.ingredient.create({
+                        data: {
+                            tenantId,
+                            name: ingredientName,
+                            type: 'STANDARD', // 默认为标准原料，后续可由用户修改
+                        },
+                    });
+                }
+            }
+
             // 步骤 2: 确定新版本号
             const nextVersionNumber =
                 recipeFamily.versions.length > 0 ? Math.max(...recipeFamily.versions.map((v) => v.version)) + 1 : 1;
@@ -205,6 +239,14 @@ export class RecipesService {
                     where: { isActive: true },
                     include: {
                         products: true,
+                        // 包含面团信息，并统计每个面团的原料数量
+                        doughs: {
+                            include: {
+                                _count: {
+                                    select: { ingredients: true },
+                                },
+                            },
+                        },
                     },
                 },
             },
