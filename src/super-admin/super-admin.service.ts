@@ -3,14 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { Prisma, Role } from '@prisma/client'; // [修改] 导入 TenantStatus
+import { Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { QueryDto } from './dto/query.dto';
 import { CreateRecipeDto } from '../recipes/dto/create-recipe.dto';
 import { RecipesService } from '../recipes/recipes.service';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
-import { UpdateTenantStatusDto } from './dto/update-tenant-status.dto'; // [新增] 导入新的 DTO
+import { UpdateTenantStatusDto } from './dto/update-tenant-status.dto';
 
 @Injectable()
 export class SuperAdminService {
@@ -108,21 +108,30 @@ export class SuperAdminService {
         return this.prisma.tenant.update({ where: { id }, data: dto });
     }
 
-    // 实现软删除
     async updateTenantStatus(id: string, dto: UpdateTenantStatusDto) {
         return this.prisma.tenant.update({
             where: { id },
             data: { status: dto.status },
         });
     }
+
+    // 永久删除店铺
+    async deleteTenant(id: string) {
+        // 使用事务确保数据一致性
+        return this.prisma.$transaction(async (tx) => {
+            // 在删除店铺前，必须先删除所有与之关联的成员关系
+            await tx.tenantUser.deleteMany({ where: { tenantId: id } });
+            // 然后再删除店铺本身
+            return tx.tenant.delete({ where: { id } });
+        });
+    }
+
     // --- User Management ---
     async findAllUsers(queryDto: QueryDto) {
         const { search, page = '1', limit = '10', sortBy = 'createdAt', order = 'desc' } = queryDto;
         const pageNum = parseInt(page, 10);
         const limitNum = parseInt(limit, 10);
-
-        const where: Prisma.UserWhereInput = search ? { phone: { contains: search } } : {};
-
+        const where: Prisma.UserWhereInput = search ? { phone: { contains: search, mode: 'insensitive' } } : {};
         const users = await this.prisma.user.findMany({
             where,
             include: {
@@ -136,7 +145,6 @@ export class SuperAdminService {
             skip: (pageNum - 1) * limitNum,
             take: limitNum,
         });
-
         const total = await this.prisma.user.count({ where });
 
         return {
@@ -182,14 +190,12 @@ export class SuperAdminService {
         if (dto.phone) data.phone = dto.phone;
         if (dto.role) data.role = dto.role;
         if (dto.status) data.status = dto.status;
-
         if (dto.password) {
             data.password = await bcrypt.hash(dto.password, 10);
         }
         return this.prisma.user.update({ where: { id }, data });
     }
 
-    // [新增] 单独更新用户状态的方法
     async updateUserStatus(id: string, dto: UpdateUserStatusDto) {
         return this.prisma.user.update({
             where: { id },
@@ -198,7 +204,6 @@ export class SuperAdminService {
     }
 
     async deleteUser(id: string) {
-        // [修改] 使用事务删除关联的 TenantUser 记录，然后再删除 User
         return this.prisma.$transaction(async (tx) => {
             await tx.tenantUser.deleteMany({ where: { userId: id } });
             return tx.user.delete({ where: { id } });

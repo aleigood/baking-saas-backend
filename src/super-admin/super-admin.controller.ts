@@ -37,10 +37,14 @@ export class SuperAdminController {
         return this.superAdminService.updateTenant(id, updateTenantDto);
     }
 
-    // [修改] 将原来的 DELETE /tenants/:id 路由替换为 PATCH /tenants/:id/status
     @Patch('tenants/:id/status')
     updateTenantStatus(@Param('id', ParseUUIDPipe) id: string, @Body() updateTenantStatusDto: UpdateTenantStatusDto) {
         return this.superAdminService.updateTenantStatus(id, updateTenantStatusDto);
+    }
+
+    @Delete('tenants/:id')
+    deleteTenant(@Param('id', ParseUUIDPipe) id: string) {
+        return this.superAdminService.deleteTenant(id);
     }
 
     // --- User endpoints ---
@@ -59,7 +63,6 @@ export class SuperAdminController {
         return this.superAdminService.updateUser(id, updateUserDto);
     }
 
-    // [新增] 更新用户状态的端点
     @Patch('users/:id/status')
     updateUserStatus(@Param('id', ParseUUIDPipe) id: string, @Body() updateUserStatusDto: UpdateUserStatusDto) {
         return this.superAdminService.updateUserStatus(id, updateUserStatusDto);
