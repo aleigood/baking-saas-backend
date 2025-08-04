@@ -59,6 +59,14 @@ export class SuperAdminService {
                     where: { role: 'OWNER' },
                     include: { user: true },
                 },
+                // 统计每个店铺的配方数量
+                _count: {
+                    select: {
+                        recipeFamilies: {
+                            where: { deletedAt: null }, // 只统计未被软删除的配方
+                        },
+                    },
+                },
             },
             orderBy,
             skip: (pageNum - 1) * limitNum,
@@ -67,12 +75,14 @@ export class SuperAdminService {
 
         const total = await this.prisma.tenant.count({ where });
 
+        // 在返回的数据中加入配方数量
         const data = tenants.map((tenant) => {
             const ownerInfo = tenant.members[0]?.user;
             return {
                 id: tenant.id,
                 name: tenant.name,
                 status: tenant.status,
+                recipeCount: tenant._count.recipeFamilies,
                 createdAt: tenant.createdAt,
                 updatedAt: tenant.updatedAt,
                 ownerName: ownerInfo?.phone || 'N/A',
@@ -137,6 +147,7 @@ export class SuperAdminService {
         const pageNum = parseInt(page, 10);
         const limitNum = parseInt(limit, 10);
         const where: Prisma.UserWhereInput = search ? { phone: { contains: search, mode: 'insensitive' } } : {};
+
         const orderBy = { [sortBy]: order };
 
         const users = await this.prisma.user.findMany({
@@ -153,6 +164,7 @@ export class SuperAdminService {
             take: limitNum,
         });
         const total = await this.prisma.user.count({ where });
+
         const data = users.map((user) => ({
             id: user.id,
             phone: user.phone,
@@ -168,6 +180,7 @@ export class SuperAdminService {
                 },
             })),
         }));
+
         return {
             data,
             meta: {
