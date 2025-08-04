@@ -8,6 +8,8 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateRecipeDto } from '../recipes/dto/create-recipe.dto';
+import { UpdateTenantStatusDto } from './dto/update-tenant-status.dto';
+import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
 @Controller('super-admin')
@@ -19,7 +21,7 @@ export class SuperAdminController {
         return this.superAdminService.getDashboardStats();
     }
 
-    // Tenant endpoints
+    // --- Tenant endpoints ---
     @Get('tenants')
     findAllTenants(@Query() queryDto: QueryDto) {
         return this.superAdminService.findAllTenants(queryDto);
@@ -35,12 +37,13 @@ export class SuperAdminController {
         return this.superAdminService.updateTenant(id, updateTenantDto);
     }
 
-    @Delete('tenants/:id')
-    deleteTenant(@Param('id', ParseUUIDPipe) id: string) {
-        return this.superAdminService.deleteTenant(id);
+    // [修改] 将原来的 DELETE /tenants/:id 路由替换为 PATCH /tenants/:id/status
+    @Patch('tenants/:id/status')
+    updateTenantStatus(@Param('id', ParseUUIDPipe) id: string, @Body() updateTenantStatusDto: UpdateTenantStatusDto) {
+        return this.superAdminService.updateTenantStatus(id, updateTenantStatusDto);
     }
 
-    // User endpoints
+    // --- User endpoints ---
     @Get('users')
     findAllUsers(@Query() queryDto: QueryDto) {
         return this.superAdminService.findAllUsers(queryDto);
@@ -56,12 +59,18 @@ export class SuperAdminController {
         return this.superAdminService.updateUser(id, updateUserDto);
     }
 
+    // [新增] 更新用户状态的端点
+    @Patch('users/:id/status')
+    updateUserStatus(@Param('id', ParseUUIDPipe) id: string, @Body() updateUserStatusDto: UpdateUserStatusDto) {
+        return this.superAdminService.updateUserStatus(id, updateUserStatusDto);
+    }
+
     @Delete('users/:id')
     deleteUser(@Param('id', ParseUUIDPipe) id: string) {
         return this.superAdminService.deleteUser(id);
     }
 
-    // Recipe endpoints
+    // --- Recipe endpoints ---
     @Post('tenants/:tenantId/recipes')
     createRecipeForTenant(
         @Param('tenantId', ParseUUIDPipe) tenantId: string,
