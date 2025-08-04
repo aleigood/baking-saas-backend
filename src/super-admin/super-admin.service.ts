@@ -41,7 +41,16 @@ export class SuperAdminService {
         const pageNum = parseInt(page, 10);
         const limitNum = parseInt(limit, 10);
 
-        const where: Prisma.TenantWhereInput = search ? { name: { contains: search, mode: 'insensitive' } } : {};
+        const where: Prisma.TenantWhereInput = search
+            ? {
+                  OR: [
+                      { name: { contains: search, mode: 'insensitive' } },
+                      { members: { some: { role: 'OWNER', user: { phone: { contains: search } } } } },
+                  ],
+              }
+            : {};
+
+        const orderBy = { [sortBy]: order };
 
         const tenants = await this.prisma.tenant.findMany({
             where,
@@ -51,7 +60,7 @@ export class SuperAdminService {
                     include: { user: true },
                 },
             },
-            orderBy: { [sortBy]: order },
+            orderBy,
             skip: (pageNum - 1) * limitNum,
             take: limitNum,
         });
@@ -115,13 +124,9 @@ export class SuperAdminService {
         });
     }
 
-    // 永久删除店铺
     async deleteTenant(id: string) {
-        // 使用事务确保数据一致性
         return this.prisma.$transaction(async (tx) => {
-            // 在删除店铺前，必须先删除所有与之关联的成员关系
             await tx.tenantUser.deleteMany({ where: { tenantId: id } });
-            // 然后再删除店铺本身
             return tx.tenant.delete({ where: { id } });
         });
     }
@@ -132,6 +137,8 @@ export class SuperAdminService {
         const pageNum = parseInt(page, 10);
         const limitNum = parseInt(limit, 10);
         const where: Prisma.UserWhereInput = search ? { phone: { contains: search, mode: 'insensitive' } } : {};
+        const orderBy = { [sortBy]: order };
+
         const users = await this.prisma.user.findMany({
             where,
             include: {
@@ -141,30 +148,28 @@ export class SuperAdminService {
                     },
                 },
             },
-            orderBy: { [sortBy]: order },
+            orderBy,
             skip: (pageNum - 1) * limitNum,
             take: limitNum,
         });
         const total = await this.prisma.user.count({ where });
-
-        return {
-            // 修复：显式构建返回对象，只包含安全的字段
-            data: users.map((user) => ({
-                id: user.id,
-                phone: user.phone,
-                role: user.role,
-                status: user.status,
-                createdAt: user.createdAt,
-                updatedAt: user.updatedAt,
-                // 必须包含处理过的 tenants 数组
-                tenants: user.tenants.map((tenantUser) => ({
-                    role: tenantUser.role,
-                    tenant: {
-                        id: tenantUser.tenant.id,
-                        name: tenantUser.tenant.name,
-                    },
-                })),
+        const data = users.map((user) => ({
+            id: user.id,
+            phone: user.phone,
+            role: user.role,
+            status: user.status,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+            tenants: user.tenants.map((tenantUser) => ({
+                role: tenantUser.role,
+                tenant: {
+                    id: tenantUser.tenant.id,
+                    name: tenantUser.tenant.name,
+                },
             })),
+        }));
+        return {
+            data,
             meta: {
                 total,
                 page: pageNum,
