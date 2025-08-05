@@ -1,4 +1,4 @@
-import { IsDateString, IsInt, IsNotEmpty, IsNumber, IsString } from 'class-validator';
+import { IsDateString, IsInt, IsNotEmpty, IsNumber } from 'class-validator';
 
 export class CreateProcurementDto {
     @IsInt()
@@ -9,7 +9,6 @@ export class CreateProcurementDto {
     @IsNotEmpty()
     pricePerPackage: number;
 
-    // 修复：添加 purchaseDate 字段
     @IsDateString()
     @IsNotEmpty()
     purchaseDate: string;
