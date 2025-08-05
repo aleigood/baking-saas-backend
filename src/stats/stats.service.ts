@@ -9,6 +9,8 @@ export class StatsService {
     async getProductionStats(tenantId: string, dto: StatsDto) {
         const { startDate, endDate } = dto;
 
+        // [修改] 查询已完成的任务，并包含其所有的任务项(items)和产品信息
+        // (Modified: Query for completed tasks, including all their items and product information)
         const completedTasks = await this.prisma.productionTask.findMany({
             where: {
                 tenantId,
@@ -21,21 +23,33 @@ export class StatsService {
                 },
             },
             include: {
+                items: {
+                    include: {
+                        product: { select: { id: true, name: true } },
+                    },
+                },
                 log: true,
-                product: { select: { name: true } },
             },
         });
 
+        // [修改] 重新构建产品统计逻辑以适应新的数据结构
+        // (Modified: Rebuild product statistics logic for the new data structure)
         const productStatsMap = new Map<string, { name: string; count: number }>();
         for (const task of completedTasks) {
-            if (task.productId && task.log) {
-                const existing = productStatsMap.get(task.productId);
-                const name = task.product?.name || '未知产品';
-                const count = (existing?.count || 0) + task.log.actualQuantity;
-                productStatsMap.set(task.productId, { name, count });
+            for (const item of task.items) {
+                if (item.productId) {
+                    const existing = productStatsMap.get(item.productId);
+                    const name = item.product?.name || '未知产品';
+                    // 数量现在从每个任务项中获取
+                    // (Quantity is now retrieved from each task item)
+                    const count = (existing?.count || 0) + item.quantity;
+                    productStatsMap.set(item.productId, { name, count });
+                }
             }
         }
 
+        // [修改] 消耗统计逻辑保持不变，因为它依赖于 taskId，这个关系没有改变
+        // (Modified: Consumption statistics logic remains the same as it depends on taskId, which has not changed)
         const consumptionStats = await this.prisma.ingredientConsumptionLog.groupBy({
             by: ['ingredientId'],
             _sum: {

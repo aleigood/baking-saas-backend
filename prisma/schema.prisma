@@ -224,9 +224,9 @@ model Product {
   baseDoughWeight Float // 基础面团克重 (不含mixIn)
   procedure       String[] // 制作流程要点 (如烘烤参数)
 
-  recipeVersion   RecipeVersion       @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  recipeVersion   RecipeVersion        @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
   ingredients     ProductIngredient[] // 产品的附加原料 (搅拌、馅料、装饰)
-  productionTasks ProductionTask[] // 关联到生产此产品的任务
+  productionTasks ProductionTaskItem[] // [修改] 关联到生产任务清单项
 
   @@index([recipeVersionId])
 }
@@ -316,14 +316,9 @@ model ProcurementRecord {
 // ================================================================= //
 
 // 生产任务模型
-// 任务直接关联到最终产品，使计划更精确
 model ProductionTask {
   id          String               @id @default(uuid())
   tenantId    String
-  // 直接关联目标产品
-  productId   String
-  quantity    Float // 计划数量
-  unit        String // 单位（如“件”或“克”）
   status      ProductionTaskStatus @default(PENDING)
   plannedDate DateTime
   notes       String?
@@ -331,11 +326,25 @@ model ProductionTask {
   updatedAt   DateTime             @updatedAt
   deletedAt   DateTime?
 
-  tenant  Tenant         @relation(fields: [tenantId], references: [id])
-  product Product        @relation(fields: [productId], references: [id])
-  log     ProductionLog? // 关联到该任务的生产日志
+  tenant Tenant               @relation(fields: [tenantId], references: [id])
+  log    ProductionLog? // 关联到该任务的生产日志
+  // [新增] 关联到任务清单
+  items  ProductionTaskItem[]
 
   @@index([tenantId])
+}
+
+// [新增] 生产任务清单项 (中间表)
+model ProductionTaskItem {
+  id        String @id @default(uuid())
+  taskId    String
+  productId String
+  quantity  Int // [修改] 计划数量，改为整数类型
+
+  task    ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  product Product        @relation(fields: [productId], references: [id])
+
+  @@index([taskId])
   @@index([productId])
 }
 
@@ -346,11 +355,12 @@ model ProductionTask {
 // 生产日志模型
 // 记录一个生产任务的实际产出结果
 model ProductionLog {
-  id             String   @id @default(uuid())
-  taskId         String   @unique // 每个任务对应唯一一个日志
-  actualQuantity Float // 实际产出数量
-  completedAt    DateTime @default(now())
-  notes          String?
+  id          String   @id @default(uuid())
+  taskId      String   @unique // 每个任务对应唯一一个日志
+  // [移除] actualQuantity 字段，因为任务完成即代表计划完成
+  // actualQuantity Float 
+  completedAt DateTime @default(now())
+  notes       String?
 
   task            ProductionTask             @relation(fields: [taskId], references: [id])
   consumptionLogs IngredientConsumptionLog[] // 关联到本次生产的所有原料消耗记录

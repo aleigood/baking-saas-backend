@@ -1,14 +1,17 @@
-import { IsNumber, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 
 /**
- * 完成生产任务的数据传输对象
+ * [修改] 完成生产任务的数据传输对象
+ * (Modified: Data Transfer Object for completing a production task)
  */
 export class CompleteProductionTaskDto {
-    @IsNumber()
-    @IsNotEmpty()
-    actualQuantity: number; // 实际产出的数量
+    // [移除] actualQuantity 字段已被删除，因为业务逻辑是任务完成即代表计划完成
+    // (Removed: actualQuantity field is deleted as task completion implies plan completion)
+    // @IsNumber()
+    // @IsNotEmpty()
+    // actualQuantity: number;
 
     @IsString()
     @IsOptional()
-    notes?: string; // 生产日志的备注
+    notes?: string; // 生产日志的备注 (Notes for the production log)
 }

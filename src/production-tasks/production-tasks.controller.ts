@@ -25,6 +25,8 @@ import { QueryProductionTaskDto } from './dto/query-production-task.dto';
 export class ProductionTasksController {
     constructor(private readonly productionTasksService: ProductionTasksService) {}
 
+    // [修改] create 方法现在使用新的 DTO
+    // (Modified: create method now uses the new DTO)
     @Post()
     create(@GetUser() user: UserPayload, @Body() createProductionTaskDto: CreateProductionTaskDto) {
         return this.productionTasksService.create(user.tenantId, createProductionTaskDto);
@@ -60,6 +62,7 @@ export class ProductionTasksController {
 
     /**
      * 新增：完成一个生产任务
+     * (New: Complete a production task)
      */
     @Post(':id/complete')
     complete(
