@@ -221,9 +221,7 @@ export class RecipesService {
                         products: true,
                         doughs: {
                             include: {
-                                _count: {
-                                    select: { ingredients: true },
-                                },
+                                ingredients: true, // [新增] 在列表页也包含原料信息
                             },
                         },
                     },
@@ -233,7 +231,7 @@ export class RecipesService {
     }
 
     /**
-     * [核心修改] findOne 现在返回配方家族及其所有版本
+     * 现在返回配方家族及其所有版本，并深度包含所引用的面种配方
      */
     async findOne(familyId: string) {
         const family = await this.prisma.recipeFamily.findFirst({
@@ -244,7 +242,29 @@ export class RecipesService {
             include: {
                 versions: {
                     include: {
-                        doughs: { include: { ingredients: true } },
+                        doughs: {
+                            include: {
+                                ingredients: {
+                                    // 深度查询，如果原料是面种，则把它也查出来
+                                    include: {
+                                        linkedPreDough: {
+                                            include: {
+                                                versions: {
+                                                    where: { isActive: true },
+                                                    include: {
+                                                        doughs: {
+                                                            include: {
+                                                                ingredients: true,
+                                                            },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                         products: { include: { ingredients: true } },
                     },
                     orderBy: { version: 'desc' },
