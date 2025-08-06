@@ -23,10 +23,28 @@ export class IngredientsService {
 
     // 查询租户下的所有原料
     async findAll(tenantId: string) {
+        // [核心修改] 过滤掉作为半成品的原料（例如：烫种、卡仕达酱等）
+        // 1. 首先找出所有类型为 PRE_DOUGH 或 EXTRA 的配方名称
+        const intermediateRecipes = await this.prisma.recipeFamily.findMany({
+            where: {
+                tenantId,
+                type: { in: ['PRE_DOUGH', 'EXTRA'] },
+                deletedAt: null,
+            },
+            select: {
+                name: true,
+            },
+        });
+        const intermediateRecipeNames = intermediateRecipes.map((r) => r.name);
+
+        // 2. 查询原料，并排除掉名称在上面列表中的原料
         return this.prisma.ingredient.findMany({
             where: {
                 tenantId,
                 deletedAt: null,
+                name: {
+                    notIn: intermediateRecipeNames, // 过滤条件
+                },
             },
             include: {
                 // V2.1 优化: 查询时总是包含激活的SKU信息
