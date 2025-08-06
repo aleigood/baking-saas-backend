@@ -138,6 +138,60 @@ export class CostingService {
     }
 
     /**
+     * [新增] 获取单个原料成本的历史变化记录
+     * @param tenantId 租户ID
+     * @param ingredientId 原料ID
+     * @returns 一个包含每次成本变化点的数组 (单位: 元/kg)
+     */
+    async getIngredientCostHistory(tenantId: string, ingredientId: string) {
+        // 1. 查找原料，确保它属于该租户
+        const ingredient = await this.prisma.ingredient.findFirst({
+            where: { id: ingredientId, tenantId },
+            include: { skus: true }, // 包含其下所有的SKU
+        });
+
+        if (!ingredient) {
+            throw new NotFoundException('原料不存在');
+        }
+
+        const skuIds = ingredient.skus.map((sku) => sku.id);
+        if (skuIds.length === 0) {
+            return []; // 如果没有任何SKU，则没有价格历史
+        }
+
+        // 2. 获取该原料所有SKU的历史采购记录，并按日期排序
+        const procurementRecords = await this.prisma.procurementRecord.findMany({
+            where: { skuId: { in: skuIds } },
+            include: { sku: true }, // 包含SKU信息以获取规格重量
+            orderBy: { purchaseDate: 'asc' },
+        });
+
+        if (procurementRecords.length === 0) {
+            return []; // 如果没有采购记录，则没有价格历史
+        }
+
+        // 3. 将采购记录映射为成本历史点 (成本单位: 元/kg)
+        const costHistory = procurementRecords.map((record) => {
+            const pricePerPackage = new Decimal(record.pricePerPackage);
+            const specWeightInGrams = new Decimal(record.sku.specWeightInGrams);
+
+            // 防止除以零的错误
+            if (specWeightInGrams.isZero()) {
+                return { cost: 0 };
+            }
+
+            // 计算每公斤的价格
+            const costPerKg = pricePerPackage.div(specWeightInGrams).mul(1000);
+
+            return {
+                cost: costPerKg.toDP(2).toNumber(), // 返回每公斤成本，保留两位小数
+            };
+        });
+
+        return costHistory;
+    }
+
+    /**
      * [核心重构] 计算单个产品的当前成本，现在调用新的辅助函数
      */
     async calculateProductCost(tenantId: string, productId: string) {
@@ -152,8 +206,9 @@ export class CostingService {
 
         for (const [name, weight] of flatIngredients.entries()) {
             const ingredientInfo = ingredientsMap.get(name);
+            // [编译错误修复] 从 ingredientInfo (原料) 获取价格，从 activeSku 获取规格重量
             if (ingredientInfo?.activeSku) {
-                const pricePerGram = new Decimal(ingredientInfo.activeSku.currentPricePerPackage).div(
+                const pricePerGram = new Decimal(ingredientInfo.currentPricePerPackage).div(
                     ingredientInfo.activeSku.specWeightInGrams,
                 );
                 const cost = pricePerGram.mul(weight);

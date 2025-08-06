@@ -5,6 +5,9 @@ CREATE TYPE "Role" AS ENUM ('OWNER', 'ADMIN', 'MEMBER', 'SUPER_ADMIN');
 CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'PENDING');
 
 -- CreateEnum
+CREATE TYPE "TenantStatus" AS ENUM ('ACTIVE', 'INACTIVE');
+
+-- CreateEnum
 CREATE TYPE "InvitationStatus" AS ENUM ('PENDING', 'ACCEPTED', 'DECLINED', 'EXPIRED');
 
 -- CreateEnum
@@ -26,6 +29,7 @@ CREATE TYPE "SkuStatus" AS ENUM ('ACTIVE', 'INACTIVE');
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
+    "name" TEXT,
     "password" TEXT NOT NULL,
     "role" "Role" NOT NULL DEFAULT 'MEMBER',
     "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
@@ -39,6 +43,7 @@ CREATE TABLE "User" (
 CREATE TABLE "Tenant" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "status" "TenantStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -151,6 +156,8 @@ CREATE TABLE "Ingredient" (
     "name" TEXT NOT NULL,
     "type" "IngredientType" NOT NULL DEFAULT 'STANDARD',
     "activeSkuId" TEXT,
+    "currentStockInGrams" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "currentPricePerPackage" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
@@ -166,8 +173,8 @@ CREATE TABLE "IngredientSKU" (
     "specWeightInGrams" DOUBLE PRECISION NOT NULL,
     "ingredientId" TEXT NOT NULL,
     "status" "SkuStatus" NOT NULL DEFAULT 'INACTIVE',
-    "currentStockInGrams" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "currentPricePerPackage" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "IngredientSKU_pkey" PRIMARY KEY ("id")
 );
@@ -187,9 +194,6 @@ CREATE TABLE "ProcurementRecord" (
 CREATE TABLE "ProductionTask" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
-    "productId" TEXT NOT NULL,
-    "quantity" DOUBLE PRECISION NOT NULL,
-    "unit" TEXT NOT NULL,
     "status" "ProductionTaskStatus" NOT NULL DEFAULT 'PENDING',
     "plannedDate" TIMESTAMP(3) NOT NULL,
     "notes" TEXT,
@@ -201,10 +205,19 @@ CREATE TABLE "ProductionTask" (
 );
 
 -- CreateTable
+CREATE TABLE "ProductionTaskItem" (
+    "id" TEXT NOT NULL,
+    "taskId" TEXT NOT NULL,
+    "productId" TEXT NOT NULL,
+    "quantity" INTEGER NOT NULL,
+
+    CONSTRAINT "ProductionTaskItem_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "ProductionLog" (
     "id" TEXT NOT NULL,
     "taskId" TEXT NOT NULL,
-    "actualQuantity" DOUBLE PRECISION NOT NULL,
     "completedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "notes" TEXT,
 
@@ -265,7 +278,10 @@ CREATE UNIQUE INDEX "Ingredient_tenantId_name_deletedAt_key" ON "Ingredient"("te
 CREATE INDEX "ProductionTask_tenantId_idx" ON "ProductionTask"("tenantId");
 
 -- CreateIndex
-CREATE INDEX "ProductionTask_productId_idx" ON "ProductionTask"("productId");
+CREATE INDEX "ProductionTaskItem_taskId_idx" ON "ProductionTaskItem"("taskId");
+
+-- CreateIndex
+CREATE INDEX "ProductionTaskItem_productId_idx" ON "ProductionTaskItem"("productId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ProductionLog_taskId_key" ON "ProductionLog"("taskId");
@@ -331,7 +347,10 @@ ALTER TABLE "ProcurementRecord" ADD CONSTRAINT "ProcurementRecord_skuId_fkey" FO
 ALTER TABLE "ProductionTask" ADD CONSTRAINT "ProductionTask_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ProductionTask" ADD CONSTRAINT "ProductionTask_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ProductionTaskItem" ADD CONSTRAINT "ProductionTaskItem_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "ProductionTask"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductionTaskItem" ADD CONSTRAINT "ProductionTaskItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductionLog" ADD CONSTRAINT "ProductionLog_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "ProductionTask"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

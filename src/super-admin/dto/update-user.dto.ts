@@ -4,7 +4,7 @@ import { Role, UserStatus } from '@prisma/client';
 export class UpdateUserDto {
     @IsStringForUpdate()
     @IsOptional()
-    name?: string; // [新增] 用户姓名
+    name?: string; // [修改] 用户姓名现在是可编辑字段
 
     @IsStringForUpdate()
     @IsOptional()

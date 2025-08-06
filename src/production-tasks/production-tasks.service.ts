@@ -287,10 +287,9 @@ export class ProductionTasksService {
                     },
                 });
 
-                // 扣减对应激活SKU的实时库存
-                // (Deduct the real-time stock of the corresponding active SKU)
-                await tx.ingredientSKU.update({
-                    where: { id: consumption.activeSkuId },
+                // [编译错误修复] 扣减对应原料品类的实时库存
+                await tx.ingredient.update({
+                    where: { id: consumption.ingredientId },
                     data: {
                         currentStockInGrams: {
                             decrement: consumption.totalConsumed,

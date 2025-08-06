@@ -167,6 +167,7 @@ export class SuperAdminService {
 
         const data = users.map((user) => ({
             id: user.id,
+            name: user.name, // [新增] 返回用户姓名
             phone: user.phone,
             role: user.role,
             status: user.status,
@@ -193,10 +194,11 @@ export class SuperAdminService {
     }
 
     async createUser(dto: CreateUserDto) {
-        const { phone, password } = dto;
+        const { name, phone, password } = dto;
         const hashedPassword = await bcrypt.hash(password, 10);
         return this.prisma.user.create({
             data: {
+                name,
                 phone,
                 password: hashedPassword,
             },
@@ -205,7 +207,8 @@ export class SuperAdminService {
 
     async updateUser(id: string, dto: UpdateUserDto) {
         const data: Prisma.UserUpdateInput = {};
-        if (dto.phone) data.phone = dto.phone;
+        if (dto.name) data.name = dto.name; // [修改] 允许更新 name
+        // [修改] 移除 phone 的更新逻辑
         if (dto.role) data.role = dto.role;
         if (dto.status) data.status = dto.status;
         if (dto.password) {

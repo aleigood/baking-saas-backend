@@ -260,15 +260,19 @@ model ProductIngredient {
 
 // 原料品类模型
 model Ingredient {
-  id          String         @id @default(uuid())
-  tenantId    String
-  name        String // e.g., "High-gluten flour"
-  type        IngredientType @default(STANDARD)
+  id                     String         @id @default(uuid())
+  tenantId               String
+  name                   String // e.g., "High-gluten flour"
+  type                   IngredientType @default(STANDARD)
   // 指向当前启用的SKU
-  activeSkuId String?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  deletedAt   DateTime?
+  activeSkuId            String?
+  // [核心重构] 将库存和价格移至此处
+  currentStockInGrams    Float          @default(0)
+  currentPricePerPackage Decimal        @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   tenant          Tenant                     @relation(fields: [tenantId], references: [id])
   skus            IngredientSKU[]
@@ -287,11 +291,12 @@ model IngredientSKU {
   ingredientId      String
 
   // SKU状态 (启用/未启用)
-  status                 SkuStatus @default(INACTIVE)
-  // 当前实时库存（克）
-  currentStockInGrams    Float     @default(0)
-  // 当前采购单价
-  currentPricePerPackage Decimal   @default(0)
+  status SkuStatus @default(INACTIVE)
+  // [核心重构] 移除库存和价格字段
+
+  // [新增] 增加创建和更新时间戳
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   ingredient         Ingredient                 @relation(fields: [ingredientId], references: [id])
   procurementRecords ProcurementRecord[]

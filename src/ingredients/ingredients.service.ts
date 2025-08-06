@@ -166,7 +166,7 @@ export class IngredientsService {
     }
 
     /**
-     * [V2.1 核心逻辑重写] 创建采购记录并更新库存
+     * [V2.3 核心逻辑重构] 创建采购记录并更新原料库存
      * @param tenantId 租户ID
      * @param skuId SKU ID
      * @param createProcurementDto DTO
@@ -207,9 +207,9 @@ export class IngredientsService {
                 },
             });
 
-            // 4.2 更新SKU的实时库存和当前单价
-            const updatedSku = await tx.ingredientSKU.update({
-                where: { id: skuId },
+            // 4.2 [核心修改] 更新原料品类的实时库存和当前单价
+            const updatedIngredient = await tx.ingredient.update({
+                where: { id: sku.ingredientId },
                 data: {
                     // 增加实时库存
                     currentStockInGrams: {
@@ -220,7 +220,7 @@ export class IngredientsService {
                 },
             });
 
-            return updatedSku;
+            return updatedIngredient;
         });
     }
 }

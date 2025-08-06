@@ -17,6 +17,7 @@ async function main() {
         where: { phone: adminPhone }, // 修复：使用 phone 代替 email
         update: {},
         create: {
+            name: '超级管理员', // 修复：添加 name 字段
             phone: adminPhone, // 修复：使用 phone 代替 email
             password: hashedPassword, // 修复：使用 password 代替 passwordHash
             role: Role.SUPER_ADMIN, // 修复：使用集成的 Role 枚举

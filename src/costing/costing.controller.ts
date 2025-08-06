@@ -33,4 +33,15 @@ export class CostingController {
     async getProductCostHistory(@GetUser() user: UserPayload, @Param('productId') productId: string) {
         return this.costingService.getProductCostHistory(user.tenantId, productId);
     }
+
+    /**
+     * [新增] 获取指定原料的成本历史记录
+     * @param user 认证用户
+     * @param ingredientId 原料ID
+     * @returns 成本历史数据点数组
+     */
+    @Get('ingredients/:ingredientId/cost-history')
+    async getIngredientCostHistory(@GetUser() user: UserPayload, @Param('ingredientId') ingredientId: string) {
+        return this.costingService.getIngredientCostHistory(user.tenantId, ingredientId);
+    }
 }
