@@ -22,4 +22,15 @@ export class CostingController {
         // 调用服务方法并等待结果
         return await this.costingService.calculateProductCost(user.tenantId, productId);
     }
+
+    /**
+     * [核心新增] 获取指定产品的成本历史记录
+     * @param user 认证用户
+     * @param productId 产品ID
+     * @returns 成本历史数据点数组
+     */
+    @Get('products/:productId/cost-history')
+    async getProductCostHistory(@GetUser() user: UserPayload, @Param('productId') productId: string) {
+        return this.costingService.getProductCostHistory(user.tenantId, productId);
+    }
 }
