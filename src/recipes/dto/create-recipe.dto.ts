@@ -83,30 +83,7 @@ class DoughIngredientDto {
     waterContent?: number;
 }
 
-// [新增] 用于面团的DTO，它可以包含多个原料
-class DoughDto {
-    @IsString()
-    @IsNotEmpty()
-    name: string;
-
-    @IsNumber()
-    @IsOptional()
-    targetTemp?: number;
-
-    @IsNumber()
-    @IsOptional()
-    lossRatio?: number;
-
-    @IsArray()
-    @IsString({ each: true })
-    @IsOptional()
-    procedure?: string[];
-
-    @IsArray()
-    @ValidateNested({ each: true })
-    @Type(() => DoughIngredientDto)
-    ingredients: DoughIngredientDto[];
-}
+// [回滚] 移除 DoughDto，直接在主 DTO 中使用 ingredients
 
 // 主创建DTO
 export class CreateRecipeDto {
@@ -118,7 +95,6 @@ export class CreateRecipeDto {
     @IsOptional()
     type?: RecipeType; // 'MAIN', 'PRE_DOUGH', 'EXTRA'
 
-    // [新增] 版本说明字段
     @IsString()
     @IsOptional()
     notes?: string;
@@ -131,11 +107,11 @@ export class CreateRecipeDto {
     @IsOptional()
     lossRatio?: number;
 
-    // [修改] 从 ingredients: DoughIngredientDto[] 改为 doughs: DoughDto[]
+    // [回滚] 将 doughs: DoughDto[] 改回 ingredients: DoughIngredientDto[]
     @IsArray()
     @ValidateNested({ each: true })
-    @Type(() => DoughDto)
-    doughs: DoughDto[];
+    @Type(() => DoughIngredientDto)
+    ingredients: DoughIngredientDto[];
 
     @IsArray()
     @ValidateNested({ each: true })
