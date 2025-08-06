@@ -130,8 +130,7 @@ export class ProductionTasksService {
                 deletedAt: null,
             },
             include: {
-                // [修改] 包含任务中的产品项
-                // (Modified: Include product items in the task)
+                // [核心修改] 包含任务中的产品项，并深入查询到配方、面团和原料
                 items: {
                     include: {
                         product: {
@@ -139,6 +138,11 @@ export class ProductionTasksService {
                                 recipeVersion: {
                                     include: {
                                         family: true,
+                                        doughs: {
+                                            include: {
+                                                ingredients: true,
+                                            },
+                                        },
                                     },
                                 },
                             },

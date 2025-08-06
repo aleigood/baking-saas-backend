@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Delete, UseGuards, Query, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, UseGuards, NotFoundException, Patch } from '@nestjs/common'; // [修改] 引入 Patch
 import { RecipesService } from './recipes.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { AuthGuard } from '@nestjs/passport';
@@ -11,14 +11,41 @@ export class RecipesController {
     constructor(private readonly recipesService: RecipesService) {}
 
     /**
-     * 导入或创建一个新配方。
-     * 如果是已存在的配方，则会创建一个新版本。
+     * [修改] 创建一个全新的配方族。
      */
     @Post()
     create(@GetUser() user: UserPayload, @Body() createRecipeDto: CreateRecipeDto) {
-        // 从JWT token中获取tenantId
         const tenantId = user.tenantId;
         return this.recipesService.create(tenantId, createRecipeDto);
+    }
+
+    /**
+     * [新增] 为指定的配方族创建一个新版本。
+     */
+    @Post(':familyId/versions')
+    createVersion(
+        @GetUser() user: UserPayload,
+        @Param('familyId') familyId: string,
+        @Body() createRecipeDto: CreateRecipeDto,
+    ) {
+        const tenantId = user.tenantId;
+        return this.recipesService.createVersion(tenantId, familyId, createRecipeDto);
+    }
+
+    /**
+     * [核心新增] 激活一个指定的配方版本
+     * @param user
+     * @param familyId
+     * @param versionId
+     * @returns
+     */
+    @Patch(':familyId/versions/:versionId/activate')
+    activateVersion(
+        @GetUser() user: UserPayload,
+        @Param('familyId') familyId: string,
+        @Param('versionId') versionId: string,
+    ) {
+        return this.recipesService.activateVersion(user.tenantId, familyId, versionId);
     }
 
     /**
@@ -31,16 +58,16 @@ export class RecipesController {
     }
 
     /**
-     * 根据配方族ID获取配方的详细信息。
+     * [核心修复] 修正 findOne 方法的调用
+     * 根据配方族ID获取配方的详细信息，包含所有版本。
      * @param id 配方族ID
-     * @param version 可选查询参数，用于获取特定版本，不提供则返回激活版本
      */
     @Get(':id')
-    async findOne(@Param('id') id: string, @Query('version') version?: string) {
-        const versionNumber = version ? parseInt(version, 10) : undefined;
-        const recipe = await this.recipesService.findOne(id, versionNumber);
-        if (!recipe || recipe.versions.length === 0) {
-            throw new NotFoundException(`ID为 ${id} 且版本为 ${version || '激活'} 的配方未找到`);
+    async findOne(@Param('id') id: string) {
+        // [修复] 调用 service 的 findOne 方法时只传递一个参数
+        const recipe = await this.recipesService.findOne(id);
+        if (!recipe) {
+            throw new NotFoundException(`ID为 ${id} 的配方未找到`);
         }
         return recipe;
     }

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common'; // [修改] 引入 ConflictException
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { RecipeFamily, RecipeVersion, ProductIngredientType } from '@prisma/client';
@@ -11,45 +11,84 @@ export class RecipesService {
     constructor(private prisma: PrismaService) {}
 
     /**
-     * 创建一个全新的配方版本。
-     * 如果同名配方族不存在，则创建配方族及V1版本。
-     * 如果存在，则在该配方族下创建下一个版本。
+     * [核心重构] 创建一个全新的配方族及其第一个版本。
+     * 如果配方名已存在，则会抛出冲突错误。
      * @param tenantId 租户ID
      * @param createRecipeDto 配方数据
      * @returns 创建的配方版本
      */
     async create(tenantId: string, createRecipeDto: CreateRecipeDto) {
-        const { name, type = 'MAIN', ingredients, products, procedure, targetTemp, lossRatio } = createRecipeDto;
+        const { name } = createRecipeDto;
 
-        // 核心业务逻辑：使用数据库事务确保数据一致性
+        // 检查同名配方是否已存在
+        const existingFamily = await this.prisma.recipeFamily.findFirst({
+            where: {
+                tenantId,
+                name,
+                deletedAt: null,
+            },
+        });
+
+        if (existingFamily) {
+            throw new ConflictException(`名为 "${name}" 的配方已存在。`);
+        }
+
+        // 由于是全新的配方，直接调用内部的创建版本逻辑，但不传入 familyId
+        return this.createVersionInternal(tenantId, null, createRecipeDto);
+    }
+
+    /**
+     * [核心新增] 为一个已存在的配方族创建一个新版本。
+     * @param tenantId 租户ID
+     * @param familyId 配方族ID
+     * @param createRecipeDto 配方数据
+     * @returns 创建的配方版本
+     */
+    async createVersion(tenantId: string, familyId: string, createRecipeDto: CreateRecipeDto) {
+        // 确保配方族存在
+        const recipeFamily = await this.prisma.recipeFamily.findFirst({
+            where: { id: familyId, tenantId, deletedAt: null },
+        });
+
+        if (!recipeFamily) {
+            throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
+        }
+
+        // 调用内部的创建版本逻辑，并传入 familyId
+        return this.createVersionInternal(tenantId, familyId, createRecipeDto);
+    }
+
+    /**
+     * [内部方法] 封装了创建配方版本和相关实体的核心逻辑。
+     * @param tenantId 租户ID
+     * @param familyId 可选的配方族ID。如果提供，则为现有配方创建新版本；否则，创建新配方族。
+     * @param createRecipeDto 配方数据
+     */
+    private async createVersionInternal(tenantId: string, familyId: string | null, createRecipeDto: CreateRecipeDto) {
+        const { name, type = 'MAIN', doughs, products, notes } = createRecipeDto; // [修改] 解构出 notes
+
         return this.prisma.$transaction(async (tx) => {
-            // 步骤 1: 查找或创建配方族 (RecipeFamily)
-            let recipeFamily: RecipeFamilyWithVersions | null = await tx.recipeFamily.findFirst({
-                where: {
-                    tenantId,
-                    name,
-                    deletedAt: null, // 仅查找未被软删除的
-                },
-                include: {
-                    versions: true, // 包含所有版本以计算下一个版本号
-                },
-            });
+            let recipeFamily: RecipeFamilyWithVersions;
 
-            if (!recipeFamily) {
+            if (familyId) {
+                // 为现有配方族创建新版本
+                const existingFamily = await tx.recipeFamily.findFirst({
+                    where: { id: familyId, tenantId },
+                    include: { versions: true },
+                });
+                if (!existingFamily) throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
+                recipeFamily = existingFamily;
+            } else {
+                // 创建全新的配方族
                 recipeFamily = await tx.recipeFamily.create({
-                    data: {
-                        name,
-                        tenantId,
-                        type,
-                    },
+                    data: { name, tenantId, type },
                     include: { versions: true },
                 });
             }
 
-            // 导入配方时自动创建原料
-            // 步骤 1.1: 收集所有在配方中用到的原料名称
+            // [逻辑不变] 自动创建原料
             const allIngredientNames = new Set<string>();
-            ingredients.forEach((ing) => allIngredientNames.add(ing.name));
+            doughs.forEach((dough) => dough.ingredients.forEach((ing) => allIngredientNames.add(ing.name)));
             if (products) {
                 products.forEach((p) => {
                     p.mixIn?.forEach((i) => allIngredientNames.add(i.name));
@@ -58,99 +97,70 @@ export class RecipesService {
                 });
             }
 
-            // 步骤 1.2: 遍历所有原料名称，如果不存在则创建
             for (const ingredientName of allIngredientNames) {
-                // [修复] 使用先查找后创建的方式替代 upsert，以解决复合唯一键中 null 值的类型错误
                 const existingIngredient = await tx.ingredient.findFirst({
-                    where: {
-                        tenantId,
-                        name: ingredientName,
-                        deletedAt: null,
-                    },
+                    where: { tenantId, name: ingredientName, deletedAt: null },
                 });
-
                 if (!existingIngredient) {
                     await tx.ingredient.create({
-                        data: {
-                            tenantId,
-                            name: ingredientName,
-                            type: 'STANDARD', // 默认为标准原料，后续可由用户修改
-                        },
+                        data: { tenantId, name: ingredientName, type: 'STANDARD' },
                     });
                 }
             }
 
-            // 步骤 2: 确定新版本号
+            // [核心修复] 在创建新版本之前，将该配方族下所有旧版本设为非激活
+            if (recipeFamily.versions.length > 0) {
+                await tx.recipeVersion.updateMany({
+                    where: { familyId: recipeFamily.id },
+                    data: { isActive: false },
+                });
+            }
+
+            // [逻辑不变] 确定新版本号
             const nextVersionNumber =
                 recipeFamily.versions.length > 0 ? Math.max(...recipeFamily.versions.map((v) => v.version)) + 1 : 1;
 
-            // 步骤 3: 校验预制面团依赖是否存在 (仅在创建主配方时)
-            if (type === 'MAIN') {
-                for (const ingredient of ingredients) {
-                    // 检查该原料是否可能是预制面团
-                    const preDoughRecipe = await tx.recipeFamily.findFirst({
-                        where: {
-                            name: ingredient.name,
-                            tenantId: tenantId,
-                            type: 'PRE_DOUGH',
-                            deletedAt: null,
-                        },
-                    });
-                    if (preDoughRecipe) {
-                        // 如果找到了同名的预制面团配方，就进行关联。
-                        // 实际业务中可能还需要校验其成分比例是否一致，这里先做关联。
-                        console.log(`配方 "${name}" 中的原料 "${ingredient.name}" 关联到预制面团配方。`);
-                    }
-                }
-            }
-
-            // 步骤 4: 创建配方版本 (RecipeVersion)
+            // [逻辑不变] 创建配方版本
             const recipeVersion = await tx.recipeVersion.create({
                 data: {
                     familyId: recipeFamily.id,
                     version: nextVersionNumber,
-                    notes: `版本 ${nextVersionNumber} 初始创建`,
-                    isActive: true, // 新版本默认为激活状态
+                    // [修改] 使用传入的 notes，如果没有则使用默认值
+                    notes: notes || `版本 ${nextVersionNumber}`,
+                    isActive: true,
                 },
             });
 
-            // 步骤 5: 创建面团 (Dough)
-            // 对于一个配方，我们简化处理，认为它只有一个主面团定义
-            const dough = await tx.dough.create({
-                data: {
-                    recipeVersionId: recipeVersion.id,
-                    name: '主面团', // 或从DTO中获取
-                    targetTemp,
-                    lossRatio,
-                    procedure,
-                },
-            });
-
-            // 步骤 6: 创建面团中的原料 (DoughIngredient)
-            for (const ingredientDto of ingredients) {
-                // 检查并关联预制面团
-                const linkedPreDough = await tx.recipeFamily.findFirst({
-                    where: {
-                        name: ingredientDto.name,
-                        tenantId: tenantId,
-                        type: 'PRE_DOUGH',
-                        deletedAt: null,
-                    },
-                });
-
-                await tx.doughIngredient.create({
+            // [逻辑不变] 创建面团和原料
+            for (const doughDto of doughs) {
+                const dough = await tx.dough.create({
                     data: {
-                        doughId: dough.id,
-                        name: ingredientDto.name,
-                        ratio: ingredientDto.ratio,
-                        isFlour: ingredientDto.isFlour ?? false,
-                        waterContent: ingredientDto.waterContent,
-                        linkedPreDoughId: linkedPreDough?.id, // 如果找到，则关联ID
+                        recipeVersionId: recipeVersion.id,
+                        name: doughDto.name,
+                        targetTemp: doughDto.targetTemp,
+                        lossRatio: doughDto.lossRatio,
+                        procedure: doughDto.procedure,
                     },
                 });
+
+                for (const ingredientDto of doughDto.ingredients) {
+                    const linkedPreDough = await tx.recipeFamily.findFirst({
+                        where: { name: ingredientDto.name, tenantId: tenantId, type: 'PRE_DOUGH', deletedAt: null },
+                    });
+                    await tx.doughIngredient.create({
+                        data: {
+                            doughId: dough.id,
+                            name: ingredientDto.name,
+                            ratio: ingredientDto.ratio,
+                            isFlour: ingredientDto.isFlour ?? false,
+                            waterContent: ingredientDto.waterContent,
+                            linkedPreDoughId: linkedPreDough?.id,
+                        },
+                    });
+                }
             }
 
-            // 步骤 7: 如果是主配方，创建最终产品 (Product) 及其附加原料
+            // [逻辑不变] 创建最终产品
             if (type === 'MAIN' && products) {
                 for (const productDto of products) {
                     const product = await tx.product.create({
@@ -162,33 +172,16 @@ export class RecipesService {
                         },
                     });
 
-                    // 合并所有附加原料并使用正确的枚举类型
                     const allProductIngredients = [
-                        ...(productDto.mixIn?.map((i) => ({
-                            ...i,
-                            type: ProductIngredientType.MIX_IN,
-                        })) ?? []),
-                        ...(productDto.fillings?.map((i) => ({
-                            ...i,
-                            type: ProductIngredientType.FILLING,
-                        })) ?? []),
-                        ...(productDto.toppings?.map((i) => ({
-                            ...i,
-                            type: ProductIngredientType.TOPPING,
-                        })) ?? []),
+                        ...(productDto.mixIn?.map((i) => ({ ...i, type: ProductIngredientType.MIX_IN })) ?? []),
+                        ...(productDto.fillings?.map((i) => ({ ...i, type: ProductIngredientType.FILLING })) ?? []),
+                        ...(productDto.toppings?.map((i) => ({ ...i, type: ProductIngredientType.TOPPING })) ?? []),
                     ];
 
                     for (const pIngredientDto of allProductIngredients) {
-                        // 检查并关联馅料等子配方
                         const linkedExtra = await tx.recipeFamily.findFirst({
-                            where: {
-                                name: pIngredientDto.name,
-                                tenantId: tenantId,
-                                type: 'EXTRA',
-                                deletedAt: null,
-                            },
+                            where: { name: pIngredientDto.name, tenantId: tenantId, type: 'EXTRA', deletedAt: null },
                         });
-
                         await tx.productIngredient.create({
                             data: {
                                 productId: product.id,
@@ -196,37 +189,25 @@ export class RecipesService {
                                 type: pIngredientDto.type,
                                 ratio: pIngredientDto.ratio,
                                 weightInGrams: pIngredientDto.weightInGrams,
-                                linkedExtraId: linkedExtra?.id, // 如果找到，则关联ID
+                                linkedExtraId: linkedExtra?.id,
                             },
                         });
                     }
                 }
             }
 
-            // 步骤 8: 返回完整创建的配方版本数据
+            // [逻辑不变] 返回结果
             return tx.recipeVersion.findUnique({
                 where: { id: recipeVersion.id },
                 include: {
                     family: true,
-                    doughs: {
-                        include: {
-                            ingredients: true,
-                        },
-                    },
-                    products: {
-                        include: {
-                            ingredients: true,
-                        },
-                    },
+                    doughs: { include: { ingredients: true } },
+                    products: { include: { ingredients: true } },
                 },
             });
         });
     }
 
-    /**
-     * 查找租户下的所有配方族
-     * @param tenantId 租户ID
-     */
     async findAll(tenantId: string) {
         return this.prisma.recipeFamily.findMany({
             where: {
@@ -234,12 +215,10 @@ export class RecipesService {
                 deletedAt: null,
             },
             include: {
-                // 默认只展示每个配方族的激活版本信息
                 versions: {
                     where: { isActive: true },
                     include: {
                         products: true,
-                        // 包含面团信息，并统计每个面团的原料数量
                         doughs: {
                             include: {
                                 _count: {
@@ -254,11 +233,9 @@ export class RecipesService {
     }
 
     /**
-     * 根据配方族ID查找其所有版本或特定版本
-     * @param familyId 配方族ID
-     * @param versionNumber 可选的版本号
+     * [核心修改] findOne 现在返回配方家族及其所有版本
      */
-    async findOne(familyId: string, versionNumber?: number) {
+    async findOne(familyId: string) {
         const family = await this.prisma.recipeFamily.findFirst({
             where: {
                 id: familyId,
@@ -266,9 +243,6 @@ export class RecipesService {
             },
             include: {
                 versions: {
-                    where: {
-                        ...(versionNumber ? { version: versionNumber } : { isActive: true }),
-                    },
                     include: {
                         doughs: { include: { ingredients: true } },
                         products: { include: { ingredients: true } },
@@ -285,9 +259,42 @@ export class RecipesService {
     }
 
     /**
-     * 软删除一个配方族及其所有版本
-     * @param familyId 配方族ID
+     * [核心新增] 激活一个指定的配方版本
      */
+    async activateVersion(tenantId: string, familyId: string, versionId: string) {
+        // 验证该版本是否存在且属于该租户
+        const versionToActivate = await this.prisma.recipeVersion.findFirst({
+            where: {
+                id: versionId,
+                familyId: familyId,
+                family: {
+                    tenantId: tenantId,
+                },
+            },
+        });
+
+        if (!versionToActivate) {
+            throw new NotFoundException('指定的配方版本不存在');
+        }
+
+        // 使用事务确保原子性
+        return this.prisma.$transaction(async (tx) => {
+            // 1. 将该配方家族下所有版本设为非激活
+            await tx.recipeVersion.updateMany({
+                where: { familyId: familyId },
+                data: { isActive: false },
+            });
+
+            // 2. 将指定版本设为激活
+            const activatedVersion = await tx.recipeVersion.update({
+                where: { id: versionId },
+                data: { isActive: true },
+            });
+
+            return activatedVersion;
+        });
+    }
+
     async remove(familyId: string) {
         const family = await this.prisma.recipeFamily.findUnique({
             where: { id: familyId },
