@@ -1,9 +1,14 @@
+// 文件路径: src/auth/dto/auth.dto.ts
 import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
 /**
- * [已恢复并适配] 用于新用户注册并创建店铺的DTO
+ * [修改] 用于新用户注册并创建店铺的DTO
  */
 export class RegisterDto {
+    @IsString()
+    @IsNotEmpty()
+    name: string; // [新增] 用户姓名
+
     @IsString()
     @IsNotEmpty()
     phone: string;

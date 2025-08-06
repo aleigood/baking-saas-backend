@@ -1,13 +1,16 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString as IsStringForUpdate } from 'class-validator';
 import { Role, UserStatus } from '@prisma/client';
 
-// 修复：适配新的 User 模型，提供所有可更新字段
 export class UpdateUserDto {
-    @IsString()
+    @IsStringForUpdate()
+    @IsOptional()
+    name?: string; // [新增] 用户姓名
+
+    @IsStringForUpdate()
     @IsOptional()
     phone?: string;
 
-    @IsString()
+    @IsStringForUpdate()
     @IsOptional()
     password?: string;
 

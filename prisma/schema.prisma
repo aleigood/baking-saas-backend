@@ -86,6 +86,7 @@ enum SkuStatus {
 model User {
   id        String       @id @default(uuid())
   phone     String       @unique
+  name      String? // [新增] 用户姓名 (New: User's name)
   password  String
   role      Role         @default(MEMBER) // Global role, SUPER_ADMIN is highest
   status    UserStatus   @default(ACTIVE)

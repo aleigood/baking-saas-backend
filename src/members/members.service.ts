@@ -1,12 +1,19 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { Role } from '@prisma/client';
-import { UpdateMemberDto } from './dto/update-member.dto';
-import { UserPayload } from 'src/auth/interfaces/user-payload.interface';
+// ========================================================
 
-@Injectable()
+// 文件路径: src/members/members.service.ts
+import {
+    Injectable as InjectableMembers,
+    NotFoundException as NotFoundExceptionMembers,
+    ForbiddenException as ForbiddenExceptionMembers,
+} from '@nestjs/common';
+import { PrismaService as PrismaServiceMembers } from '../prisma/prisma.service';
+import { Role as RoleMembers } from '@prisma/client';
+import { UpdateMemberDto as UpdateMemberDtoMembers } from './dto/update-member.dto';
+import { UserPayload as UserPayloadMembers } from 'src/auth/interfaces/user-payload.interface';
+
+@InjectableMembers()
 export class MembersService {
-    constructor(private prisma: PrismaService) {}
+    constructor(private prisma: PrismaServiceMembers) {}
 
     async findAll(tenantId: string) {
         const tenantUsers = await this.prisma.tenantUser.findMany({
@@ -19,6 +26,7 @@ export class MembersService {
 
         return tenantUsers.map((tu) => ({
             id: tu.user.id,
+            name: tu.user.name || tu.user.phone, // [修改] 优先返回姓名
             phone: tu.user.phone,
             role: tu.role,
             status: tu.status,
@@ -35,22 +43,22 @@ export class MembersService {
         });
 
         if (!tenantUser) {
-            throw new NotFoundException('该成员不存在');
+            throw new NotFoundExceptionMembers('该成员不存在');
         }
 
         const { user, ...rest } = tenantUser;
         return { ...rest, ...user };
     }
 
-    async update(tenantId: string, memberId: string, dto: UpdateMemberDto, currentUser: UserPayload) {
+    async update(tenantId: string, memberId: string, dto: UpdateMemberDtoMembers, currentUser: UserPayloadMembers) {
         const memberToUpdate = await this.findOne(tenantId, memberId);
 
-        if (currentUser.role === Role.MEMBER) {
-            throw new ForbiddenException('您没有权限修改成员信息。');
+        if (currentUser.role === RoleMembers.MEMBER) {
+            throw new ForbiddenExceptionMembers('您没有权限修改成员信息。');
         }
-        if (currentUser.role === Role.ADMIN) {
-            if (memberToUpdate.role === Role.ADMIN || memberToUpdate.role === Role.OWNER) {
-                throw new ForbiddenException('管理员不能修改其他管理员或所有者。');
+        if (currentUser.role === RoleMembers.ADMIN) {
+            if (memberToUpdate.role === RoleMembers.ADMIN || memberToUpdate.role === RoleMembers.OWNER) {
+                throw new ForbiddenExceptionMembers('管理员不能修改其他管理员或所有者。');
             }
         }
 
@@ -65,18 +73,18 @@ export class MembersService {
         });
     }
 
-    async remove(tenantId: string, memberId: string, currentUser: UserPayload) {
+    async remove(tenantId: string, memberId: string, currentUser: UserPayloadMembers) {
         const memberToRemove = await this.findOne(tenantId, memberId);
 
-        if (memberToRemove.role === Role.OWNER) {
-            throw new ForbiddenException('不能移除店铺所有者。');
+        if (memberToRemove.role === RoleMembers.OWNER) {
+            throw new ForbiddenExceptionMembers('不能移除店铺所有者。');
         }
 
         if (
-            currentUser.role === Role.MEMBER ||
-            (currentUser.role === Role.ADMIN && memberToRemove.role === Role.ADMIN)
+            currentUser.role === RoleMembers.MEMBER ||
+            (currentUser.role === RoleMembers.ADMIN && memberToRemove.role === RoleMembers.ADMIN)
         ) {
-            throw new ForbiddenException('您没有权限移除该成员。');
+            throw new ForbiddenExceptionMembers('您没有权限移除该成员。');
         }
 
         return this.prisma.tenantUser.delete({

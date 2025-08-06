@@ -1,3 +1,4 @@
+// 文件路径: src/auth/auth.service.ts
 import {
     Injectable,
     UnauthorizedException,
@@ -37,7 +38,7 @@ export class AuthService {
     }
 
     async register(registerDto: RegisterDto): Promise<{ accessToken: string }> {
-        const { phone, password, tenantName } = registerDto;
+        const { name, phone, password, tenantName } = registerDto; // [修改] 解构出 name
 
         const existingUser = await this.prisma.user.findUnique({
             where: { phone },
@@ -51,6 +52,7 @@ export class AuthService {
         const { user, tenantUser } = await this.prisma.$transaction(async (tx) => {
             const newUser = await tx.user.create({
                 data: {
+                    name, // [修改] 保存姓名
                     phone,
                     password: hashedPassword,
                 },
@@ -131,6 +133,7 @@ export class AuthService {
             select: {
                 id: true,
                 phone: true,
+                name: true, // [修改] 查询姓名
                 role: true,
                 status: true,
                 createdAt: true,
