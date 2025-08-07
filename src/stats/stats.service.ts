@@ -9,6 +9,12 @@ export class StatsService {
     async getProductionStats(tenantId: string, dto: StatsDto) {
         const { startDate, endDate } = dto;
 
+        // [核心修正] 调整 endDate 的时间，使其包含当天的所有时间
+        const startOfDay = new Date(startDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+
         // [修改] 查询已完成的任务，并包含其所有的任务项(items)和产品信息
         // (Modified: Query for completed tasks, including all their items and product information)
         const completedTasks = await this.prisma.productionTask.findMany({
@@ -17,8 +23,8 @@ export class StatsService {
                 status: 'COMPLETED',
                 log: {
                     completedAt: {
-                        gte: new Date(startDate),
-                        lte: new Date(endDate),
+                        gte: startOfDay,
+                        lte: endOfDay,
                     },
                 },
             },

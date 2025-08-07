@@ -209,8 +209,9 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
-        if (task.status !== ProductionTaskStatus.PENDING) {
-            throw new BadRequestException('只有待处理状态的任务才能被完成');
+        // [核心修正] 允许“进行中”的任务被完成
+        if (task.status !== ProductionTaskStatus.PENDING && task.status !== ProductionTaskStatus.IN_PROGRESS) {
+            throw new BadRequestException('只有“待开始”或“进行中”的任务才能被完成');
         }
 
         const { notes } = completeProductionTaskDto;
