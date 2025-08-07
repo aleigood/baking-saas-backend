@@ -38,7 +38,7 @@ export class IngredientsService {
         const intermediateRecipeNames = intermediateRecipes.map((r) => r.name);
 
         // 2. 查询原料，并排除掉名称在上面列表中的原料
-        return this.prisma.ingredient.findMany({
+        const ingredients = await this.prisma.ingredient.findMany({
             where: {
                 tenantId,
                 deletedAt: null,
@@ -47,7 +47,6 @@ export class IngredientsService {
                 },
             },
             include: {
-                // V2.1 优化: 查询时总是包含激活的SKU信息
                 activeSku: true,
                 skus: {
                     orderBy: {
@@ -58,6 +57,51 @@ export class IngredientsService {
             orderBy: {
                 name: 'asc',
             },
+        });
+
+        // [核心新增] 计算每种原料的平均单次任务消耗量
+        const ingredientIds = ingredients.map((i) => i.id);
+        const consumptionLogs = await this.prisma.ingredientConsumptionLog.findMany({
+            where: {
+                ingredientId: { in: ingredientIds },
+            },
+            select: {
+                ingredientId: true,
+                quantityInGrams: true,
+                productionLogId: true,
+            },
+        });
+
+        const consumptionStats = new Map<string, { total: number; count: number }>();
+        for (const log of consumptionLogs) {
+            if (!consumptionStats.has(log.ingredientId)) {
+                consumptionStats.set(log.ingredientId, { total: 0, count: 0 });
+            }
+            const stats = consumptionStats.get(log.ingredientId)!;
+            stats.total += log.quantityInGrams;
+        }
+
+        // 计算每个原料被用在多少个不同的生产任务中
+        const taskCounts = new Map<string, number>();
+        const uniqueTaskLogs = new Map<string, Set<string>>(); // ingredientId -> Set<productionLogId>
+        for (const log of consumptionLogs) {
+            if (!uniqueTaskLogs.has(log.ingredientId)) {
+                uniqueTaskLogs.set(log.ingredientId, new Set());
+            }
+            uniqueTaskLogs.get(log.ingredientId)!.add(log.productionLogId);
+        }
+        uniqueTaskLogs.forEach((tasks, ingredientId) => {
+            taskCounts.set(ingredientId, tasks.size);
+        });
+
+        return ingredients.map((ingredient) => {
+            const stats = consumptionStats.get(ingredient.id);
+            const tasks = taskCounts.get(ingredient.id) || 0;
+            const avgConsumptionPerTask = stats && tasks > 0 ? stats.total / tasks : 0;
+            return {
+                ...ingredient,
+                avgConsumptionPerTask,
+            };
         });
     }
 
