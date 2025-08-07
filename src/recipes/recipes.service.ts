@@ -112,13 +112,8 @@ export class RecipesService {
                     }
                 }
 
-                // [核心修复] 在创建新版本之前，将该配方族下所有旧版本设为非激活
-                if (recipeFamily.versions.length > 0) {
-                    await tx.recipeVersion.updateMany({
-                        where: { familyId: recipeFamily.id },
-                        data: { isActive: false },
-                    });
-                }
+                // [核心修改] 检查是否存在已激活的版本
+                const hasActiveVersion = recipeFamily.versions.some((v) => v.isActive);
 
                 // [逻辑不变] 确定新版本号
                 const nextVersionNumber =
@@ -130,7 +125,8 @@ export class RecipesService {
                         familyId: recipeFamily.id,
                         version: nextVersionNumber,
                         notes: notes || `版本 ${nextVersionNumber}`,
-                        isActive: true,
+                        // [核心修改] 只有在没有其他激活版本时，新版本才默认为激活
+                        isActive: !hasActiveVersion,
                     },
                 });
 
