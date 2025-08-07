@@ -194,6 +194,41 @@ export class CostingService {
     }
 
     /**
+     * [新增] 获取单个原料最近10次制作的用量历史
+     * @param tenantId 租户ID
+     * @param ingredientId 原料ID
+     * @returns 一个包含每次用量（克）的数组
+     */
+    async getIngredientUsageHistory(tenantId: string, ingredientId: string) {
+        // 1. 验证原料是否存在于该租户
+        const ingredientExists = await this.prisma.ingredient.findFirst({
+            where: { id: ingredientId, tenantId },
+        });
+        if (!ingredientExists) {
+            throw new NotFoundException('原料不存在');
+        }
+
+        // 2. 查询最近10条消耗记录
+        const consumptionLogs = await this.prisma.ingredientConsumptionLog.findMany({
+            where: {
+                ingredientId: ingredientId,
+            },
+            orderBy: {
+                productionLog: {
+                    completedAt: 'desc',
+                },
+            },
+            take: 10,
+            select: {
+                quantityInGrams: true,
+            },
+        });
+
+        // 3. 格式化并反转数组以匹配图表顺序
+        return consumptionLogs.map((log) => ({ cost: log.quantityInGrams })).reverse();
+    }
+
+    /**
      * [核心重构] 计算单个产品的当前成本，现在调用新的辅助函数
      */
     async calculateProductCost(tenantId: string, productId: string) {
