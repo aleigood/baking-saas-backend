@@ -35,6 +35,17 @@ export class CostingController {
     }
 
     /**
+     * [核心新增] 获取产品中各原料的成本构成
+     * @param user 认证用户
+     * @param productId 产品ID
+     * @returns 各原料成本构成的数组
+     */
+    @Get('products/:productId/cost-breakdown')
+    async getProductCostBreakdown(@GetUser() user: UserPayload, @Param('productId') productId: string) {
+        return this.costingService.calculateIngredientCostBreakdown(user.tenantId, productId);
+    }
+
+    /**
      * [新增] 获取指定原料的成本历史记录
      * @param user 认证用户
      * @param ingredientId 原料ID

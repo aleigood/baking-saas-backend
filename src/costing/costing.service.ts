@@ -67,74 +67,74 @@ export class CostingService {
     constructor(private readonly prisma: PrismaService) {}
 
     /**
-     * [核心新增] 获取产品成本的历史变化记录
+     * [核心逻辑最终修正] 获取产品成本的历史变化记录
      * @param tenantId 租户ID
      * @param productId 产品ID
      * @returns 一个包含每次成本变化点的数组
      */
     async getProductCostHistory(tenantId: string, productId: string) {
-        // 1. 获取产品的完整配方信息，包括所有嵌套的面种
+        // 1. 获取产品的完整配方信息
         const product = await this.getFullProduct(tenantId, productId);
         if (!product) {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        // 2. 将配方扁平化，计算出制作一个单位产品所需每种基础原料的克重
+        // 2. 将配方扁平化，计算出每种基础原料的总用量
         const flatIngredients = this._getFlattenedIngredients(product);
         const ingredientNames = Array.from(flatIngredients.keys());
         if (ingredientNames.length === 0) return [];
 
-        // 3. 找到这些原料，并获取它们当前激活的SKU ID
-        const ingredients = await this.prisma.ingredient.findMany({
+        // 3. 找到这些原料及其所有SKU
+        const ingredientsWithSkus = await this.prisma.ingredient.findMany({
             where: { tenantId, name: { in: ingredientNames }, deletedAt: null },
-            select: { name: true, activeSkuId: true },
+            select: { id: true, name: true, skus: { select: { id: true } } },
         });
 
-        const activeSkuIds = ingredients.map((i) => i.activeSkuId).filter((id): id is string => !!id);
-        if (activeSkuIds.length === 0) {
-            // 如果没有任何SKU，则无法计算成本
-            return [];
-        }
-
-        // 4. 获取所有相关SKU的历史采购记录，并按日期排序
-        const procurementRecords = await this.prisma.procurementRecord.findMany({
-            where: { skuId: { in: activeSkuIds } },
-            include: { sku: true },
-            orderBy: { purchaseDate: 'asc' },
-        });
-
-        if (procurementRecords.length === 0) {
-            // 如果没有采购记录，则无法生成历史，返回空数组
-            return [];
-        }
-
-        // 5. 迭代采购记录，在每个价格变化点重新计算总成本
         const costHistory: { cost: number }[] = [];
-        const currentPricesPerGram = new Map<string, Decimal>(); // Map<skuId, pricePerGram>
+        const today = new Date();
 
-        for (const record of procurementRecords) {
-            // 更新价格表
-            currentPricesPerGram.set(
-                record.skuId,
-                new Decimal(record.pricePerPackage).div(record.sku.specWeightInGrams),
-            );
+        // 4. 循环10次，为最近10周每周生成一个成本快照
+        for (let i = 0; i < 10; i++) {
+            const weekEndDate = new Date(today);
+            weekEndDate.setDate(today.getDate() - i * 7);
 
-            let totalCost = new Decimal(0);
+            let weeklyTotalCost = new Decimal(0);
 
-            // 使用当前的价格表和扁平化的原料用量，重新计算总成本
+            // 5. 对配方中的每种原料，查找在当周结束前的最新采购价格
             for (const [name, weight] of flatIngredients.entries()) {
-                const ingredient = ingredients.find((i) => i.name === name);
-                if (ingredient?.activeSkuId && currentPricesPerGram.has(ingredient.activeSkuId)) {
-                    const pricePerGram = currentPricesPerGram.get(ingredient.activeSkuId)!;
-                    totalCost = totalCost.add(pricePerGram.mul(weight));
+                const ingredientInfo = ingredientsWithSkus.find((ing) => ing.name === name);
+                if (!ingredientInfo || ingredientInfo.skus.length === 0) {
+                    continue; // 如果原料没有SKU，则跳过
+                }
+
+                const skuIds = ingredientInfo.skus.map((s) => s.id);
+
+                const latestProcurement = await this.prisma.procurementRecord.findFirst({
+                    where: {
+                        skuId: { in: skuIds },
+                        purchaseDate: { lte: weekEndDate },
+                    },
+                    orderBy: {
+                        purchaseDate: 'desc',
+                    },
+                    include: {
+                        sku: { select: { specWeightInGrams: true } },
+                    },
+                });
+
+                // 如果找到了采购记录，则用该价格计算成本
+                if (latestProcurement) {
+                    const pricePerGram = new Decimal(latestProcurement.pricePerPackage).div(
+                        latestProcurement.sku.specWeightInGrams,
+                    );
+                    weeklyTotalCost = weeklyTotalCost.add(pricePerGram.mul(weight));
                 }
             }
-
-            // 将计算出的成本点添加到历史记录中
-            costHistory.push({ cost: totalCost.toDP(4).toNumber() });
+            costHistory.push({ cost: weeklyTotalCost.toDP(4).toNumber() });
         }
 
-        return costHistory;
+        // 6. 反转数组，使图表从左到右时间递增
+        return costHistory.reverse();
     }
 
     /**
@@ -221,6 +221,42 @@ export class CostingService {
             productName: product.name,
             totalCost: totalCost.toFixed(4),
         };
+    }
+
+    /**
+     * [核心新增] 计算产品中各原料的成本构成
+     * @param tenantId 租户ID
+     * @param productId 产品ID
+     * @returns 返回一个包含 { name: string, value: number } 的数组，用于饼图
+     */
+    async calculateIngredientCostBreakdown(
+        tenantId: string,
+        productId: string,
+    ): Promise<{ name: string; value: number }[]> {
+        const product = await this.getFullProduct(tenantId, productId);
+        if (!product) {
+            throw new NotFoundException('产品或其激活的配方版本不存在');
+        }
+
+        const flatIngredients = this._getFlattenedIngredients(product);
+        const ingredientsMap = await this.getIngredientsWithActiveSku(tenantId);
+        const costBreakdown: { name: string; value: number }[] = [];
+
+        for (const [name, weight] of flatIngredients.entries()) {
+            const ingredientInfo = ingredientsMap.get(name);
+            if (ingredientInfo?.activeSku) {
+                const pricePerGram = new Decimal(ingredientInfo.currentPricePerPackage).div(
+                    ingredientInfo.activeSku.specWeightInGrams,
+                );
+                const cost = pricePerGram.mul(weight);
+                costBreakdown.push({
+                    name: name,
+                    value: cost.toDP(4).toNumber(),
+                });
+            }
+        }
+
+        return costBreakdown;
     }
 
     /**
