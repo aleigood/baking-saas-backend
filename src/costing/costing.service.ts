@@ -138,7 +138,7 @@ export class CostingService {
     }
 
     /**
-     * [新增] 获取单个原料成本的历史变化记录
+     * [修改] 获取单个原料成本的历史变化记录, 限定为最近10次采购
      * @param tenantId 租户ID
      * @param ingredientId 原料ID
      * @returns 一个包含每次成本变化点的数组 (单位: 元/kg)
@@ -159,11 +159,12 @@ export class CostingService {
             return []; // 如果没有任何SKU，则没有价格历史
         }
 
-        // 2. 获取该原料所有SKU的历史采购记录，并按日期排序
+        // 2. [修改] 获取该原料所有SKU的最近10条采购记录
         const procurementRecords = await this.prisma.procurementRecord.findMany({
             where: { skuId: { in: skuIds } },
             include: { sku: true }, // 包含SKU信息以获取规格重量
-            orderBy: { purchaseDate: 'asc' },
+            orderBy: { purchaseDate: 'desc' }, // 按日期降序排序以获取最新的记录
+            take: 10, // 限制为10条
         });
 
         if (procurementRecords.length === 0) {
@@ -188,7 +189,8 @@ export class CostingService {
             };
         });
 
-        return costHistory;
+        // 4. [新增] 因为查询时是倒序的，所以需要反转数组以保证图表时间轴正确
+        return costHistory.reverse();
     }
 
     /**
