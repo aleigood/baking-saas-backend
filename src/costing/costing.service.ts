@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { Decimal } from '@prisma/client/runtime/library';
-// [修复] 导入所有需要的 Prisma 模型类型
+// [FIX] 导入所有需要的 Prisma 模型类型
 import {
     Dough,
     DoughIngredient,
@@ -21,7 +21,7 @@ interface ConsumptionDetail {
     ingredientId: string;
     ingredientName: string;
     activeSkuId: string | null;
-    totalConsumed: number;
+    totalConsumed: number; // in grams
 }
 
 // [新增] 定义一个更详细的类型，用于在递归计算中传递配方数据
@@ -41,9 +41,9 @@ type FullRecipeVersion = RecipeVersion & {
     })[];
 };
 
-// [修复] 为 FullProduct 类型添加 ingredients 属性
+// [FIX] 为 FullProduct 类型添加 ingredients 属性
 type FullProduct = Product & {
-    recipeVersion: FullRecipeVersion;
+    recipeVersion: FullRecipeVersion & { family: RecipeFamily }; // [修正] 确保 family 被包含
     ingredients: ProductIngredient[];
 };
 
@@ -80,7 +80,7 @@ export class CostingService {
         }
 
         // 2. 将配方扁平化，计算出每种基础原料的总用量
-        const flatIngredients = this._getFlattenedIngredients(product);
+        const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientNames = Array.from(flatIngredients.keys());
         if (ingredientNames.length === 0) return [];
 
@@ -237,7 +237,7 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const flatIngredients = this._getFlattenedIngredients(product);
+        const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientsMap = await this.getIngredientsWithActiveSku(tenantId);
         let totalCost = new Decimal(0);
 
@@ -275,7 +275,7 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const flatIngredients = this._getFlattenedIngredients(product);
+        const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientsMap = await this.getIngredientsWithActiveSku(tenantId);
         const costBreakdown: { name: string; value: number }[] = [];
 
@@ -305,6 +305,7 @@ export class CostingService {
             include: {
                 recipeVersion: {
                     include: {
+                        family: true,
                         doughs: {
                             include: {
                                 ingredients: {
@@ -338,14 +339,41 @@ export class CostingService {
     /**
      * [核心新增] 私有辅助方法：将一个完整的配方（含面种）扁平化，计算出每种基础原料的总克重
      */
-    private _getFlattenedIngredients(product: FullProduct): Map<string, number> {
+    private async _getFlattenedIngredients(product: FullProduct): Promise<Map<string, number>> {
         const flattenedIngredients = new Map<string, number>(); // Map<ingredientName, weightInGrams>
+
+        // [核心修正] 1. 收集所有需要查询的原料名称
+        const allIngredientNames = new Set<string>();
+        const collectIngredientNames = (dough: ProcessableDough) => {
+            dough.ingredients.forEach((ing) => {
+                const preDough = ing.linkedPreDough?.versions?.[0];
+                if (preDough && preDough.doughs[0]) {
+                    collectIngredientNames(preDough.doughs[0]);
+                } else {
+                    allIngredientNames.add(ing.name);
+                }
+            });
+        };
+        product.recipeVersion.doughs.forEach((dough) => collectIngredientNames(dough));
+        product.ingredients?.forEach((pIng) => allIngredientNames.add(pIng.name));
+
+        // [核心修正] 2. 一次性从数据库查询所有原料的 isFlour 属性
+        const ingredientsFromDb = await this.prisma.ingredient.findMany({
+            where: {
+                tenantId: product.recipeVersion.family.tenantId,
+                name: { in: Array.from(allIngredientNames) },
+            },
+            select: { name: true, isFlour: true },
+        });
+        const ingredientInfoMap = new Map(ingredientsFromDb.map((i) => [i.name, i]));
 
         // [修复] 移除未使用的 isMainDough 参数，并为 dough 参数添加精确类型
         const processDough = (dough: ProcessableDough, doughWeight: number) => {
             let totalFlourRatio = 0;
             dough.ingredients.forEach((ing) => {
-                if (ing.isFlour) {
+                // [核心修正] 3. 从查询结果中获取 isFlour 属性
+                const ingredientInfo = ingredientInfoMap.get(ing.name);
+                if (ingredientInfo?.isFlour) {
                     totalFlourRatio += ing.ratio;
                 }
             });
@@ -393,7 +421,7 @@ export class CostingService {
             throw new NotFoundException('产品不存在');
         }
 
-        const flatIngredients = this._getFlattenedIngredients(product);
+        const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientNames = Array.from(flatIngredients.keys());
         if (ingredientNames.length === 0) return [];
 

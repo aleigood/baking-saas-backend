@@ -199,12 +199,13 @@ model Dough {
 
 // 面团中的原料
 model DoughIngredient {
-  id           String  @id @default(uuid())
-  doughId      String // 所属面团ID
-  name         String // 原料名称
-  ratio        Float // 基于总面粉的百分比
-  isFlour      Boolean @default(false) // 是否为面粉
-  waterContent Float?  @default(0) // 含水量百分比 (仅湿性材料)
+  id      String @id @default(uuid())
+  doughId String // 所属面团ID
+  name    String // 原料名称
+  ratio   Float // 基于总面粉的百分比
+  // [核心删除] 移除 isFlour 和 waterContent 字段
+  // isFlour      Boolean @default(false) 
+  // waterContent Float?  @default(0)
 
   // 如果这个原料本身是一个预制面团配方，这里会有关联
   linkedPreDoughId String?
@@ -264,6 +265,9 @@ model Ingredient {
   tenantId               String
   name                   String // e.g., "High-gluten flour"
   type                   IngredientType @default(STANDARD)
+  // [核心新增] 新增配方属性字段
+  isFlour                Boolean        @default(false)
+  waterContent           Float          @default(0)
   // 指向当前启用的SKU
   activeSkuId            String?
   // [核心重构] 将库存和价格移至此处

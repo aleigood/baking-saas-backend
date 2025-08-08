@@ -141,7 +141,7 @@ export class RecipesService {
                     },
                 });
 
-                // [回滚] 将所有 ingredients 关联到这个新创建的 dough
+                // [核心修正] 创建 DoughIngredient 时不再包含 isFlour 和 waterContent
                 for (const ingredientDto of ingredients) {
                     const linkedPreDough = await tx.recipeFamily.findFirst({
                         where: { name: ingredientDto.name, tenantId: tenantId, type: 'PRE_DOUGH', deletedAt: null },
@@ -151,8 +151,6 @@ export class RecipesService {
                             doughId: dough.id,
                             name: ingredientDto.name,
                             ratio: ingredientDto.ratio,
-                            isFlour: ingredientDto.isFlour ?? false,
-                            waterContent: ingredientDto.waterContent,
                             linkedPreDoughId: linkedPreDough?.id,
                         },
                     });

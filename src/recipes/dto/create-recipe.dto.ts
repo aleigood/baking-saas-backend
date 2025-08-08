@@ -1,13 +1,4 @@
-import {
-    IsString,
-    IsNotEmpty,
-    IsArray,
-    ValidateNested,
-    IsOptional,
-    IsNumber,
-    IsBoolean,
-    IsEnum,
-} from 'class-validator';
+import { IsString, IsNotEmpty, IsArray, ValidateNested, IsOptional, IsNumber, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ProductIngredientType, RecipeType } from '@prisma/client';
 
@@ -74,13 +65,14 @@ class DoughIngredientDto {
     @IsNotEmpty()
     ratio: number;
 
-    @IsBoolean()
-    @IsOptional()
-    isFlour?: boolean;
+    // [核心修正] 这两个字段已移至 Ingredient 模型，因此在此处移除
+    // @IsBoolean()
+    // @IsOptional()
+    // isFlour?: boolean;
 
-    @IsNumber()
-    @IsOptional()
-    waterContent?: number;
+    // @IsNumber()
+    // @IsOptional()
+    // waterContent?: number;
 }
 
 // [回滚] 移除 DoughDto，直接在主 DTO 中使用 ingredients
