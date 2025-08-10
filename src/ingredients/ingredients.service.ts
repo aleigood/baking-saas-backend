@@ -285,4 +285,65 @@ export class IngredientsService {
             return updatedIngredient;
         });
     }
+
+    // 新增：删除采购记录并更新库存
+    async deleteProcurement(tenantId: string, procurementId: string) {
+        // 1. 查找要删除的采购记录，并确保它属于该租户
+        const procurementRecord = await this.prisma.procurementRecord.findFirst({
+            where: {
+                id: procurementId,
+                sku: {
+                    ingredient: {
+                        tenantId: tenantId,
+                    },
+                },
+            },
+            include: {
+                sku: true,
+            },
+        });
+
+        if (!procurementRecord) {
+            throw new NotFoundException('采购记录不存在');
+        }
+
+        // 2. 计算需要扣减的库存量
+        const stockDecrease = procurementRecord.packagesPurchased * procurementRecord.sku.specWeightInGrams;
+
+        // 3. 查找该采购记录之前的最新一条采购记录，以恢复单价
+        const previousProcurement = await this.prisma.procurementRecord.findFirst({
+            where: {
+                skuId: procurementRecord.skuId,
+                purchaseDate: {
+                    lt: procurementRecord.purchaseDate,
+                },
+            },
+            orderBy: {
+                purchaseDate: 'desc',
+            },
+        });
+
+        // 4. 使用事务确保数据一致性
+        return this.prisma.$transaction(async (tx) => {
+            // 4.1 删除采购记录
+            await tx.procurementRecord.delete({
+                where: { id: procurementId },
+            });
+
+            // 4.2 更新原料库存和单价
+            const updatedIngredient = await tx.ingredient.update({
+                where: { id: procurementRecord.sku.ingredientId },
+                data: {
+                    // 扣减库存
+                    currentStockInGrams: {
+                        decrement: stockDecrease,
+                    },
+                    // 恢复到上一条记录的单价，如果没有则为0
+                    currentPricePerPackage: previousProcurement ? previousProcurement.pricePerPackage : 0,
+                },
+            });
+
+            return updatedIngredient;
+        });
+    }
 }
