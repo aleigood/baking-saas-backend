@@ -71,10 +71,14 @@ export class IngredientsController {
         return this.ingredientsService.createProcurement(user.tenantId, skuId, createProcurementDto);
     }
 
-    // 新增：删除采购记录的端点
-    @Delete('procurements/:procurementId')
-    deleteProcurement(@GetUser() user: UserPayload, @Param('procurementId') procurementId: string) {
-        // 调用服务层方法处理删除逻辑
-        return this.ingredientsService.deleteProcurement(user.tenantId, procurementId);
+    /**
+     * [核心新增] 删除一条采购记录
+     * @param user 当前用户
+     * @param id 采购记录的ID
+     * @returns
+     */
+    @Delete('procurements/:id')
+    deleteProcurement(@GetUser() user: UserPayload, @Param('id') id: string) {
+        return this.ingredientsService.deleteProcurement(user.tenantId, id);
     }
 }

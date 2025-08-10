@@ -286,10 +286,14 @@ export class IngredientsService {
         });
     }
 
-    // 新增：删除采购记录并更新库存
+    /**
+     * [核心新增] 删除采购记录并更新原料库存和单价
+     * @param tenantId 租户ID
+     * @param procurementId 采购记录ID
+     */
     async deleteProcurement(tenantId: string, procurementId: string) {
-        // 1. 查找要删除的采购记录，并确保它属于该租户
-        const procurementRecord = await this.prisma.procurementRecord.findFirst({
+        // 1. 查找采购记录，并确保它属于该租户
+        const procurementToDelete = await this.prisma.procurementRecord.findFirst({
             where: {
                 id: procurementId,
                 sku: {
@@ -303,43 +307,42 @@ export class IngredientsService {
             },
         });
 
-        if (!procurementRecord) {
+        if (!procurementToDelete) {
             throw new NotFoundException('采购记录不存在');
         }
 
-        // 2. 计算需要扣减的库存量
-        const stockDecrease = procurementRecord.packagesPurchased * procurementRecord.sku.specWeightInGrams;
+        const { sku } = procurementToDelete;
+        const stockDecrease = procurementToDelete.packagesPurchased * sku.specWeightInGrams;
 
-        // 3. 查找该采购记录之前的最新一条采购记录，以恢复单价
-        const previousProcurement = await this.prisma.procurementRecord.findFirst({
-            where: {
-                skuId: procurementRecord.skuId,
-                purchaseDate: {
-                    lt: procurementRecord.purchaseDate,
-                },
-            },
-            orderBy: {
-                purchaseDate: 'desc',
-            },
-        });
-
-        // 4. 使用事务确保数据一致性
+        // 2. 使用数据库事务来保证数据一致性
         return this.prisma.$transaction(async (tx) => {
-            // 4.1 删除采购记录
+            // 2.1 删除采购记录
             await tx.procurementRecord.delete({
                 where: { id: procurementId },
             });
 
-            // 4.2 更新原料库存和单价
+            // 2.2 查找删除后最新的采购记录，以更新单价
+            const latestProcurement = await tx.procurementRecord.findFirst({
+                where: {
+                    sku: {
+                        ingredientId: sku.ingredientId,
+                    },
+                },
+                orderBy: {
+                    purchaseDate: 'desc',
+                },
+            });
+
+            // 2.3 更新原料的库存和当前单价
             const updatedIngredient = await tx.ingredient.update({
-                where: { id: procurementRecord.sku.ingredientId },
+                where: { id: sku.ingredientId },
                 data: {
-                    // 扣减库存
+                    // 减去对应的库存量
                     currentStockInGrams: {
                         decrement: stockDecrease,
                     },
-                    // 恢复到上一条记录的单价，如果没有则为0
-                    currentPricePerPackage: previousProcurement ? previousProcurement.pricePerPackage : 0,
+                    // 如果还有其他采购记录，则更新为最新记录的单价，否则重置为0
+                    currentPricePerPackage: latestProcurement ? latestProcurement.pricePerPackage : 0,
                 },
             });
 
