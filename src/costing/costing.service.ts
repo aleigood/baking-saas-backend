@@ -300,8 +300,9 @@ export class CostingService {
      * [核心新增] 私有辅助方法：获取一个产品的完整配方信息，包括所有嵌套的面种
      */
     private async getFullProduct(tenantId: string, productId: string): Promise<FullProduct | null> {
+        // [关键修改] 移除查询条件中的 isActive: true
         return this.prisma.product.findFirst({
-            where: { id: productId, recipeVersion: { family: { tenantId }, isActive: true } },
+            where: { id: productId, recipeVersion: { family: { tenantId } } },
             include: {
                 recipeVersion: {
                     include: {
