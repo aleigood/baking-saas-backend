@@ -21,7 +21,7 @@ export class IngredientsService {
         });
     }
 
-    // 查询租户下的所有原料
+    // [REFACTORED] findAll 方法现在直接计算每日消耗和可供应天数
     async findAll(tenantId: string) {
         // [核心修改] 过滤掉作为半成品的原料（例如：烫种、卡仕达酱等）
         // 1. 首先找出所有类型为 PRE_DOUGH 或 EXTRA 的配方名称
@@ -59,8 +59,13 @@ export class IngredientsService {
             },
         });
 
-        // [核心新增] 计算每种原料的平均单次任务消耗量
+        // [ADDED] 为每个原料计算平均每日消耗和可供应天数
         const ingredientIds = ingredients.map((i) => i.id);
+        if (ingredientIds.length === 0) {
+            // 如果没有原料，直接返回空数组，避免后续计算
+            return [];
+        }
+
         const consumptionLogs = await this.prisma.ingredientConsumptionLog.findMany({
             where: {
                 ingredientId: { in: ingredientIds },
@@ -68,38 +73,71 @@ export class IngredientsService {
             select: {
                 ingredientId: true,
                 quantityInGrams: true,
-                productionLogId: true,
+                productionLog: {
+                    // [FIXED] 同时查询 taskId 和 completedAt 以修复编译错误
+                    select: {
+                        completedAt: true,
+                        taskId: true,
+                    },
+                },
             },
         });
 
-        const consumptionStats = new Map<string, { total: number; count: number }>();
-        for (const log of consumptionLogs) {
-            if (!consumptionStats.has(log.ingredientId)) {
-                consumptionStats.set(log.ingredientId, { total: 0, count: 0 });
-            }
-            const stats = consumptionStats.get(log.ingredientId)!;
-            stats.total += log.quantityInGrams;
+        // 如果没有任何消耗记录，则所有原料的可供应天数都视为无限
+        if (consumptionLogs.length === 0) {
+            return ingredients.map((i) => ({
+                ...i,
+                daysOfSupply: Infinity,
+                avgDailyConsumption: 0,
+                avgConsumptionPerTask: 0,
+            }));
         }
 
-        // 计算每个原料被用在多少个不同的生产任务中
-        const taskCounts = new Map<string, number>();
-        const uniqueTaskLogs = new Map<string, Set<string>>(); // ingredientId -> Set<productionLogId>
+        // 按原料ID对消耗记录进行分组和统计
+        const consumptionStats = new Map<
+            string,
+            { total: number; count: number; firstDate: Date; lastDate: Date; taskIds: Set<string> }
+        >();
         for (const log of consumptionLogs) {
-            if (!uniqueTaskLogs.has(log.ingredientId)) {
-                uniqueTaskLogs.set(log.ingredientId, new Set());
+            const stats = consumptionStats.get(log.ingredientId);
+            const completedAt = log.productionLog.completedAt;
+
+            if (!stats) {
+                consumptionStats.set(log.ingredientId, {
+                    total: log.quantityInGrams,
+                    count: 1,
+                    firstDate: completedAt,
+                    lastDate: completedAt,
+                    taskIds: new Set([log.productionLog.taskId]),
+                });
+            } else {
+                stats.total += log.quantityInGrams;
+                stats.count++;
+                if (completedAt < stats.firstDate) stats.firstDate = completedAt;
+                if (completedAt > stats.lastDate) stats.lastDate = completedAt;
+                stats.taskIds.add(log.productionLog.taskId);
             }
-            uniqueTaskLogs.get(log.ingredientId)!.add(log.productionLogId);
         }
-        uniqueTaskLogs.forEach((tasks, ingredientId) => {
-            taskCounts.set(ingredientId, tasks.size);
-        });
 
         return ingredients.map((ingredient) => {
             const stats = consumptionStats.get(ingredient.id);
-            const tasks = taskCounts.get(ingredient.id) || 0;
-            const avgConsumptionPerTask = stats && tasks > 0 ? stats.total / tasks : 0;
+            if (!stats || stats.total === 0) {
+                return { ...ingredient, daysOfSupply: Infinity, avgDailyConsumption: 0, avgConsumptionPerTask: 0 };
+            }
+
+            // 计算消耗周期的天数（至少为1天，避免除以0）
+            const timeDiff = stats.lastDate.getTime() - stats.firstDate.getTime();
+            const dayDiff = Math.max(1, Math.ceil(timeDiff / (1000 * 3600 * 24)));
+
+            const avgDailyConsumption = stats.total / dayDiff;
+            const daysOfSupply =
+                avgDailyConsumption > 0 ? ingredient.currentStockInGrams / avgDailyConsumption : Infinity;
+            const avgConsumptionPerTask = stats.taskIds.size > 0 ? stats.total / stats.taskIds.size : 0;
+
             return {
                 ...ingredient,
+                daysOfSupply,
+                avgDailyConsumption,
                 avgConsumptionPerTask,
             };
         });
