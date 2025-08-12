@@ -12,6 +12,17 @@ export class CostingController {
     constructor(private readonly costingService: CostingService) {}
 
     /**
+     * [新增] 获取计算后的产品配方详情，用于客户端展示
+     * @param user 认证用户
+     * @param productId 产品ID
+     * @returns 结构化的配方详情，包含用量和成本
+     */
+    @Get('products/:productId/details')
+    async getCalculatedProductDetails(@GetUser() user: UserPayload, @Param('productId') productId: string) {
+        return this.costingService.getCalculatedProductDetails(user.tenantId, productId);
+    }
+
+    /**
      * 计算指定产品的总成本
      * @param user 认证用户
      * @param productId 产品ID

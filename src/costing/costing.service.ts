@@ -9,6 +9,7 @@ import {
     IngredientSKU,
     Product,
     ProductIngredient,
+    ProductIngredientType, // [新增] 导入 ProductIngredientType
     RecipeFamily,
     RecipeVersion,
 } from '@prisma/client';
@@ -22,6 +23,38 @@ interface ConsumptionDetail {
     ingredientName: string;
     activeSkuId: string | null;
     totalConsumed: number; // in grams
+}
+
+// [新增] 定义配方详情计算结果的返回结构
+export interface CalculatedIngredientInfo {
+    name: string;
+    ratio: number;
+    weightInGrams: number;
+    pricePerKg: string;
+    cost: number;
+}
+
+export interface CalculatedDoughGroup {
+    name: string;
+    ingredients: CalculatedIngredientInfo[];
+    procedure?: string[];
+    totalCost: number;
+}
+
+export interface CalculatedExtraIngredientInfo {
+    id: string;
+    name: string;
+    type: string;
+    cost: number;
+    weightInGrams: number;
+    ratio?: number;
+}
+
+export interface CalculatedProductCostDetails {
+    totalCost: number;
+    doughGroups: CalculatedDoughGroup[];
+    extraIngredients: CalculatedExtraIngredientInfo[];
+    groupedExtraIngredients: Record<string, CalculatedExtraIngredientInfo[]>;
 }
 
 // [新增] 定义一个更详细的类型，用于在递归计算中传递配方数据
@@ -226,6 +259,142 @@ export class CostingService {
 
         // 3. 格式化并反转数组以匹配图表顺序
         return consumptionLogs.map((log) => ({ cost: log.quantityInGrams })).reverse();
+    }
+
+    /**
+     * [核心新增] 计算并返回产品的完整配方详情，包括所有原料的用量和成本
+     * @param tenantId 租户ID
+     * @param productId 产品ID
+     * @returns 结构化的配方详情，可直接用于前端渲染
+     */
+    async getCalculatedProductDetails(tenantId: string, productId: string): Promise<CalculatedProductCostDetails> {
+        const product = await this.getFullProduct(tenantId, productId);
+        if (!product) {
+            throw new NotFoundException('产品或其激活的配方版本不存在');
+        }
+
+        const ingredientsMap = await this.getIngredientsWithActiveSku(tenantId);
+        const getPricePerKg = (name: string) => {
+            const ingredientInfo = ingredientsMap.get(name);
+            if (ingredientInfo?.activeSku) {
+                const price = new Decimal(ingredientInfo.currentPricePerPackage).div(
+                    ingredientInfo.activeSku.specWeightInGrams,
+                );
+                return price.mul(1000).toDP(2).toNumber();
+            }
+            return 0;
+        };
+
+        const doughGroups: CalculatedDoughGroup[] = [];
+        let totalCost = new Decimal(0);
+        let totalFlourWeight = new Decimal(0);
+
+        // 递归函数，用于处理面团和预制面团
+        const processDough = (dough: ProcessableDough, doughWeight: number): CalculatedDoughGroup => {
+            const group: CalculatedDoughGroup = {
+                name: dough.name,
+                ingredients: [],
+                procedure: dough.procedure,
+                totalCost: 0,
+            };
+
+            const totalRatio = dough.ingredients.reduce((sum, i) => sum + i.ratio, 0);
+            if (totalRatio === 0) return group;
+
+            const weightPerRatioPoint = new Decimal(doughWeight).div(totalRatio);
+
+            for (const ingredient of dough.ingredients) {
+                const weight = weightPerRatioPoint.mul(ingredient.ratio);
+                const preDough = ingredient.linkedPreDough?.versions?.[0];
+
+                if (preDough && preDough.doughs[0]) {
+                    const preDoughGroup = processDough(preDough.doughs[0], weight.toNumber());
+                    preDoughGroup.name = `${ingredient.name} (用量: ${weight.toDP(1).toNumber()}g)`;
+                    doughGroups.push(preDoughGroup);
+                } else {
+                    const pricePerKg = getPricePerKg(ingredient.name);
+                    const cost = new Decimal(pricePerKg).div(1000).mul(weight);
+                    group.ingredients.push({
+                        name: ingredient.name,
+                        ratio: ingredient.ratio,
+                        weightInGrams: weight.toDP(1).toNumber(),
+                        pricePerKg: pricePerKg.toFixed(2),
+                        cost: cost.toDP(2).toNumber(),
+                    });
+                    group.totalCost = new Decimal(group.totalCost).add(cost).toNumber();
+
+                    const ingredientInfo = ingredientsMap.get(ingredient.name);
+                    if (ingredientInfo?.isFlour) {
+                        totalFlourWeight = totalFlourWeight.add(weight);
+                    }
+                }
+            }
+            totalCost = totalCost.add(group.totalCost);
+            return group;
+        };
+
+        // 处理主配方中的所有面团
+        product.recipeVersion.doughs.forEach((dough) => {
+            const mainDoughGroup = processDough(dough, product.baseDoughWeight);
+            if (mainDoughGroup.ingredients.length > 0) {
+                doughGroups.push(mainDoughGroup);
+            }
+        });
+
+        // 处理附加原料 (mix-in, filling, topping)
+        const getProductIngredientTypeName = (type: ProductIngredientType) => {
+            const map = { MIX_IN: '搅拌原料', FILLING: '馅料', TOPPING: '表面装饰' };
+            return map[type] || '附加原料';
+        };
+
+        const extraIngredients = (product.ingredients || []).map((ing) => {
+            const pricePerKg = getPricePerKg(ing.name);
+            let finalWeightInGrams = new Decimal(0);
+            if (ing.type === 'MIX_IN' && ing.ratio) {
+                finalWeightInGrams = totalFlourWeight.mul(ing.ratio).div(100);
+            } else if (ing.weightInGrams) {
+                finalWeightInGrams = new Decimal(ing.weightInGrams);
+            }
+            const cost = new Decimal(pricePerKg).div(1000).mul(finalWeightInGrams);
+            totalCost = totalCost.add(cost);
+
+            return {
+                id: ing.id,
+                name: ing.name,
+                type: getProductIngredientTypeName(ing.type),
+                cost: cost.toDP(2).toNumber(),
+                weightInGrams: finalWeightInGrams.toDP(1).toNumber(),
+                ratio: ing.ratio ?? undefined,
+            };
+        });
+
+        const allExtraIngredients = [
+            {
+                id: 'dough-summary',
+                name: '基础面团',
+                type: '面团',
+                cost: doughGroups.reduce((sum, g) => sum + g.totalCost, 0),
+                weightInGrams: product.baseDoughWeight,
+            },
+            ...extraIngredients,
+        ];
+
+        const groupedExtraIngredients = allExtraIngredients.reduce(
+            (acc, ing) => {
+                const typeKey = ing.type || '其他';
+                if (!acc[typeKey]) acc[typeKey] = [];
+                acc[typeKey].push(ing);
+                return acc;
+            },
+            {} as Record<string, CalculatedExtraIngredientInfo[]>,
+        );
+
+        return {
+            totalCost: totalCost.toDP(2).toNumber(),
+            doughGroups,
+            extraIngredients: allExtraIngredients,
+            groupedExtraIngredients,
+        };
     }
 
     /**
