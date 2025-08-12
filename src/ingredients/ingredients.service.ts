@@ -90,6 +90,7 @@ export class IngredientsService {
                 daysOfSupply: Infinity,
                 avgDailyConsumption: 0,
                 avgConsumptionPerTask: 0,
+                totalConsumptionInGrams: 0,
             }));
         }
 
@@ -122,7 +123,13 @@ export class IngredientsService {
         return ingredients.map((ingredient) => {
             const stats = consumptionStats.get(ingredient.id);
             if (!stats || stats.total === 0) {
-                return { ...ingredient, daysOfSupply: Infinity, avgDailyConsumption: 0, avgConsumptionPerTask: 0 };
+                return {
+                    ...ingredient,
+                    daysOfSupply: Infinity,
+                    avgDailyConsumption: 0,
+                    avgConsumptionPerTask: 0,
+                    totalConsumptionInGrams: 0,
+                };
             }
 
             // 计算消耗周期的天数（至少为1天，避免除以0）
@@ -139,6 +146,7 @@ export class IngredientsService {
                 daysOfSupply,
                 avgDailyConsumption,
                 avgConsumptionPerTask,
+                totalConsumptionInGrams: stats.total, // [ADDED] 新增总消耗量字段
             };
         });
     }
