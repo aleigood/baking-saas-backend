@@ -71,17 +71,20 @@ export class ProductionTasksService {
         });
     }
 
-    // 查询生产任务列表
-    // (Find all production tasks)
+    // [REFACTORED] 重构 findAll 方法以支持分页和分组
     async findAll(tenantId: string, query: QueryProductionTaskDto) {
-        const { status, plannedDate } = query;
+        const { status, plannedDate, page = '1', limit = '10' } = query;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+
         const where: Prisma.ProductionTaskWhereInput = {
             tenantId,
             deletedAt: null,
         };
 
-        if (status) {
-            where.status = status;
+        if (status && status.length > 0) {
+            // [MODIFIED] 支持状态数组查询
+            where.status = { in: status };
         }
 
         if (plannedDate) {
@@ -95,11 +98,70 @@ export class ProductionTasksService {
             };
         }
 
+        // [ADDED] 检查是否是历史任务查询，如果是则应用分页和分组逻辑
+        const isHistoryQuery = status && status.some((s) => ['COMPLETED', 'CANCELLED'].includes(s));
+
+        if (isHistoryQuery) {
+            const tasks = await this.prisma.productionTask.findMany({
+                where,
+                include: {
+                    items: {
+                        include: {
+                            product: {
+                                include: {
+                                    recipeVersion: {
+                                        include: {
+                                            family: true,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                orderBy: {
+                    plannedDate: 'desc', // 按日期降序排序
+                },
+                skip: (pageNum - 1) * limitNum,
+                take: limitNum,
+            });
+
+            // [ADDED] 按日期进行分组
+            const groupedTasks = tasks.reduce(
+                (acc, task) => {
+                    // 格式化日期为 'MM月DD日 星期X'
+                    const date = new Date(task.plannedDate).toLocaleDateString('zh-CN', {
+                        month: 'long',
+                        day: 'numeric',
+                        weekday: 'long',
+                    });
+                    if (!acc[date]) {
+                        acc[date] = [];
+                    }
+                    acc[date].push(task);
+                    return acc;
+                },
+                {} as Record<string, any[]>,
+            );
+
+            const totalTasks = await this.prisma.productionTask.count({ where });
+
+            return {
+                data: groupedTasks,
+                meta: {
+                    total: totalTasks,
+                    page: pageNum,
+                    limit: limitNum,
+                    lastPage: Math.ceil(totalTasks / limitNum),
+                    hasMore: pageNum * limitNum < totalTasks,
+                },
+            };
+        }
+
+        // 对于进行中的任务，保持原有逻辑，不分页
         return this.prisma.productionTask.findMany({
             where,
             include: {
-                // [修改] 包含任务中的产品项
-                // (Modified: Include product items in the task)
                 items: {
                     include: {
                         product: {
