@@ -226,8 +226,11 @@ export class RecipesService {
                     include: {
                         products: true,
                         doughs: {
+                            // [MODIFIED] 使用 _count 来高效地获取原料数量，而不是获取所有原料实体
                             include: {
-                                ingredients: true,
+                                _count: {
+                                    select: { ingredients: true },
+                                },
                             },
                         },
                     },
