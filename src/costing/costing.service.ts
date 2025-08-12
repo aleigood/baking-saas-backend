@@ -100,7 +100,7 @@ export class CostingService {
     constructor(private readonly prisma: PrismaService) {}
 
     /**
-     * [核心逻辑最终修正] 获取产品成本的历史变化记录
+     * [核心逻辑重构] 获取产品成本的历史变化记录, 现在基于采购事件
      * @param tenantId 租户ID
      * @param productId 产品ID
      * @returns 一个包含每次成本变化点的数组
@@ -123,51 +123,60 @@ export class CostingService {
             select: { id: true, name: true, skus: { select: { id: true } } },
         });
 
+        const allSkuIds = ingredientsWithSkus.flatMap((i) => i.skus.map((s) => s.id));
+        if (allSkuIds.length === 0) {
+            // 如果没有任何SKU，则只返回当前成本（可能为0）
+            const currentCostResult = await this.calculateProductCost(tenantId, productId);
+            return [{ cost: Number(currentCostResult.totalCost) }];
+        }
+
+        // 4. 获取所有相关的采购记录，并按日期排序
+        const allProcurements = await this.prisma.procurementRecord.findMany({
+            where: { skuId: { in: allSkuIds } },
+            orderBy: { purchaseDate: 'asc' },
+            select: { purchaseDate: true },
+        });
+
+        // 5. 确定所有成本变化的时间点（去重并排序）
+        const costChangeDates = [
+            ...new Set(allProcurements.map((p) => p.purchaseDate.toISOString().split('T')[0])),
+        ].map((d) => new Date(d));
+
         const costHistory: { cost: number }[] = [];
-        const today = new Date();
 
-        // 4. 循环10次，为最近10周每周生成一个成本快照
-        for (let i = 0; i < 10; i++) {
-            const weekEndDate = new Date(today);
-            weekEndDate.setDate(today.getDate() - i * 7);
-
-            let weeklyTotalCost = new Decimal(0);
-
-            // 5. 对配方中的每种原料，查找在当周结束前的最新采购价格
+        // 6. 为每个成本变化的时间点计算成本快照
+        for (const date of costChangeDates) {
+            let snapshotTotalCost = new Decimal(0);
             for (const [name, weight] of flatIngredients.entries()) {
                 const ingredientInfo = ingredientsWithSkus.find((ing) => ing.name === name);
-                if (!ingredientInfo || ingredientInfo.skus.length === 0) {
-                    continue; // 如果原料没有SKU，则跳过
-                }
+                if (!ingredientInfo || ingredientInfo.skus.length === 0) continue;
 
                 const skuIds = ingredientInfo.skus.map((s) => s.id);
-
+                // 查找截至当天（包含当天）的最新采购记录
                 const latestProcurement = await this.prisma.procurementRecord.findFirst({
                     where: {
                         skuId: { in: skuIds },
-                        purchaseDate: { lte: weekEndDate },
+                        purchaseDate: { lte: new Date(date.getTime() + 86400000 - 1) }, // 包含当天
                     },
-                    orderBy: {
-                        purchaseDate: 'desc',
-                    },
-                    include: {
-                        sku: { select: { specWeightInGrams: true } },
-                    },
+                    orderBy: { purchaseDate: 'desc' },
+                    include: { sku: { select: { specWeightInGrams: true } } },
                 });
 
-                // 如果找到了采购记录，则用该价格计算成本
                 if (latestProcurement) {
                     const pricePerGram = new Decimal(latestProcurement.pricePerPackage).div(
                         latestProcurement.sku.specWeightInGrams,
                     );
-                    weeklyTotalCost = weeklyTotalCost.add(pricePerGram.mul(weight));
+                    snapshotTotalCost = snapshotTotalCost.add(pricePerGram.mul(weight));
                 }
             }
-            costHistory.push({ cost: weeklyTotalCost.toDP(4).toNumber() });
+            costHistory.push({ cost: snapshotTotalCost.toDP(4).toNumber() });
         }
 
-        // 6. 反转数组，使图表从左到右时间递增
-        return costHistory.reverse();
+        // 7. 添加当前实时成本作为最后一个点，确保曲线连接到当前状态
+        const currentCostResult = await this.calculateProductCost(tenantId, productId);
+        costHistory.push({ cost: Number(currentCostResult.totalCost) });
+
+        return costHistory;
     }
 
     /**
@@ -430,7 +439,7 @@ export class CostingService {
     }
 
     /**
-     * [核心新增] 计算产品中各原料的成本构成
+     * [核心重构] 计算产品中各原料的成本构成, 并聚合为前4+其他
      * @param tenantId 租户ID
      * @param productId 产品ID
      * @returns 返回一个包含 { name: string, value: number } 的数组，用于饼图
@@ -462,7 +471,20 @@ export class CostingService {
             }
         }
 
-        return costBreakdown;
+        // 按成本排序
+        const sortedBreakdown = costBreakdown.sort((a, b) => b.value - a.value);
+
+        // [核心修改] 如果超过4项，则聚合为前4+其他
+        if (sortedBreakdown.length > 4) {
+            const top4 = sortedBreakdown.slice(0, 4);
+            const otherValue = sortedBreakdown.slice(4).reduce((sum, item) => sum + item.value, 0);
+            if (otherValue > 0) {
+                return [...top4, { name: '其他', value: otherValue }];
+            }
+            return top4;
+        }
+
+        return sortedBreakdown;
     }
 
     /**
@@ -511,6 +533,8 @@ export class CostingService {
      */
     private async _getFlattenedIngredients(product: FullProduct): Promise<Map<string, number>> {
         const flattenedIngredients = new Map<string, number>(); // Map<ingredientName, weightInGrams>
+        // [错误修复] 在顶层作用域声明 totalFlourWeight
+        let totalFlourWeight = new Decimal(0);
 
         // [核心修正] 1. 收集所有需要查询的原料名称
         const allIngredientNames = new Set<string>();
@@ -539,18 +563,18 @@ export class CostingService {
 
         // [修复] 移除未使用的 isMainDough 参数，并为 dough 参数添加精确类型
         const processDough = (dough: ProcessableDough, doughWeight: number) => {
-            let totalFlourRatio = 0;
+            let flourRatioInDough = 0;
             dough.ingredients.forEach((ing) => {
-                // [核心修正] 3. 从查询结果中获取 isFlour 属性
                 const ingredientInfo = ingredientInfoMap.get(ing.name);
                 if (ingredientInfo?.isFlour) {
-                    totalFlourRatio += ing.ratio;
+                    flourRatioInDough += ing.ratio;
                 }
             });
-            if (totalFlourRatio === 0) totalFlourRatio = 100;
+            if (flourRatioInDough === 0) flourRatioInDough = 100;
 
             const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
-            const flourWeightInDough = (doughWeight * totalFlourRatio) / totalRatio;
+            if (totalRatio === 0) return;
+            const flourWeightInDough = (doughWeight * flourRatioInDough) / totalRatio;
 
             for (const ing of dough.ingredients) {
                 const ingredientWeight = (flourWeightInDough * ing.ratio) / 100;
@@ -561,6 +585,11 @@ export class CostingService {
                 } else {
                     const currentWeight = flattenedIngredients.get(ing.name) || 0;
                     flattenedIngredients.set(ing.name, currentWeight + ingredientWeight);
+                    // [错误修复] 在这里累加总面粉量
+                    const ingredientInfo = ingredientInfoMap.get(ing.name);
+                    if (ingredientInfo?.isFlour) {
+                        totalFlourWeight = totalFlourWeight.add(ingredientWeight);
+                    }
                 }
             }
         };
@@ -575,6 +604,12 @@ export class CostingService {
             if (pIng.weightInGrams) {
                 const currentWeight = flattenedIngredients.get(pIng.name) || 0;
                 flattenedIngredients.set(pIng.name, currentWeight + pIng.weightInGrams);
+            } else if (pIng.ratio) {
+                // 处理搅拌类原料
+                // [错误修复] 使用修复后的 totalFlourWeight 进行计算
+                const weight = totalFlourWeight.mul(pIng.ratio).div(100).toNumber();
+                const currentWeight = flattenedIngredients.get(pIng.name) || 0;
+                flattenedIngredients.set(pIng.name, currentWeight + weight);
             }
         });
 
