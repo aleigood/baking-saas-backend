@@ -106,6 +106,9 @@ export class StatsService {
             },
         });
 
+        // [核心新增] 计算已完成的任务总数
+        const totalTasks = completedTasks.length;
+
         const productStatsMap = new Map<string, { name: string; count: number }>();
         for (const task of completedTasks) {
             for (const item of task.items) {
@@ -140,6 +143,7 @@ export class StatsService {
         const ingredientMap = new Map(ingredients.map((i) => [i.id, i.name]));
 
         return {
+            totalTasks, // [核心新增] 返回任务总数
             productStats: Array.from(productStatsMap.values()),
             ingredientConsumption: consumptionStats.map((s) => ({
                 name: ingredientMap.get(s.ingredientId) || '未知原料',
