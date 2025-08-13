@@ -238,20 +238,20 @@ export class RecipesService {
             },
         });
 
-        // [ADDED] 使用 Promise.all 并行计算每个配方的生产总数
+        // [ADDED] 使用 Promise.all 并行计算每个配方的生产总数和任务次数
         const familiesWithCounts = await Promise.all(
             recipeFamilies.map(async (family) => {
                 // 只查找激活的版本来计算
                 const activeVersion = family.versions.find((v) => v.isActive);
                 if (!activeVersion || activeVersion.products.length === 0) {
                     // 如果没有激活的版本或版本中没有产品，则制作次数为0
-                    return { ...family, productionCount: 0 };
+                    return { ...family, productionCount: 0, productionTaskCount: 0 };
                 }
 
                 const productIds = activeVersion.products.map((p) => p.id);
 
                 // 在数据库中聚合计算与这些产品相关的已完成任务的总数量
-                const result = await this.prisma.productionTaskItem.aggregate({
+                const aggregateResult = await this.prisma.productionTaskItem.aggregate({
                     _sum: {
                         quantity: true,
                     },
@@ -264,10 +264,23 @@ export class RecipesService {
                     },
                 });
 
+                // [核心新增] 计算制作任务次数
+                const distinctTasks = await this.prisma.productionTaskItem.groupBy({
+                    by: ['taskId'],
+                    where: {
+                        productId: { in: productIds },
+                        task: {
+                            status: 'COMPLETED',
+                            deletedAt: null,
+                        },
+                    },
+                });
+
                 // 将计算结果附加到配方对象上
                 return {
                     ...family,
-                    productionCount: result._sum.quantity || 0,
+                    productionCount: aggregateResult._sum.quantity || 0,
+                    productionTaskCount: distinctTasks.length, // 新增字段：制作任务次数
                 };
             }),
         );
