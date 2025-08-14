@@ -49,6 +49,21 @@ export class RecipesController {
     }
 
     /**
+     * [新增] 删除一个指定的配方版本
+     * @param user
+     * @param familyId
+     * @param versionId
+     */
+    @Delete(':familyId/versions/:versionId')
+    deleteVersion(
+        @GetUser() user: UserPayload,
+        @Param('familyId') familyId: string,
+        @Param('versionId') versionId: string,
+    ) {
+        return this.recipesService.deleteVersion(user.tenantId, familyId, versionId);
+    }
+
+    /**
      * 获取当前租户的所有配方族（及其激活版本）。
      */
     @Get()

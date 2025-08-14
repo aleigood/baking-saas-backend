@@ -221,6 +221,47 @@ export class IngredientsService {
     }
 
     /**
+     * [新增] 删除一个SKU
+     * @param tenantId 租户ID
+     * @param skuId SKU ID
+     */
+    async deleteSku(tenantId: string, skuId: string) {
+        // 1. 验证SKU是否存在且属于该租户
+        const skuToDelete = await this.prisma.ingredientSKU.findFirst({
+            where: {
+                id: skuId,
+                ingredient: {
+                    tenantId: tenantId,
+                },
+            },
+            include: {
+                _count: {
+                    select: { procurementRecords: true },
+                },
+            },
+        });
+
+        if (!skuToDelete) {
+            throw new NotFoundException('SKU不存在');
+        }
+
+        // 2. 业务规则：如果SKU下有采购记录，则不允许删除
+        if (skuToDelete._count.procurementRecords > 0) {
+            throw new BadRequestException('该SKU下已存在采购记录，无法删除');
+        }
+
+        // 3. 业务规则：如果SKU是激活状态，则不允许删除
+        if (skuToDelete.status === SkuStatus.ACTIVE) {
+            throw new BadRequestException('不能删除当前激活的SKU');
+        }
+
+        // 4. 执行删除
+        return this.prisma.ingredientSKU.delete({
+            where: { id: skuId },
+        });
+    }
+
+    /**
      * [V2.1 核心逻辑重写] 设置某个SKU为原料的激活SKU
      * @param tenantId 租户ID
      * @param ingredientId 原料ID

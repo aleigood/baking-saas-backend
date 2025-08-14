@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 // [修改] 导入Prisma，用于指定事务隔离级别
@@ -383,6 +383,72 @@ export class RecipesService {
         return this.prisma.recipeFamily.update({
             where: { id: familyId },
             data: { deletedAt: new Date() },
+        });
+    }
+
+    /**
+     * [新增] 删除一个指定的配方版本
+     * @param tenantId 租户ID
+     * @param familyId 配方族ID
+     * @param versionId 要删除的版本ID
+     */
+    async deleteVersion(tenantId: string, familyId: string, versionId: string) {
+        // 1. 验证版本是否存在且属于该租户
+        const versionToDelete = await this.prisma.recipeVersion.findFirst({
+            where: {
+                id: versionId,
+                familyId: familyId,
+                family: {
+                    tenantId: tenantId,
+                },
+            },
+            include: {
+                products: true, // 包含版本下的所有产品
+                family: {
+                    include: {
+                        _count: {
+                            select: { versions: true },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!versionToDelete) {
+            throw new NotFoundException('指定的配方版本不存在');
+        }
+
+        // 2. 业务规则：如果是激活的版本，则不允许删除
+        if (versionToDelete.isActive) {
+            throw new BadRequestException('不能删除当前激活的配方版本');
+        }
+
+        // 3. 业务规则：如果这是配方族中唯一的一个版本，则不允许删除
+        if (versionToDelete.family._count.versions <= 1) {
+            throw new BadRequestException('不能删除配方族的最后一个版本');
+        }
+
+        // [错误修复] 检查此版本下的产品是否已在生产任务中使用
+        const productIds = versionToDelete.products.map((p) => p.id);
+        if (productIds.length > 0) {
+            const taskCount = await this.prisma.productionTaskItem.count({
+                where: {
+                    productId: {
+                        in: productIds,
+                    },
+                },
+            });
+
+            if (taskCount > 0) {
+                throw new BadRequestException('该配方版本已被生产任务使用，无法删除');
+            }
+        }
+
+        // 4. 执行删除
+        // 由于数据库模型中设置了级联删除（onDelete: Cascade），
+        // 删除版本会自动删除其下的Dough、DoughIngredient、Product和ProductIngredient
+        return this.prisma.recipeVersion.delete({
+            where: { id: versionId },
         });
     }
 }

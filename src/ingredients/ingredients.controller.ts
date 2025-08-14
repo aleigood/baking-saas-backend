@@ -51,6 +51,16 @@ export class IngredientsController {
     }
 
     /**
+     * [新增] 删除一个SKU
+     * @param user 当前用户
+     * @param skuId SKU的ID
+     */
+    @Delete('skus/:skuId')
+    deleteSku(@GetUser() user: UserPayload, @Param('skuId') skuId: string) {
+        return this.ingredientsService.deleteSku(user.tenantId, skuId);
+    }
+
+    /**
      * [V2.1 接口变更] 设置激活的SKU
      */
     @Post(':ingredientId/active-sku')
