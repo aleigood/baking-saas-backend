@@ -194,15 +194,51 @@ export class IngredientsService {
         });
     }
 
-    // 软删除原料品类
+    /**
+     * [V2.5 核心逻辑重写] 物理删除原料品类，增加使用校验
+     * @param tenantId 租户ID
+     * @param id 原料ID
+     */
     async remove(tenantId: string, id: string) {
-        // 确保该原料存在且属于该租户
-        await this.findOne(tenantId, id);
-        return this.prisma.ingredient.update({
-            where: { id },
-            data: {
-                deletedAt: new Date(),
+        // 1. 确保该原料存在且属于该租户
+        const ingredientToDelete = await this.findOne(tenantId, id);
+
+        // 2. 检查是否有任何配方正在使用该原料
+        const usageInDoughs = await this.prisma.doughIngredient.count({
+            where: {
+                name: ingredientToDelete.name,
+                dough: {
+                    recipeVersion: {
+                        family: {
+                            tenantId,
+                            deletedAt: null,
+                        },
+                    },
+                },
             },
+        });
+
+        const usageInProducts = await this.prisma.productIngredient.count({
+            where: {
+                name: ingredientToDelete.name,
+                product: {
+                    recipeVersion: {
+                        family: {
+                            tenantId,
+                            deletedAt: null,
+                        },
+                    },
+                },
+            },
+        });
+
+        if (usageInDoughs > 0 || usageInProducts > 0) {
+            throw new BadRequestException('该原料正在被一个或多个配方使用，无法删除。');
+        }
+
+        // 3. 执行物理删除
+        return this.prisma.ingredient.delete({
+            where: { id },
         });
     }
 

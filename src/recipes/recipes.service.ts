@@ -373,7 +373,56 @@ export class RecipesService {
         });
     }
 
+    /**
+     * [V2.5 核心逻辑重写] 物理删除配方族，增加使用校验
+     * @param familyId 配方族ID
+     */
     async remove(familyId: string) {
+        // 1. 查找配方族及其所有版本和产品
+        const family = await this.prisma.recipeFamily.findUnique({
+            where: { id: familyId },
+            include: {
+                versions: {
+                    include: {
+                        products: true,
+                    },
+                },
+            },
+        });
+
+        if (!family) {
+            throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
+        }
+
+        // 2. 收集该配方族下所有产品的ID
+        const productIds = family.versions.flatMap((version) => version.products.map((product) => product.id));
+
+        // 3. 检查这些产品是否在任何生产任务中使用过
+        if (productIds.length > 0) {
+            const taskCount = await this.prisma.productionTaskItem.count({
+                where: {
+                    productId: {
+                        in: productIds,
+                    },
+                },
+            });
+
+            if (taskCount > 0) {
+                throw new BadRequestException('该配方已被生产任务使用，无法删除。请先弃用该配方。');
+            }
+        }
+
+        // 4. 执行物理删除
+        return this.prisma.recipeFamily.delete({
+            where: { id: familyId },
+        });
+    }
+
+    /**
+     * [V2.5 新增] 弃用一个配方 (软删除)
+     * @param familyId 配方族ID
+     */
+    async discontinue(familyId: string) {
         const family = await this.prisma.recipeFamily.findUnique({
             where: { id: familyId },
         });
@@ -383,6 +432,31 @@ export class RecipesService {
         return this.prisma.recipeFamily.update({
             where: { id: familyId },
             data: { deletedAt: new Date() },
+        });
+    }
+
+    /**
+     * [V2.5 新增] 恢复一个已弃用的配方
+     * @param familyId 配方族ID
+     */
+    async restore(familyId: string) {
+        // 检查配方是否存在（即使是软删除的）
+        const family = await this.prisma.recipeFamily.findFirst({
+            where: { id: familyId },
+            select: { id: true, deletedAt: true },
+        });
+
+        if (!family) {
+            throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
+        }
+
+        if (family.deletedAt === null) {
+            throw new BadRequestException('该配方未被弃用，无需恢复。');
+        }
+
+        return this.prisma.recipeFamily.update({
+            where: { id: familyId },
+            data: { deletedAt: null },
         });
     }
 

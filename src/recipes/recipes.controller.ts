@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Delete, UseGuards, NotFoundException, Patch } from '@nestjs/common'; // [修改] 引入 Patch
+import { Controller, Get, Post, Body, Param, Delete, UseGuards, NotFoundException, Patch } from '@nestjs/common';
 import { RecipesService } from './recipes.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { AuthGuard } from '@nestjs/passport';
@@ -88,11 +88,29 @@ export class RecipesController {
     }
 
     /**
-     * 软删除一个配方族。
+     * [V2.5 修改] 物理删除一个配方族 (如果未被使用)。
      * @param id 配方族ID
      */
     @Delete(':id')
     remove(@Param('id') id: string) {
         return this.recipesService.remove(id);
+    }
+
+    /**
+     * [V2.5 新增] 弃用一个配方族 (软删除)。
+     * @param id 配方族ID
+     */
+    @Patch(':id/discontinue')
+    discontinue(@Param('id') id: string) {
+        return this.recipesService.discontinue(id);
+    }
+
+    /**
+     * [V2.5 新增] 恢复一个已弃用的配方族。
+     * @param id 配方族ID
+     */
+    @Patch(':id/restore')
+    restore(@Param('id') id: string) {
+        return this.recipesService.restore(id);
     }
 }
