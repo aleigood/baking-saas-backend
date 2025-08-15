@@ -236,9 +236,36 @@ export class IngredientsService {
             throw new BadRequestException('该原料正在被一个或多个配方使用，无法删除。');
         }
 
-        // 3. 执行物理删除
-        return this.prisma.ingredient.delete({
-            where: { id },
+        // 3. [FIX] 使用事务按正确顺序删除所有关联记录
+        return this.prisma.$transaction(async (tx) => {
+            const skuIds = ingredientToDelete.skus.map((sku) => sku.id);
+
+            if (skuIds.length > 0) {
+                // 3.1 删除引用SKU的采购记录
+                await tx.procurementRecord.deleteMany({
+                    where: {
+                        skuId: { in: skuIds },
+                    },
+                });
+            }
+
+            // 3.2 解除原料对激活SKU的引用
+            await tx.ingredient.update({
+                where: { id },
+                data: { activeSkuId: null },
+            });
+
+            // 3.3 删除所有关联的SKU
+            await tx.ingredientSKU.deleteMany({
+                where: {
+                    ingredientId: id,
+                },
+            });
+
+            // 3.4 执行物理删除
+            return tx.ingredient.delete({
+                where: { id },
+            });
         });
     }
 
