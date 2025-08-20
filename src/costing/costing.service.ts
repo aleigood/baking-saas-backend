@@ -101,7 +101,7 @@ export class CostingService {
     constructor(private readonly prisma: PrismaService) {}
 
     /**
-     * [核心逻辑重构] 获取产品成本的历史变化记录, 现在基于采购事件
+     * [核心逻辑优化] 获取产品成本的历史变化记录, 现在基于最近30个采购日期点
      * @param tenantId 租户ID
      * @param productId 产品ID
      * @returns 一个包含每次成本变化点的数组
@@ -126,26 +126,30 @@ export class CostingService {
 
         const allSkuIds = ingredientsWithSkus.flatMap((i) => i.skus.map((s) => s.id));
         if (allSkuIds.length === 0) {
-            // 如果没有任何SKU，则只返回当前成本（可能为0）
             const currentCostResult = await this.calculateProductCost(tenantId, productId);
-            return [{ cost: Number(currentCostResult.totalCost) }];
+            return [{ cost: Number(currentCostResult.totalCost), date: new Date().toISOString().split('T')[0] }];
         }
 
-        // 4. 获取所有相关的采购记录，并按日期排序
-        const allProcurements = await this.prisma.procurementRecord.findMany({
+        // 4. [性能优化] 获取最近的30个成本变化时间点
+        const distinctDates = await this.prisma.procurementRecord.findMany({
             where: { skuId: { in: allSkuIds } },
-            orderBy: { purchaseDate: 'asc' },
+            orderBy: { purchaseDate: 'desc' },
             select: { purchaseDate: true },
+            distinct: ['purchaseDate'],
+            take: 30, // 只取最近30个不同的采购日期
         });
 
-        // 5. 确定所有成本变化的时间点（去重并排序）
-        const costChangeDates = [
-            ...new Set(allProcurements.map((p) => p.purchaseDate.toISOString().split('T')[0])),
-        ].map((d) => new Date(d));
+        if (distinctDates.length === 0) {
+            const currentCostResult = await this.calculateProductCost(tenantId, productId);
+            return [{ cost: Number(currentCostResult.totalCost), date: new Date().toISOString().split('T')[0] }];
+        }
 
-        const costHistory: { cost: number }[] = [];
+        // 将日期按升序排列
+        const costChangeDates = distinctDates.map((p) => p.purchaseDate).sort((a, b) => a.getTime() - b.getTime());
 
-        // 6. 为每个成本变化的时间点计算成本快照
+        const costHistory: { cost: number; date: string }[] = [];
+
+        // 5. 为每个成本变化的时间点计算成本快照
         for (const date of costChangeDates) {
             let snapshotTotalCost = new Decimal(0);
             for (const [name, weight] of flatIngredients.entries()) {
@@ -157,7 +161,7 @@ export class CostingService {
                 const latestProcurement = await this.prisma.procurementRecord.findFirst({
                     where: {
                         skuId: { in: skuIds },
-                        purchaseDate: { lte: new Date(date.getTime() + 86400000 - 1) }, // 包含当天
+                        purchaseDate: { lte: date }, // 使用当前遍历的日期作为截止点
                     },
                     orderBy: { purchaseDate: 'desc' },
                     include: { sku: { select: { specWeightInGrams: true } } },
@@ -170,12 +174,25 @@ export class CostingService {
                     snapshotTotalCost = snapshotTotalCost.add(pricePerGram.mul(weight));
                 }
             }
-            costHistory.push({ cost: snapshotTotalCost.toDP(4).toNumber() });
+            costHistory.push({
+                cost: snapshotTotalCost.toDP(4).toNumber(),
+                date: date.toISOString().split('T')[0], // 增加日期字段方便前端展示
+            });
         }
 
-        // 7. 添加当前实时成本作为最后一个点，确保曲线连接到当前状态
+        // 6. 添加当前实时成本作为最后一个点，确保曲线连接到当前状态
         const currentCostResult = await this.calculateProductCost(tenantId, productId);
-        costHistory.push({ cost: Number(currentCostResult.totalCost) });
+        const today = new Date().toISOString().split('T')[0];
+
+        // 如果历史记录的最后一天不是今天，或者成本发生了变化，则添加当前点
+        const lastHistoryEntry = costHistory[costHistory.length - 1];
+        if (
+            !lastHistoryEntry ||
+            lastHistoryEntry.date !== today ||
+            lastHistoryEntry.cost !== Number(currentCostResult.totalCost)
+        ) {
+            costHistory.push({ cost: Number(currentCostResult.totalCost), date: today });
+        }
 
         return costHistory;
     }

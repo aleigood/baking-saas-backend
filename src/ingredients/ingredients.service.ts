@@ -4,7 +4,7 @@ import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
-import { Prisma, SkuStatus } from '@prisma/client';
+import { SkuStatus } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { Decimal } from '@prisma/client/runtime/library';
 
@@ -432,7 +432,7 @@ export class IngredientsService {
             }
 
             // 2. 创建新的采购记录
-            const newProcurement = await tx.procurementRecord.create({
+            await tx.procurementRecord.create({
                 data: {
                     skuId,
                     ...createProcurementDto,
@@ -440,7 +440,7 @@ export class IngredientsService {
             });
 
             // 3. 计算本次采购的单位成本（元/克）
-            const currentPricePerGram = new Decimal(newProcurement.pricePerPackage).div(sku.specWeightInGrams);
+            const currentPricePerGram = new Decimal(createProcurementDto.pricePerPackage).div(sku.specWeightInGrams);
 
             // 4. 更新原料的总库存和最新的单位成本
             return tx.ingredient.update({

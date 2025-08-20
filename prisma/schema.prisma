@@ -203,9 +203,6 @@ model DoughIngredient {
   doughId String // 所属面团ID
   name    String // 原料名称
   ratio   Float // 基于总面粉的百分比
-  // [核心删除] 移除 isFlour 和 waterContent 字段
-  // isFlour      Boolean @default(false) 
-  // waterContent Float?  @default(0)
 
   // 如果这个原料本身是一个预制面团配方，这里会有关联
   linkedPreDoughId String?
@@ -265,14 +262,11 @@ model Ingredient {
   tenantId            String
   name                String // e.g., "High-gluten flour"
   type                IngredientType @default(STANDARD)
-  // [核心新增] 新增配方属性字段
   isFlour             Boolean        @default(false)
   waterContent        Float          @default(0)
-  // 指向当前启用的SKU
   activeSkuId         String?
-  // [核心重构] 将库存和价格移至此处
   currentStockInGrams Float          @default(0)
-  currentPricePerGram Decimal        @default(0) // 修改：将 currentPricePerPackage 替换为 currentPricePerGram，用于存储最新的单位成本
+  currentPricePerGram Decimal        @default(0) // 核心修改：用于存储最新的单位成本（元/克）
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -280,34 +274,27 @@ model Ingredient {
 
   tenant          Tenant                     @relation(fields: [tenantId], references: [id])
   skus            IngredientSKU[]
-  consumptionLogs IngredientConsumptionLog[] // 关联到该原料的消耗记录
-  activeSku       IngredientSKU?             @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: SetNull, onUpdate: Cascade) // 修改：调整关系，允许在SKU删除时将此字段置空
+  consumptionLogs IngredientConsumptionLog[]
+  activeSku       IngredientSKU?             @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@unique([tenantId, name, deletedAt])
 }
 
 // 原料SKU模型
 model IngredientSKU {
-  id                String  @id @default(uuid())
+  id                String    @id @default(uuid())
   brand             String?
   specName          String // e.g., "1kg bag"
   specWeightInGrams Float
   ingredientId      String
+  status            SkuStatus @default(INACTIVE)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  // SKU状态 (启用/未启用)
-  status SkuStatus @default(INACTIVE)
-  // [核心重构] 移除库存和价格字段
-
-  // [新增] 增加创建和更新时间戳
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  ingredient         Ingredient                 @relation(fields: [ingredientId], references: [id])
-  procurementRecords ProcurementRecord[]
-  consumptionLogs    IngredientConsumptionLog[] // 关联到该SKU的消耗记录
-
-  // Foreign key for the active SKU relation
-  activeForIngredients Ingredient[] @relation("ActiveSKU")
+  ingredient           Ingredient                 @relation(fields: [ingredientId], references: [id])
+  procurementRecords   ProcurementRecord[]
+  consumptionLogs      IngredientConsumptionLog[]
+  activeForIngredients Ingredient[]               @relation("ActiveSKU")
 }
 
 // 采购记录模型
@@ -337,19 +324,18 @@ model ProductionTask {
   deletedAt   DateTime?
 
   tenant Tenant               @relation(fields: [tenantId], references: [id])
-  log    ProductionLog? // 关联到该任务的生产日志
-  // [新增] 关联到任务清单
+  log    ProductionLog?
   items  ProductionTaskItem[]
 
   @@index([tenantId])
 }
 
-// [新增] 生产任务清单项 (中间表)
+// 生产任务清单项 (中间表)
 model ProductionTaskItem {
   id        String @id @default(uuid())
   taskId    String
   productId String
-  quantity  Int // [修改] 计划数量，改为整数类型
+  quantity  Int
 
   task    ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   product Product        @relation(fields: [productId], references: [id])
@@ -363,29 +349,25 @@ model ProductionTaskItem {
 // ================================================================= //
 
 // 生产日志模型
-// 记录一个生产任务的实际产出结果
 model ProductionLog {
   id          String   @id @default(uuid())
-  taskId      String   @unique // 每个任务对应唯一一个日志
-  // [移除] actualQuantity 字段，因为任务完成即代表计划完成
-  // actualQuantity Float 
+  taskId      String   @unique
   completedAt DateTime @default(now())
   notes       String?
 
   task            ProductionTask             @relation(fields: [taskId], references: [id])
-  consumptionLogs IngredientConsumptionLog[] // 关联到本次生产的所有原料消耗记录
+  consumptionLogs IngredientConsumptionLog[]
 
   @@index([taskId])
 }
 
 // 原料消耗日志模型
-// 记录在一次生产中，每种原料的实际消耗量
 model IngredientConsumptionLog {
   id              String  @id @default(uuid())
   productionLogId String
-  ingredientId    String // 消耗的原料品类ID
-  skuId           String? // 消耗已激活的具体SKU ID
-  quantityInGrams Float // 消耗的克数
+  ingredientId    String
+  skuId           String?
+  quantityInGrams Float
 
   productionLog ProductionLog  @relation(fields: [productionLogId], references: [id])
   ingredient    Ingredient     @relation(fields: [ingredientId], references: [id])
