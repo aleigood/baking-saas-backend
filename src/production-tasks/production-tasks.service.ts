@@ -230,7 +230,7 @@ export class ProductionTasksService {
     }
 
     /**
-     * [核心修改] 查询任务详情时，实时计算库存警告
+     * 查询任务详情时，深度查询以满足前端称重需求，并实时计算库存警告
      * @param tenantId
      * @param id
      * @returns
@@ -245,7 +245,25 @@ export class ProductionTasksService {
             include: {
                 items: {
                     include: {
-                        product: true,
+                        product: {
+                            include: {
+                                recipeVersion: {
+                                    include: {
+                                        family: true,
+                                        doughs: {
+                                            include: {
+                                                ingredients: true,
+                                            },
+                                        },
+                                        products: {
+                                            include: {
+                                                ingredients: true,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                     },
                 },
                 log: {
@@ -267,7 +285,7 @@ export class ProductionTasksService {
 
         // 如果任务已完成或取消，则不显示库存警告
         if (task.status === 'COMPLETED' || task.status === 'CANCELLED') {
-            return task;
+            return { ...task, stockWarning: null };
         }
 
         // 实时计算库存警告
