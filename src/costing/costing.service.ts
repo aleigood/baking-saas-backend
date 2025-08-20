@@ -300,17 +300,21 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const ingredientsMap = await this.getIngredientsMap(tenantId);
+        // [核心修改] 使用新的方法获取实时计算的最新单位成本
+        const flatIngredients = await this._getFlattenedIngredients(product);
+        const ingredientNames = Array.from(flatIngredients.keys());
+        const pricePerGramMap = await this._getLatestPricePerGramMap(tenantId, ingredientNames);
+
         // 辅助函数：根据原料名称获取其单位成本（元/千克）
         const getPricePerKg = (name: string) => {
-            const ingredientInfo = ingredientsMap.get(name);
-            if (ingredientInfo) {
-                // 修改：直接使用 currentPricePerGram 计算
-                return new Decimal(ingredientInfo.currentPricePerGram).mul(1000).toDP(2).toNumber();
+            const pricePerGram = pricePerGramMap.get(name);
+            if (pricePerGram) {
+                return pricePerGram.mul(1000).toDP(2).toNumber();
             }
             return 0;
         };
 
+        const ingredientsMap = await this.getIngredientsMap(tenantId);
         const doughGroups: CalculatedDoughGroup[] = [];
         let totalCost = new Decimal(0);
         let totalFlourWeight = new Decimal(0);
@@ -424,7 +428,7 @@ export class CostingService {
     }
 
     /**
-     * [核心修改] 计算单个产品的当前成本，使用最新的单位成本
+     * [核心修改] 计算单个产品的当前成本，使用实时计算的最新单位成本
      */
     async calculateProductCost(tenantId: string, productId: string) {
         const product = await this.getFullProduct(tenantId, productId);
@@ -433,14 +437,14 @@ export class CostingService {
         }
 
         const flatIngredients = await this._getFlattenedIngredients(product);
-        const ingredientsMap = await this.getIngredientsMap(tenantId);
+        const ingredientNames = Array.from(flatIngredients.keys());
+        const pricePerGramMap = await this._getLatestPricePerGramMap(tenantId, ingredientNames);
+
         let totalCost = new Decimal(0);
 
         for (const [name, weight] of flatIngredients.entries()) {
-            const ingredientInfo = ingredientsMap.get(name);
-            if (ingredientInfo) {
-                // 直接使用最新的单位成本进行计算
-                const pricePerGram = new Decimal(ingredientInfo.currentPricePerGram);
+            const pricePerGram = pricePerGramMap.get(name);
+            if (pricePerGram) {
                 const cost = pricePerGram.mul(weight);
                 totalCost = totalCost.add(cost);
             }
@@ -454,7 +458,7 @@ export class CostingService {
     }
 
     /**
-     * [核心修改] 计算产品中各原料的成本构成，使用最新的单位成本
+     * [核心修改] 计算产品中各原料的成本构成，使用实时计算的最新单位成本
      * @param tenantId 租户ID
      * @param productId 产品ID
      * @returns 返回一个包含 { name: string, value: number } 的数组，用于饼图
@@ -469,14 +473,14 @@ export class CostingService {
         }
 
         const flatIngredients = await this._getFlattenedIngredients(product);
-        const ingredientsMap = await this.getIngredientsMap(tenantId);
+        const ingredientNames = Array.from(flatIngredients.keys());
+        const pricePerGramMap = await this._getLatestPricePerGramMap(tenantId, ingredientNames);
+
         const costBreakdown: { name: string; value: number }[] = [];
 
         for (const [name, weight] of flatIngredients.entries()) {
-            const ingredientInfo = ingredientsMap.get(name);
-            if (ingredientInfo) {
-                // 直接使用最新的单位成本进行计算
-                const pricePerGram = new Decimal(ingredientInfo.currentPricePerGram);
+            const pricePerGram = pricePerGramMap.get(name);
+            if (pricePerGram) {
                 const cost = pricePerGram.mul(weight);
                 costBreakdown.push({
                     name: name,
@@ -505,7 +509,6 @@ export class CostingService {
      * [核心新增] 私有辅助方法：获取一个产品的完整配方信息，包括所有嵌套的面种
      */
     private async getFullProduct(tenantId: string, productId: string): Promise<FullProduct | null> {
-        // [关键修改] 移除查询条件中的 isActive: true
         return this.prisma.product.findFirst({
             where: { id: productId, recipeVersion: { family: { tenantId } } },
             include: {
@@ -536,21 +539,18 @@ export class CostingService {
                         },
                     },
                 },
-                // [新增] 包含产品本身的附加原料
                 ingredients: true,
             },
         }) as Promise<FullProduct | null>;
     }
 
     /**
-     * [核心新增] 私有辅助方法：将一个完整的配方（含面种）扁平化，计算出每种基础原料的总克重
+     * [核心逻辑修复] 统一配方展开和用量计算的逻辑
      */
     private async _getFlattenedIngredients(product: FullProduct): Promise<Map<string, number>> {
         const flattenedIngredients = new Map<string, number>(); // Map<ingredientName, weightInGrams>
-        // [错误修复] 在顶层作用域声明 totalFlourWeight
-        let totalFlourWeight = new Decimal(0);
 
-        // [核心修正] 1. 收集所有需要查询的原料名称
+        // 1. 收集所有需要查询的原料名称
         const allIngredientNames = new Set<string>();
         const collectIngredientNames = (dough: ProcessableDough) => {
             dough.ingredients.forEach((ing) => {
@@ -565,7 +565,7 @@ export class CostingService {
         product.recipeVersion.doughs.forEach((dough) => collectIngredientNames(dough));
         product.ingredients?.forEach((pIng) => allIngredientNames.add(pIng.name));
 
-        // [核心修正] 2. 一次性从数据库查询所有原料的 isFlour 属性
+        // 2. 一次性查询所有原料的 isFlour 属性
         const ingredientsFromDb = await this.prisma.ingredient.findMany({
             where: {
                 tenantId: product.recipeVersion.family.tenantId,
@@ -575,55 +575,53 @@ export class CostingService {
         });
         const ingredientInfoMap = new Map(ingredientsFromDb.map((i) => [i.name, i]));
 
-        // [修复] 移除未使用的 isMainDough 参数，并为 dough 参数添加精确类型
+        // 3. 递归处理面团和预制面团，计算基础用量
         const processDough = (dough: ProcessableDough, doughWeight: number) => {
-            let flourRatioInDough = 0;
-            dough.ingredients.forEach((ing) => {
-                const ingredientInfo = ingredientInfoMap.get(ing.name);
-                if (ingredientInfo?.isFlour) {
-                    flourRatioInDough += ing.ratio;
-                }
-            });
-            if (flourRatioInDough === 0) flourRatioInDough = 100;
-
             const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
             if (totalRatio === 0) return;
-            const flourWeightInDough = (doughWeight * flourRatioInDough) / totalRatio;
+
+            // [逻辑统一] 使用与 getCalculatedProductDetails 完全相同的比例分配法
+            const weightPerRatioPoint = new Decimal(doughWeight).div(totalRatio);
 
             for (const ing of dough.ingredients) {
-                const ingredientWeight = (flourWeightInDough * ing.ratio) / 100;
+                const ingredientWeight = weightPerRatioPoint.mul(ing.ratio).toNumber();
                 const preDough = ing.linkedPreDough?.versions?.[0];
 
-                if (preDough) {
+                if (preDough && preDough.doughs[0]) {
                     processDough(preDough.doughs[0], ingredientWeight);
                 } else {
                     const currentWeight = flattenedIngredients.get(ing.name) || 0;
                     flattenedIngredients.set(ing.name, currentWeight + ingredientWeight);
-                    // [错误修复] 在这里累加总面粉量
-                    const ingredientInfo = ingredientInfoMap.get(ing.name);
-                    if (ingredientInfo?.isFlour) {
-                        totalFlourWeight = totalFlourWeight.add(ingredientWeight);
-                    }
                 }
             }
         };
 
-        // 处理主配方中的面团
+        // 从主面团开始处理
         product.recipeVersion.doughs.forEach((dough) => {
             processDough(dough, product.baseDoughWeight);
         });
 
-        // [新增] 处理产品本身的附加原料（如馅料、装饰等）
+        // 4. 在所有面团都展开后，计算总面粉量
+        let totalFlourWeight = new Decimal(0);
+        for (const [name, weight] of flattenedIngredients.entries()) {
+            const ingredientInfo = ingredientInfoMap.get(name);
+            if (ingredientInfo?.isFlour) {
+                totalFlourWeight = totalFlourWeight.add(weight);
+            }
+        }
+
+        // 5. 最后处理附加原料（如搅拌类）
         product.ingredients?.forEach((pIng) => {
+            let finalWeightInGrams = 0;
             if (pIng.weightInGrams) {
+                finalWeightInGrams = pIng.weightInGrams;
+            } else if (pIng.ratio && pIng.type === 'MIX_IN') {
+                finalWeightInGrams = totalFlourWeight.mul(pIng.ratio).div(100).toNumber();
+            }
+
+            if (finalWeightInGrams > 0) {
                 const currentWeight = flattenedIngredients.get(pIng.name) || 0;
-                flattenedIngredients.set(pIng.name, currentWeight + pIng.weightInGrams);
-            } else if (pIng.ratio) {
-                // 处理搅拌类原料
-                // [错误修复] 使用修复后的 totalFlourWeight 进行计算
-                const weight = totalFlourWeight.mul(pIng.ratio).div(100).toNumber();
-                const currentWeight = flattenedIngredients.get(pIng.name) || 0;
-                flattenedIngredients.set(pIng.name, currentWeight + weight);
+                flattenedIngredients.set(pIng.name, currentWeight + finalWeightInGrams);
             }
         });
 
@@ -686,5 +684,66 @@ export class CostingService {
         });
 
         return new Map(ingredients.map((i) => [i.name, i as IngredientWithAllInfo]));
+    }
+
+    /**
+     * [新增] 统一的私有方法，用于实时计算原料的最新单位成本
+     * @param tenantId
+     * @param ingredientNames
+     * @returns
+     */
+    private async _getLatestPricePerGramMap(
+        tenantId: string,
+        ingredientNames: string[],
+    ): Promise<Map<string, Decimal>> {
+        const ingredients = await this.prisma.ingredient.findMany({
+            where: {
+                tenantId,
+                name: { in: ingredientNames },
+            },
+            select: {
+                name: true,
+                skus: {
+                    select: {
+                        id: true,
+                    },
+                },
+            },
+        });
+
+        const priceMap = new Map<string, Decimal>();
+
+        for (const ingredient of ingredients) {
+            const skuIds = ingredient.skus.map((s) => s.id);
+            if (skuIds.length === 0) {
+                priceMap.set(ingredient.name, new Decimal(0));
+                continue;
+            }
+
+            const latestProcurement = await this.prisma.procurementRecord.findFirst({
+                where: {
+                    skuId: { in: skuIds },
+                },
+                orderBy: {
+                    purchaseDate: 'desc',
+                },
+                include: {
+                    sku: {
+                        select: { specWeightInGrams: true },
+                    },
+                },
+            });
+
+            if (latestProcurement && latestProcurement.sku.specWeightInGrams > 0) {
+                const pricePerGram = new Decimal(latestProcurement.pricePerPackage).div(
+                    latestProcurement.sku.specWeightInGrams,
+                );
+                priceMap.set(ingredient.name, pricePerGram);
+            } else {
+                priceMap.set(ingredient.name, new Decimal(0));
+            }
+        }
+
+        return priceMap;
     }
 }

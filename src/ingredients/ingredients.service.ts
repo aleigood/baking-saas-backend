@@ -6,7 +6,6 @@ import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { SkuStatus } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
-import { Decimal } from '@prisma/client/runtime/library';
 
 @Injectable()
 export class IngredientsService {
@@ -407,7 +406,7 @@ export class IngredientsService {
     }
 
     /**
-     * [核心修改] 创建采购记录并更新原料的最新单位成本和总库存
+     * [核心修改] 创建采购记录并只更新原料的总库存
      * @param tenantId 租户ID
      * @param skuId SKU ID
      * @param createProcurementDto DTO
@@ -421,9 +420,6 @@ export class IngredientsService {
                     ingredient: {
                         tenantId,
                     },
-                },
-                include: {
-                    ingredient: true,
                 },
             });
 
@@ -439,24 +435,20 @@ export class IngredientsService {
                 },
             });
 
-            // 3. 计算本次采购的单位成本（元/克）
-            const currentPricePerGram = new Decimal(createProcurementDto.pricePerPackage).div(sku.specWeightInGrams);
-
-            // 4. 更新原料的总库存和最新的单位成本
+            // 3. 只更新原料的总库存
             return tx.ingredient.update({
                 where: { id: sku.ingredientId },
                 data: {
                     currentStockInGrams: {
                         increment: createProcurementDto.packagesPurchased * sku.specWeightInGrams,
                     },
-                    currentPricePerGram: currentPricePerGram,
                 },
             });
         });
     }
 
     /**
-     * [核心修改] 删除采购记录并根据新的最新采购记录更新原料成本
+     * [核心修改] 删除采购记录并只更新原料的总库存
      * @param tenantId 租户ID
      * @param procurementId 采购记录ID
      */
@@ -488,34 +480,13 @@ export class IngredientsService {
                 where: { id: procurementId },
             });
 
-            // 3. 查找删除后最新的采购记录
-            const latestProcurement = await tx.procurementRecord.findFirst({
-                where: {
-                    sku: {
-                        ingredientId: sku.ingredientId,
-                    },
-                },
-                orderBy: {
-                    purchaseDate: 'desc',
-                },
-                include: {
-                    sku: true,
-                },
-            });
-
-            // 4. 根据最新的采购记录计算新的单位成本，如果没有记录则成本为0
-            const newPricePerGram = latestProcurement
-                ? new Decimal(latestProcurement.pricePerPackage).div(latestProcurement.sku.specWeightInGrams)
-                : new Decimal(0);
-
-            // 5. 更新原料的库存和当前单位成本
+            // 3. 只更新原料的库存
             return tx.ingredient.update({
                 where: { id: sku.ingredientId },
                 data: {
                     currentStockInGrams: {
                         decrement: stockDecrease,
                     },
-                    currentPricePerGram: newPricePerGram,
                 },
             });
         });

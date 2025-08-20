@@ -266,7 +266,6 @@ model Ingredient {
   waterContent        Float          @default(0)
   activeSkuId         String?
   currentStockInGrams Float          @default(0)
-  currentPricePerGram Decimal        @default(0) // 核心修改：用于存储最新的单位成本（元/克）
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

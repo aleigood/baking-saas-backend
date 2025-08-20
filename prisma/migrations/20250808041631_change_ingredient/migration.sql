@@ -1,3 +1,0 @@
--- AlterTable
-ALTER TABLE "Ingredient" ADD COLUMN     "isFlour" BOOLEAN NOT NULL DEFAULT false,
-ADD COLUMN     "waterContent" DOUBLE PRECISION NOT NULL DEFAULT 0;
