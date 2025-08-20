@@ -19,9 +19,8 @@ export class ProductionTasksService {
     ) {}
 
     /**
-     * [V2.2 逻辑修改] 创建包含多个产品的生产任务
-     * (Logic modified to create a production task with multiple products)
-     * @param tenantId 租户ID (Tenant ID)
+     * [核心修改] 创建任务时增加库存预警
+     * @param tenantId 租户ID
      * @param createProductionTaskDto DTO
      */
     async create(tenantId: string, createProductionTaskDto: CreateProductionTaskDto) {
@@ -31,8 +30,7 @@ export class ProductionTasksService {
             throw new BadRequestException('一个生产任务至少需要包含一个产品。');
         }
 
-        // 验证所有目标产品是否存在且属于该租户
-        // (Validate that all target products exist and belong to the tenant)
+        // 1. 验证所有目标产品是否存在且属于该租户
         const productIds = products.map((p) => p.productId);
         const existingProducts = await this.prisma.product.findMany({
             where: {
@@ -45,9 +43,57 @@ export class ProductionTasksService {
             throw new NotFoundException('一个或多个目标产品不存在或不属于该店铺。');
         }
 
-        // 使用事务创建任务和任务项
-        // (Use a transaction to create the task and task items)
-        return this.prisma.productionTask.create({
+        // 2. 计算任务所需的原料总消耗
+        const allConsumptions = new Map<
+            string,
+            { ingredientId: string; ingredientName: string; totalConsumed: number }
+        >();
+        for (const item of products) {
+            const consumptions = await this.costingService.calculateProductConsumptions(
+                tenantId,
+                item.productId,
+                item.quantity,
+            );
+            for (const consumption of consumptions) {
+                const existing = allConsumptions.get(consumption.ingredientId);
+                if (existing) {
+                    existing.totalConsumed += consumption.totalConsumed;
+                } else {
+                    allConsumptions.set(consumption.ingredientId, {
+                        ingredientId: consumption.ingredientId,
+                        ingredientName: consumption.ingredientName,
+                        totalConsumed: consumption.totalConsumed,
+                    });
+                }
+            }
+        }
+        const finalConsumptions = Array.from(allConsumptions.values());
+
+        // 3. 检查库存并生成警告信息
+        let stockWarning: string | null = null;
+        if (finalConsumptions.length > 0) {
+            const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
+            const ingredients = await this.prisma.ingredient.findMany({
+                where: { id: { in: ingredientIds } },
+                select: { id: true, name: true, currentStockInGrams: true },
+            });
+            const ingredientStockMap = new Map(ingredients.map((i) => [i.id, i]));
+            const insufficientIngredients: string[] = [];
+
+            for (const consumption of finalConsumptions) {
+                const ingredient = ingredientStockMap.get(consumption.ingredientId);
+                if (ingredient && ingredient.currentStockInGrams < consumption.totalConsumed) {
+                    insufficientIngredients.push(ingredient.name);
+                }
+            }
+
+            if (insufficientIngredients.length > 0) {
+                stockWarning = `库存不足: ${insufficientIngredients.join(', ')}`;
+            }
+        }
+
+        // 4. 创建任务和任务项
+        const createdTask = await this.prisma.productionTask.create({
             data: {
                 plannedDate,
                 notes,
@@ -56,8 +102,6 @@ export class ProductionTasksService {
                     create: products.map((p) => ({
                         productId: p.productId,
                         quantity: p.quantity,
-                        // [移除] unit 字段已被删除
-                        // (Removed: unit field has been deleted)
                     })),
                 },
             },
@@ -69,6 +113,9 @@ export class ProductionTasksService {
                 },
             },
         });
+
+        // 5. 返回创建的任务和警告信息
+        return { task: createdTask, warning: stockWarning };
     }
 
     // [REFACTORED] 重构 findAll 方法以支持分页和分组
@@ -182,8 +229,12 @@ export class ProductionTasksService {
         });
     }
 
-    // 查询单个生产任务详情
-    // (Find a single production task)
+    /**
+     * [核心修改] 查询任务详情时，实时计算库存警告
+     * @param tenantId
+     * @param id
+     * @returns
+     */
     async findOne(tenantId: string, id: string) {
         const task = await this.prisma.productionTask.findFirst({
             where: {
@@ -192,23 +243,9 @@ export class ProductionTasksService {
                 deletedAt: null,
             },
             include: {
-                // [核心修改] 包含任务中的产品项，并深入查询到配方、面团和原料
                 items: {
                     include: {
-                        product: {
-                            include: {
-                                recipeVersion: {
-                                    include: {
-                                        family: true,
-                                        doughs: {
-                                            include: {
-                                                ingredients: true,
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
+                        product: true,
                     },
                 },
                 log: {
@@ -227,7 +264,61 @@ export class ProductionTasksService {
         if (!task) {
             throw new NotFoundException('生产任务不存在');
         }
-        return task;
+
+        // 如果任务已完成或取消，则不显示库存警告
+        if (task.status === 'COMPLETED' || task.status === 'CANCELLED') {
+            return task;
+        }
+
+        // 实时计算库存警告
+        const allConsumptions = new Map<
+            string,
+            { ingredientId: string; ingredientName: string; totalConsumed: number }
+        >();
+        for (const item of task.items) {
+            const consumptions = await this.costingService.calculateProductConsumptions(
+                tenantId,
+                item.productId,
+                item.quantity,
+            );
+            for (const consumption of consumptions) {
+                const existing = allConsumptions.get(consumption.ingredientId);
+                if (existing) {
+                    existing.totalConsumed += consumption.totalConsumed;
+                } else {
+                    allConsumptions.set(consumption.ingredientId, {
+                        ingredientId: consumption.ingredientId,
+                        ingredientName: consumption.ingredientName,
+                        totalConsumed: consumption.totalConsumed,
+                    });
+                }
+            }
+        }
+        const finalConsumptions = Array.from(allConsumptions.values());
+
+        let stockWarning: string | null = null;
+        if (finalConsumptions.length > 0) {
+            const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
+            const ingredients = await this.prisma.ingredient.findMany({
+                where: { id: { in: ingredientIds } },
+                select: { id: true, name: true, currentStockInGrams: true },
+            });
+            const ingredientStockMap = new Map(ingredients.map((i) => [i.id, i]));
+            const insufficientIngredients: string[] = [];
+
+            for (const consumption of finalConsumptions) {
+                const ingredient = ingredientStockMap.get(consumption.ingredientId);
+                if (ingredient && ingredient.currentStockInGrams < consumption.totalConsumed) {
+                    insufficientIngredients.push(ingredient.name);
+                }
+            }
+
+            if (insufficientIngredients.length > 0) {
+                stockWarning = `库存不足: ${insufficientIngredients.join(', ')}`;
+            }
+        }
+
+        return { ...task, stockWarning };
     }
 
     // 更新生产任务
@@ -253,15 +344,12 @@ export class ProductionTasksService {
     }
 
     /**
-     * [V2.2 核心逻辑重写] 完成生产任务，记录日志并扣减所有产品的库存
-     * (Core logic rewrite: Complete a production task, log it, and deduct stock for all products)
-     * @param tenantId 租户ID (Tenant ID)
-     * @param id 任务ID (Task ID)
+     * [核心修改] 完成任务时，如果库存不足则清零，不阻止任务完成
+     * @param tenantId 租户ID
+     * @param id 任务ID
      * @param completeProductionTaskDto DTO
      */
     async complete(tenantId: string, id: string, completeProductionTaskDto: CompleteProductionTaskDto) {
-        // [修改] 获取任务详情时，也获取其包含的所有产品项
-        // (Modified: Also get all product items when fetching task details)
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
             include: { items: true },
@@ -271,15 +359,12 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
-        // [核心修正] 允许“进行中”的任务被完成
         if (task.status !== ProductionTaskStatus.PENDING && task.status !== ProductionTaskStatus.IN_PROGRESS) {
             throw new BadRequestException('只有“待开始”或“进行中”的任务才能被完成');
         }
 
         const { notes } = completeProductionTaskDto;
 
-        // 1. [修改] 汇总计算任务中所有产品的原料消耗
-        // (Modified: Aggregate and calculate raw material consumption for all products in the task)
         const allConsumptions = new Map<
             string,
             {
@@ -294,7 +379,7 @@ export class ProductionTasksService {
             const consumptions = await this.costingService.calculateProductConsumptions(
                 tenantId,
                 item.productId,
-                item.quantity, // 使用每个任务项中定义的数量 (Use the quantity defined in each task item)
+                item.quantity,
             );
 
             for (const consumption of consumptions) {
@@ -309,56 +394,57 @@ export class ProductionTasksService {
 
         const finalConsumptions = Array.from(allConsumptions.values());
 
-        // 2. 使用数据库事务来保证数据一致性
-        // (Use a database transaction to ensure data consistency)
         return this.prisma.$transaction(async (tx) => {
-            // 2.1 更新任务状态为“已完成”
-            // (Update task status to "COMPLETED")
+            const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
+            const ingredients = await tx.ingredient.findMany({
+                where: { id: { in: ingredientIds } },
+                select: { id: true, name: true, currentStockInGrams: true },
+            });
+            const ingredientStockMap = new Map(ingredients.map((i) => [i.id, i]));
+
+            // 更新任务状态
             await tx.productionTask.update({
                 where: { id },
                 data: { status: ProductionTaskStatus.COMPLETED },
             });
 
-            // 2.2 创建生产日志
-            // (Create production log)
+            // 创建生产日志
             const productionLog = await tx.productionLog.create({
                 data: {
                     taskId: id,
-                    // [移除] 不再需要 actualQuantity
-                    // (Removed: actualQuantity is no longer needed)
                     notes,
                 },
             });
 
-            // 2.3 遍历消耗列表，创建消耗日志并扣减库存
-            // (Iterate through the consumption list, create consumption logs, and deduct stock)
+            // 遍历消耗列表，创建消耗日志并扣减库存
             for (const consumption of finalConsumptions) {
-                // 如果没有激活的SKU ID，说明是无需追踪的原料或未设置，直接跳过
-                // (If there is no active SKU ID, it's an untracked or unset ingredient, so skip)
                 if (!consumption.activeSkuId) {
                     continue;
                 }
 
-                // 创建原料消耗日志
-                // (Create raw material consumption log)
                 await tx.ingredientConsumptionLog.create({
                     data: {
                         productionLogId: productionLog.id,
                         ingredientId: consumption.ingredientId,
-                        skuId: consumption.activeSkuId, // 记录消耗时使用的是哪个SKU (Record which SKU was used for consumption)
+                        skuId: consumption.activeSkuId,
                         quantityInGrams: consumption.totalConsumed,
                     },
                 });
 
-                // [编译错误修复] 扣减对应原料品类的实时库存
-                await tx.ingredient.update({
-                    where: { id: consumption.ingredientId },
-                    data: {
-                        currentStockInGrams: {
-                            decrement: consumption.totalConsumed,
+                const ingredient = ingredientStockMap.get(consumption.ingredientId);
+                if (ingredient) {
+                    // [核心修改] 计算实际可扣减的库存量，确保不为负
+                    const decrementAmount = Math.min(ingredient.currentStockInGrams, consumption.totalConsumed);
+
+                    await tx.ingredient.update({
+                        where: { id: consumption.ingredientId },
+                        data: {
+                            currentStockInGrams: {
+                                decrement: decrementAmount,
+                            },
                         },
-                    },
-                });
+                    });
+                }
             }
 
             return this.findOne(tenantId, id);

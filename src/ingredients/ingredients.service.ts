@@ -6,6 +6,7 @@ import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { SkuStatus } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
+import { UpdateProcurementDto } from './dto/update-procurement.dto';
 
 @Injectable()
 export class IngredientsService {
@@ -448,47 +449,31 @@ export class IngredientsService {
     }
 
     /**
-     * [核心修改] 删除采购记录并只更新原料的总库存
+     * [核心修改] 将删除采购记录改为修改采购记录
      * @param tenantId 租户ID
      * @param procurementId 采购记录ID
+     * @param updateProcurementDto DTO
      */
-    async deleteProcurement(tenantId: string, procurementId: string) {
-        return this.prisma.$transaction(async (tx) => {
-            // 1. 查找要删除的采购记录，并确保它属于该租户
-            const procurementToDelete = await tx.procurementRecord.findFirst({
-                where: {
-                    id: procurementId,
-                    sku: {
-                        ingredient: {
-                            tenantId: tenantId,
-                        },
+    async updateProcurement(tenantId: string, procurementId: string, updateProcurementDto: UpdateProcurementDto) {
+        // 1. 验证采购记录是否存在且属于该租户
+        const procurement = await this.prisma.procurementRecord.findFirst({
+            where: {
+                id: procurementId,
+                sku: {
+                    ingredient: {
+                        tenantId: tenantId,
                     },
                 },
-                include: {
-                    sku: true,
-                },
-            });
+            },
+        });
 
-            if (!procurementToDelete) {
-                throw new NotFoundException('采购记录不存在');
-            }
-            const { sku } = procurementToDelete;
-            const stockDecrease = procurementToDelete.packagesPurchased * sku.specWeightInGrams;
+        if (!procurement) {
+            throw new NotFoundException('采购记录不存在');
+        }
 
-            // 2. 删除采购记录
-            await tx.procurementRecord.delete({
-                where: { id: procurementId },
-            });
-
-            // 3. 只更新原料的库存
-            return tx.ingredient.update({
-                where: { id: sku.ingredientId },
-                data: {
-                    currentStockInGrams: {
-                        decrement: stockDecrease,
-                    },
-                },
-            });
+        return this.prisma.procurementRecord.update({
+            where: { id: procurementId },
+            data: updateProcurementDto,
         });
     }
 }

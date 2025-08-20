@@ -9,6 +9,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
+import { UpdateProcurementDto } from './dto/update-procurement.dto';
 
 // [FIX] 使用 NestJS 内置的 AuthGuard('jwt')，而不是不存在的自定义 JwtAuthGuard
 @UseGuards(AuthGuard('jwt'))
@@ -82,13 +83,17 @@ export class IngredientsController {
     }
 
     /**
-     * [核心新增] 删除一条采购记录
+     * [核心修改] 将删除采购记录改为修改采购记录
      * @param user 当前用户
      * @param id 采购记录的ID
      * @returns
      */
-    @Delete('procurements/:id')
-    deleteProcurement(@GetUser() user: UserPayload, @Param('id') id: string) {
-        return this.ingredientsService.deleteProcurement(user.tenantId, id);
+    @Patch('procurements/:id')
+    updateProcurement(
+        @GetUser() user: UserPayload,
+        @Param('id') id: string,
+        @Body() updateProcurementDto: UpdateProcurementDto,
+    ) {
+        return this.ingredientsService.updateProcurement(user.tenantId, id, updateProcurementDto);
     }
 }
