@@ -66,7 +66,6 @@ export class RecipesService {
      * @param createRecipeDto 配方数据
      */
     private async createVersionInternal(tenantId: string, familyId: string | null, createRecipeDto: CreateRecipeDto) {
-        // [修复] 从 DTO 中解构 ingredients，而不是 doughs
         const { name, type = 'MAIN', ingredients, products, notes, targetTemp, lossRatio, procedure } = createRecipeDto;
 
         // [修改] 增加事务隔离级别配置，防止并发导入时产生重复原料
@@ -90,24 +89,37 @@ export class RecipesService {
                     });
                 }
 
-                // [逻辑不变] 自动创建原料
+                // [核心修正] 统一收集所有原料名称，并从DoughIngredient中获取isFlour等属性
                 const allIngredientNames = new Set<string>();
                 ingredients.forEach((ing) => allIngredientNames.add(ing.name));
                 if (products) {
                     products.forEach((p) => {
-                        p.mixIn?.forEach((i) => allIngredientNames.add(i.name));
-                        p.fillings?.forEach((i) => allIngredientNames.add(i.name));
-                        p.toppings?.forEach((i) => allIngredientNames.add(i.name));
+                        (p.mixIn ?? []).forEach((ing) => allIngredientNames.add(ing.name));
+                        (p.fillings ?? []).forEach((ing) => allIngredientNames.add(ing.name));
+                        (p.toppings ?? []).forEach((ing) => allIngredientNames.add(ing.name));
                     });
                 }
+
+                // 创建一个从原料名称到其详细DTO的映射，以便获取isFlour等信息
+                const doughIngredientMap = new Map(ingredients.map((item) => [item.name, item]));
 
                 for (const ingredientName of allIngredientNames) {
                     const existingIngredient = await tx.ingredient.findFirst({
                         where: { tenantId, name: ingredientName, deletedAt: null },
                     });
+
                     if (!existingIngredient) {
+                        // 从映射中查找该原料的详细信息
+                        const ingredientDetails = doughIngredientMap.get(ingredientName);
                         await tx.ingredient.create({
-                            data: { tenantId, name: ingredientName, type: 'STANDARD' },
+                            data: {
+                                tenantId,
+                                name: ingredientName,
+                                type: 'STANDARD',
+                                // 如果在DoughIngredient中找到了定义，则使用，否则默认为false/0
+                                isFlour: ingredientDetails?.isFlour ?? false,
+                                waterContent: ingredientDetails?.waterContent ?? 0,
+                            },
                         });
                     }
                 }
