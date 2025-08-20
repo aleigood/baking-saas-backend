@@ -65,7 +65,8 @@ class ProductDto {
 }
 
 // 用于面团中原料的DTO
-class DoughIngredientDto {
+// [核心修正] 增加 export 关键字，使其可以在模块外被导入
+export class DoughIngredientDto {
     @IsString()
     @IsNotEmpty()
     name: string;

@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateRecipeDto } from './dto/create-recipe.dto';
+import { CreateRecipeDto, DoughIngredientDto } from './dto/create-recipe.dto';
 // [修改] 导入Prisma，用于指定事务隔离级别
-import { Prisma, RecipeFamily, RecipeVersion, ProductIngredientType } from '@prisma/client';
+import { Prisma, RecipeFamily, RecipeVersion, ProductIngredientType, RecipeType } from '@prisma/client';
 
 // 为配方族及其版本定义一个更精确的类型，以帮助TypeScript进行类型推断
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
@@ -71,6 +71,9 @@ export class RecipesService {
         // [修改] 增加事务隔离级别配置，防止并发导入时产生重复原料
         return this.prisma.$transaction(
             async (tx) => {
+                // [核心新增] 在事务开始时执行贝克百分比验证
+                await this._validateBakerPercentage(type, ingredients, tenantId, tx);
+
                 let recipeFamily: RecipeFamilyWithVersions;
 
                 if (familyId) {
@@ -529,5 +532,91 @@ export class RecipesService {
         return this.prisma.recipeVersion.delete({
             where: { id: versionId },
         });
+    }
+
+    /**
+     * [核心新增] 验证贝克百分比的私有方法
+     * @param type 配方类型
+     * @param ingredients 配方中的原料列表
+     * @param tenantId 租户ID
+     * @param tx Prisma事务实例
+     */
+    private async _validateBakerPercentage(
+        type: RecipeType,
+        ingredients: DoughIngredientDto[],
+        tenantId: string,
+        // [核心修正] 将 tx 的类型修正为 Prisma.TransactionClient，以匹配事务回调提供的客户端类型
+        tx: Prisma.TransactionClient,
+    ) {
+        if (type === 'EXTRA') {
+            return; // EXTRA 类型的配方（如馅料）不需要验证
+        }
+
+        let totalFlourRatio = 0;
+
+        for (const ingredientDto of ingredients) {
+            // 检查原料是否为面粉
+            if (ingredientDto.isFlour) {
+                totalFlourRatio += ingredientDto.ratio;
+            } else {
+                // 检查原料是否为预制面团
+                const preDoughFamily = await tx.recipeFamily.findFirst({
+                    where: {
+                        name: ingredientDto.name,
+                        tenantId,
+                        type: 'PRE_DOUGH',
+                        deletedAt: null,
+                    },
+                    include: {
+                        versions: {
+                            where: { isActive: true },
+                            include: {
+                                doughs: {
+                                    include: {
+                                        ingredients: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+
+                if (preDoughFamily && preDoughFamily.versions.length > 0) {
+                    const preDoughVersion = preDoughFamily.versions[0];
+                    const preDough = preDoughVersion.doughs[0];
+
+                    if (preDough) {
+                        const preDoughTotalRatio = preDough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+
+                        // 获取预制面团中所有面粉类原料的名称
+                        const preDoughIngredientNames = preDough.ingredients.map((ing) => ing.name);
+                        const preDoughFlourIngredients = await tx.ingredient.findMany({
+                            where: {
+                                tenantId,
+                                name: { in: preDoughIngredientNames },
+                                isFlour: true,
+                            },
+                        });
+                        const preDoughFlourNames = new Set(preDoughFlourIngredients.map((ing) => ing.name));
+
+                        const preDoughFlourRatio = preDough.ingredients
+                            .filter((ing) => preDoughFlourNames.has(ing.name))
+                            .reduce((sum, ing) => sum + ing.ratio, 0);
+
+                        if (preDoughTotalRatio > 0) {
+                            const effectiveFlourRatio = (ingredientDto.ratio / preDoughTotalRatio) * preDoughFlourRatio;
+                            totalFlourRatio += effectiveFlourRatio;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 允许一定的浮点数误差
+        if (Math.abs(totalFlourRatio - 100) > 0.01) {
+            throw new BadRequestException(
+                `配方验证失败：所有面粉类原料（包括预制面团中折算的面粉）的百分比总和必须为100%。当前计算总和为: ${totalFlourRatio.toFixed(2)}%`,
+            );
+        }
     }
 }
