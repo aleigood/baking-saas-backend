@@ -4,8 +4,9 @@ import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
-import { SkuStatus } from '@prisma/client';
+import { Prisma, SkuStatus } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
+import { Decimal } from '@prisma/client/runtime/library';
 
 @Injectable()
 export class IngredientsService {
@@ -406,101 +407,89 @@ export class IngredientsService {
     }
 
     /**
-     * [V2.3 核心逻辑重构] 创建采购记录并更新原料库存
+     * [核心修改] 创建采购记录并更新原料的最新单位成本和总库存
      * @param tenantId 租户ID
      * @param skuId SKU ID
      * @param createProcurementDto DTO
      */
     async createProcurement(tenantId: string, skuId: string, createProcurementDto: CreateProcurementDto) {
-        // 1. 查找SKU，并确保它属于该租户
-        const sku = await this.prisma.ingredientSKU.findFirst({
-            where: {
-                id: skuId,
-                ingredient: {
-                    tenantId,
-                },
-            },
-        });
-
-        if (!sku) {
-            throw new NotFoundException('SKU不存在');
-        }
-
-        // 2. V2.1 业务规则: 只有激活的SKU才能进行采购入库
-        if (sku.status !== SkuStatus.ACTIVE) {
-            throw new BadRequestException('只有激活状态的SKU才能进行采购入库');
-        }
-
-        const { packagesPurchased, pricePerPackage } = createProcurementDto;
-
-        // 3. 计算本次入库的总克数
-        const stockIncrease = packagesPurchased * sku.specWeightInGrams;
-
-        // 4. 使用数据库事务来保证数据一致性
         return this.prisma.$transaction(async (tx) => {
-            // 4.1 创建采购历史记录
-            await tx.procurementRecord.create({
+            // 1. 查找SKU及其关联的原料，并确保它属于该租户
+            const sku = await tx.ingredientSKU.findFirst({
+                where: {
+                    id: skuId,
+                    ingredient: {
+                        tenantId,
+                    },
+                },
+                include: {
+                    ingredient: true,
+                },
+            });
+
+            if (!sku) {
+                throw new NotFoundException('SKU不存在');
+            }
+
+            // 2. 创建新的采购记录
+            const newProcurement = await tx.procurementRecord.create({
                 data: {
                     skuId,
-                    packagesPurchased,
-                    pricePerPackage,
+                    ...createProcurementDto,
                 },
             });
 
-            // 4.2 [核心修改] 更新原料品类的实时库存和当前单价
-            const updatedIngredient = await tx.ingredient.update({
+            // 3. 计算本次采购的单位成本（元/克）
+            const currentPricePerGram = new Decimal(newProcurement.pricePerPackage).div(sku.specWeightInGrams);
+
+            // 4. 更新原料的总库存和最新的单位成本
+            return tx.ingredient.update({
                 where: { id: sku.ingredientId },
                 data: {
-                    // 增加实时库存
                     currentStockInGrams: {
-                        increment: stockIncrease,
+                        increment: createProcurementDto.packagesPurchased * sku.specWeightInGrams,
                     },
-                    // 更新为最新的采购单价
-                    currentPricePerPackage: pricePerPackage,
+                    currentPricePerGram: currentPricePerGram,
                 },
             });
-
-            return updatedIngredient;
         });
     }
 
     /**
-     * [核心新增] 删除采购记录并更新原料库存和单价
+     * [核心修改] 删除采购记录并根据新的最新采购记录更新原料成本
      * @param tenantId 租户ID
      * @param procurementId 采购记录ID
      */
     async deleteProcurement(tenantId: string, procurementId: string) {
-        // 1. 查找采购记录，并确保它属于该租户
-        const procurementToDelete = await this.prisma.procurementRecord.findFirst({
-            where: {
-                id: procurementId,
-                sku: {
-                    ingredient: {
-                        tenantId: tenantId,
+        return this.prisma.$transaction(async (tx) => {
+            // 1. 查找要删除的采购记录，并确保它属于该租户
+            const procurementToDelete = await tx.procurementRecord.findFirst({
+                where: {
+                    id: procurementId,
+                    sku: {
+                        ingredient: {
+                            tenantId: tenantId,
+                        },
                     },
                 },
-            },
-            include: {
-                sku: true,
-            },
-        });
+                include: {
+                    sku: true,
+                },
+            });
 
-        if (!procurementToDelete) {
-            throw new NotFoundException('采购记录不存在');
-        }
+            if (!procurementToDelete) {
+                throw new NotFoundException('采购记录不存在');
+            }
+            const { sku } = procurementToDelete;
+            const stockDecrease = procurementToDelete.packagesPurchased * sku.specWeightInGrams;
 
-        const { sku } = procurementToDelete;
-        const stockDecrease = procurementToDelete.packagesPurchased * sku.specWeightInGrams;
-
-        // 2. 使用数据库事务来保证数据一致性
-        return this.prisma.$transaction(async (tx) => {
-            // 2.1 删除采购记录
+            // 2. 删除采购记录
             await tx.procurementRecord.delete({
                 where: { id: procurementId },
             });
 
-            // 2.2 查找删除后最新的采购记录，以更新单价
-            const latestProcurement = await this.prisma.procurementRecord.findFirst({
+            // 3. 查找删除后最新的采购记录
+            const latestProcurement = await tx.procurementRecord.findFirst({
                 where: {
                     sku: {
                         ingredientId: sku.ingredientId,
@@ -509,22 +498,26 @@ export class IngredientsService {
                 orderBy: {
                     purchaseDate: 'desc',
                 },
-            });
-
-            // 2.3 更新原料的库存和当前单价
-            const updatedIngredient = await tx.ingredient.update({
-                where: { id: sku.ingredientId },
-                data: {
-                    // 减去对应的库存量
-                    currentStockInGrams: {
-                        decrement: stockDecrease,
-                    },
-                    // 如果还有其他采购记录，则更新为最新记录的单价，否则重置为0
-                    currentPricePerPackage: latestProcurement ? latestProcurement.pricePerPackage : 0,
+                include: {
+                    sku: true,
                 },
             });
 
-            return updatedIngredient;
+            // 4. 根据最新的采购记录计算新的单位成本，如果没有记录则成本为0
+            const newPricePerGram = latestProcurement
+                ? new Decimal(latestProcurement.pricePerPackage).div(latestProcurement.sku.specWeightInGrams)
+                : new Decimal(0);
+
+            // 5. 更新原料的库存和当前单位成本
+            return tx.ingredient.update({
+                where: { id: sku.ingredientId },
+                data: {
+                    currentStockInGrams: {
+                        decrement: stockDecrease,
+                    },
+                    currentPricePerGram: newPricePerGram,
+                },
+            });
         });
     }
 }

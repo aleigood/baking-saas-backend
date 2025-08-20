@@ -14,14 +14,15 @@ import {
     RecipeVersion,
 } from '@prisma/client';
 
-type IngredientWithActiveSku = Ingredient & {
+// 修改：不再需要 activeSku，但保留类型以便复用
+type IngredientWithAllInfo = Ingredient & {
     activeSku: IngredientSKU | null;
 };
 
 interface ConsumptionDetail {
     ingredientId: string;
     ingredientName: string;
-    activeSkuId: string | null;
+    activeSkuId: string | null; // 保留此字段用于记录消耗快照
     totalConsumed: number; // in grams
 }
 
@@ -282,14 +283,13 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const ingredientsMap = await this.getIngredientsWithActiveSku(tenantId);
+        const ingredientsMap = await this.getIngredientsMap(tenantId);
+        // 辅助函数：根据原料名称获取其单位成本（元/千克）
         const getPricePerKg = (name: string) => {
             const ingredientInfo = ingredientsMap.get(name);
-            if (ingredientInfo?.activeSku) {
-                const price = new Decimal(ingredientInfo.currentPricePerPackage).div(
-                    ingredientInfo.activeSku.specWeightInGrams,
-                );
-                return price.mul(1000).toDP(2).toNumber();
+            if (ingredientInfo) {
+                // 修改：直接使用 currentPricePerGram 计算
+                return new Decimal(ingredientInfo.currentPricePerGram).mul(1000).toDP(2).toNumber();
             }
             return 0;
         };
@@ -407,7 +407,7 @@ export class CostingService {
     }
 
     /**
-     * [核心重构] 计算单个产品的当前成本，现在调用新的辅助函数
+     * [核心修改] 计算单个产品的当前成本，使用最新的单位成本
      */
     async calculateProductCost(tenantId: string, productId: string) {
         const product = await this.getFullProduct(tenantId, productId);
@@ -416,16 +416,14 @@ export class CostingService {
         }
 
         const flatIngredients = await this._getFlattenedIngredients(product);
-        const ingredientsMap = await this.getIngredientsWithActiveSku(tenantId);
+        const ingredientsMap = await this.getIngredientsMap(tenantId);
         let totalCost = new Decimal(0);
 
         for (const [name, weight] of flatIngredients.entries()) {
             const ingredientInfo = ingredientsMap.get(name);
-            // [编译错误修复] 从 ingredientInfo (原料) 获取价格，从 activeSku 获取规格重量
-            if (ingredientInfo?.activeSku) {
-                const pricePerGram = new Decimal(ingredientInfo.currentPricePerPackage).div(
-                    ingredientInfo.activeSku.specWeightInGrams,
-                );
+            if (ingredientInfo) {
+                // 直接使用最新的单位成本进行计算
+                const pricePerGram = new Decimal(ingredientInfo.currentPricePerGram);
                 const cost = pricePerGram.mul(weight);
                 totalCost = totalCost.add(cost);
             }
@@ -439,7 +437,7 @@ export class CostingService {
     }
 
     /**
-     * [核心重构] 计算产品中各原料的成本构成, 并聚合为前4+其他
+     * [核心修改] 计算产品中各原料的成本构成，使用最新的单位成本
      * @param tenantId 租户ID
      * @param productId 产品ID
      * @returns 返回一个包含 { name: string, value: number } 的数组，用于饼图
@@ -454,15 +452,14 @@ export class CostingService {
         }
 
         const flatIngredients = await this._getFlattenedIngredients(product);
-        const ingredientsMap = await this.getIngredientsWithActiveSku(tenantId);
+        const ingredientsMap = await this.getIngredientsMap(tenantId);
         const costBreakdown: { name: string; value: number }[] = [];
 
         for (const [name, weight] of flatIngredients.entries()) {
             const ingredientInfo = ingredientsMap.get(name);
-            if (ingredientInfo?.activeSku) {
-                const pricePerGram = new Decimal(ingredientInfo.currentPricePerPackage).div(
-                    ingredientInfo.activeSku.specWeightInGrams,
-                );
+            if (ingredientInfo) {
+                // 直接使用最新的单位成本进行计算
+                const pricePerGram = new Decimal(ingredientInfo.currentPricePerGram);
                 const cost = pricePerGram.mul(weight);
                 costBreakdown.push({
                     name: name,
@@ -474,7 +471,7 @@ export class CostingService {
         // 按成本排序
         const sortedBreakdown = costBreakdown.sort((a, b) => b.value - a.value);
 
-        // [核心修改] 如果超过4项，则聚合为前4+其他
+        // 如果超过4项，则聚合为前4+其他
         if (sortedBreakdown.length > 4) {
             const top4 = sortedBreakdown.slice(0, 4);
             const otherValue = sortedBreakdown.slice(4).reduce((sum, item) => sum + item.value, 0);
@@ -658,7 +655,12 @@ export class CostingService {
         return result;
     }
 
-    private async getIngredientsWithActiveSku(tenantId: string): Promise<Map<string, IngredientWithActiveSku>> {
+    /**
+     * [修改] 获取所有原料信息，不再只包含 activeSku
+     * @param tenantId 租户ID
+     * @returns 一个以原料名称为键的 Map
+     */
+    private async getIngredientsMap(tenantId: string): Promise<Map<string, IngredientWithAllInfo>> {
         const ingredients = await this.prisma.ingredient.findMany({
             where: { tenantId, deletedAt: null },
             include: {
@@ -666,6 +668,6 @@ export class CostingService {
             },
         });
 
-        return new Map(ingredients.map((i) => [i.name, i as IngredientWithActiveSku]));
+        return new Map(ingredients.map((i) => [i.name, i as IngredientWithAllInfo]));
     }
 }

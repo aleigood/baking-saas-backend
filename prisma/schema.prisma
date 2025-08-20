@@ -261,18 +261,18 @@ model ProductIngredient {
 
 // 原料品类模型
 model Ingredient {
-  id                     String         @id @default(uuid())
-  tenantId               String
-  name                   String // e.g., "High-gluten flour"
-  type                   IngredientType @default(STANDARD)
+  id                  String         @id @default(uuid())
+  tenantId            String
+  name                String // e.g., "High-gluten flour"
+  type                IngredientType @default(STANDARD)
   // [核心新增] 新增配方属性字段
-  isFlour                Boolean        @default(false)
-  waterContent           Float          @default(0)
+  isFlour             Boolean        @default(false)
+  waterContent        Float          @default(0)
   // 指向当前启用的SKU
-  activeSkuId            String?
+  activeSkuId         String?
   // [核心重构] 将库存和价格移至此处
-  currentStockInGrams    Float          @default(0)
-  currentPricePerPackage Decimal        @default(0)
+  currentStockInGrams Float          @default(0)
+  currentPricePerGram Decimal        @default(0) // 修改：将 currentPricePerPackage 替换为 currentPricePerGram，用于存储最新的单位成本
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -281,7 +281,7 @@ model Ingredient {
   tenant          Tenant                     @relation(fields: [tenantId], references: [id])
   skus            IngredientSKU[]
   consumptionLogs IngredientConsumptionLog[] // 关联到该原料的消耗记录
-  activeSku       IngredientSKU?             @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  activeSku       IngredientSKU?             @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: SetNull, onUpdate: Cascade) // 修改：调整关系，允许在SKU删除时将此字段置空
 
   @@unique([tenantId, name, deletedAt])
 }
