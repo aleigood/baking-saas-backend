@@ -270,16 +270,9 @@ export class IngredientsService {
         });
     }
 
-    /**
-     * [新增] 获取单个原料的完整库存流水
-     * @param tenantId 租户ID
-     * @param ingredientId 原料ID
-     */
     async getIngredientLedger(tenantId: string, ingredientId: string) {
-        // 1. 确保原料存在
         await this.findOne(tenantId, ingredientId);
 
-        // 2. 查询三种类型的流水记录
         const procurements = await this.prisma.procurementRecord.findMany({
             where: { sku: { ingredientId: ingredientId } },
             include: { sku: true },
@@ -292,7 +285,7 @@ export class IngredientsService {
                 productionLog: {
                     include: {
                         task: {
-                            select: { id: true }, // 只选择需要的字段
+                            select: { id: true },
                         },
                     },
                 },
@@ -302,25 +295,24 @@ export class IngredientsService {
 
         const adjustments = await this.prisma.ingredientStockAdjustment.findMany({
             where: { ingredientId: ingredientId },
-            include: { user: { select: { name: true, phone: true } } }, // 选择操作人信息
+            include: { user: { select: { name: true, phone: true } } },
             orderBy: { createdAt: 'desc' },
         });
 
-        // 3. 将不同类型的记录格式化为统一的流水格式
         const procurementLedger = procurements.map((p) => ({
             date: p.purchaseDate,
             type: '采购入库',
             change: p.packagesPurchased * p.sku.specWeightInGrams,
             details: `采购 ${p.sku.brand || ''} ${p.sku.specName} × ${p.packagesPurchased}`,
-            operator: '系统', // 采购目前没有记录操作人
+            operator: '系统',
         }));
 
         const consumptionLedger = consumptions.map((c) => ({
             date: c.productionLog.completedAt,
             type: '生产消耗',
             change: -c.quantityInGrams,
-            details: `生产任务 #${c.productionLog.task.id.split('-')[0]}`, // 截取任务ID以简化显示
-            operator: '系统', // 生产完成目前没有记录操作人
+            details: `生产任务 #${c.productionLog.task.id.split('-')[0]}`,
+            operator: '系统',
         }));
 
         const adjustmentLedger = adjustments.map((a) => ({
@@ -331,7 +323,6 @@ export class IngredientsService {
             operator: a.user.name || a.user.phone,
         }));
 
-        // 4. 合并并排序所有流水记录
         const ledger = [...procurementLedger, ...consumptionLedger, ...adjustmentLedger];
         ledger.sort((a, b) => b.date.getTime() - a.date.getTime());
 

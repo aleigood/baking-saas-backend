@@ -3,8 +3,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductionTaskDto } from './dto/create-production-task.dto';
 import { UpdateProductionTaskDto } from './dto/update-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
-// [FIX] 导入 Prisma 类型以增强类型安全
-// (Import Prisma types for enhanced type safety)
 import { Prisma, ProductionTaskStatus } from '@prisma/client';
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService } from '../costing/costing.service';
@@ -13,16 +11,9 @@ import { CostingService } from '../costing/costing.service';
 export class ProductionTasksService {
     constructor(
         private readonly prisma: PrismaService,
-        // 注入成本计算服务，用于获取配方成分
-        // (Inject costing service to get recipe ingredients)
         private readonly costingService: CostingService,
     ) {}
 
-    /**
-     * [核心修改] 创建任务时增加库存预警
-     * @param tenantId 租户ID
-     * @param createProductionTaskDto DTO
-     */
     async create(tenantId: string, createProductionTaskDto: CreateProductionTaskDto) {
         const { plannedDate, notes, products } = createProductionTaskDto;
 
@@ -30,7 +21,6 @@ export class ProductionTasksService {
             throw new BadRequestException('一个生产任务至少需要包含一个产品。');
         }
 
-        // 1. 验证所有目标产品是否存在且属于该租户
         const productIds = products.map((p) => p.productId);
         const existingProducts = await this.prisma.product.findMany({
             where: {
@@ -43,7 +33,6 @@ export class ProductionTasksService {
             throw new NotFoundException('一个或多个目标产品不存在或不属于该店铺。');
         }
 
-        // 2. 计算任务所需的原料总消耗
         const allConsumptions = new Map<
             string,
             { ingredientId: string; ingredientName: string; totalConsumed: number }
@@ -69,7 +58,6 @@ export class ProductionTasksService {
         }
         const finalConsumptions = Array.from(allConsumptions.values());
 
-        // 3. 检查库存并生成警告信息
         let stockWarning: string | null = null;
         if (finalConsumptions.length > 0) {
             const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
@@ -92,7 +80,6 @@ export class ProductionTasksService {
             }
         }
 
-        // 4. 创建任务和任务项
         const createdTask = await this.prisma.productionTask.create({
             data: {
                 plannedDate,
@@ -114,11 +101,9 @@ export class ProductionTasksService {
             },
         });
 
-        // 5. 返回创建的任务和警告信息
         return { task: createdTask, warning: stockWarning };
     }
 
-    // [REFACTORED] 重构 findAll 方法以支持分页和分组
     async findAll(tenantId: string, query: QueryProductionTaskDto) {
         const { status, plannedDate, page = '1', limit = '10' } = query;
         const pageNum = parseInt(page, 10);
@@ -130,7 +115,6 @@ export class ProductionTasksService {
         };
 
         if (status && status.length > 0) {
-            // [MODIFIED] 支持状态数组查询
             where.status = { in: status };
         }
 
@@ -145,7 +129,6 @@ export class ProductionTasksService {
             };
         }
 
-        // [ADDED] 检查是否是历史任务查询，如果是则应用分页和分组逻辑
         const isHistoryQuery = status && status.some((s) => ['COMPLETED', 'CANCELLED'].includes(s));
 
         if (isHistoryQuery) {
@@ -167,16 +150,14 @@ export class ProductionTasksService {
                     },
                 },
                 orderBy: {
-                    plannedDate: 'desc', // 按日期降序排序
+                    plannedDate: 'desc',
                 },
                 skip: (pageNum - 1) * limitNum,
                 take: limitNum,
             });
 
-            // [ADDED] 按日期进行分组
             const groupedTasks = tasks.reduce(
                 (acc, task) => {
-                    // 格式化日期为 'MM月DD日 星期X'
                     const date = new Date(task.plannedDate).toLocaleDateString('zh-CN', {
                         month: 'long',
                         day: 'numeric',
@@ -205,7 +186,6 @@ export class ProductionTasksService {
             };
         }
 
-        // 对于进行中的任务，保持原有逻辑，不分页
         return this.prisma.productionTask.findMany({
             where,
             include: {
@@ -229,12 +209,6 @@ export class ProductionTasksService {
         });
     }
 
-    /**
-     * 查询任务详情时，深度查询以满足前端称重需求，并实时计算库存警告
-     * @param tenantId
-     * @param id
-     * @returns
-     */
     async findOne(tenantId: string, id: string) {
         const task = await this.prisma.productionTask.findFirst({
             where: {
@@ -283,12 +257,10 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
-        // 如果任务已完成或取消，则不显示库存警告
         if (task.status === 'COMPLETED' || task.status === 'CANCELLED') {
             return { ...task, stockWarning: null };
         }
 
-        // 实时计算库存警告
         const allConsumptions = new Map<
             string,
             { ingredientId: string; ingredientName: string; totalConsumed: number }
@@ -339,8 +311,6 @@ export class ProductionTasksService {
         return { ...task, stockWarning };
     }
 
-    // 更新生产任务
-    // (Update a production task)
     async update(tenantId: string, id: string, updateProductionTaskDto: UpdateProductionTaskDto) {
         await this.findOne(tenantId, id);
         return this.prisma.productionTask.update({
@@ -349,8 +319,6 @@ export class ProductionTasksService {
         });
     }
 
-    // 软删除生产任务
-    // (Soft delete a production task)
     async remove(tenantId: string, id: string) {
         await this.findOne(tenantId, id);
         return this.prisma.productionTask.update({
@@ -361,12 +329,6 @@ export class ProductionTasksService {
         });
     }
 
-    /**
-     * [核心修改] 完成任务时，如果库存不足则清零，不阻止任务完成
-     * @param tenantId 租户ID
-     * @param id 任务ID
-     * @param completeProductionTaskDto DTO
-     */
     async complete(tenantId: string, id: string, completeProductionTaskDto: CompleteProductionTaskDto) {
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
@@ -416,17 +378,15 @@ export class ProductionTasksService {
             const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
             const ingredients = await tx.ingredient.findMany({
                 where: { id: { in: ingredientIds } },
-                select: { id: true, name: true, currentStockInGrams: true },
+                select: { id: true, name: true, currentStockInGrams: true, currentStockValue: true },
             });
-            const ingredientStockMap = new Map(ingredients.map((i) => [i.id, i]));
+            const ingredientDataMap = new Map(ingredients.map((i) => [i.id, i]));
 
-            // 更新任务状态
             await tx.productionTask.update({
                 where: { id },
                 data: { status: ProductionTaskStatus.COMPLETED },
             });
 
-            // 创建生产日志
             const productionLog = await tx.productionLog.create({
                 data: {
                     taskId: id,
@@ -434,7 +394,6 @@ export class ProductionTasksService {
                 },
             });
 
-            // 遍历消耗列表，创建消耗日志并扣减库存
             for (const consumption of finalConsumptions) {
                 if (!consumption.activeSkuId) {
                     continue;
@@ -449,16 +408,26 @@ export class ProductionTasksService {
                     },
                 });
 
-                const ingredient = ingredientStockMap.get(consumption.ingredientId);
+                const ingredient = ingredientDataMap.get(consumption.ingredientId);
                 if (ingredient) {
-                    // [核心修改] 计算实际可扣减的库存量，确保不为负
                     const decrementAmount = Math.min(ingredient.currentStockInGrams, consumption.totalConsumed);
+
+                    // [核心修改] 计算本次消耗的价值，并从库存总价值中扣除
+                    const currentStockValue = new Prisma.Decimal(ingredient.currentStockValue.toString());
+                    let valueToDecrement = new Prisma.Decimal(0);
+                    if (ingredient.currentStockInGrams > 0) {
+                        const avgPricePerGram = currentStockValue.div(ingredient.currentStockInGrams);
+                        valueToDecrement = avgPricePerGram.mul(decrementAmount);
+                    }
 
                     await tx.ingredient.update({
                         where: { id: consumption.ingredientId },
                         data: {
                             currentStockInGrams: {
                                 decrement: decrementAmount,
+                            },
+                            currentStockValue: {
+                                decrement: valueToDecrement,
                             },
                         },
                     });

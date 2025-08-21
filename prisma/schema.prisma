@@ -93,7 +93,7 @@ model User {
   createdAt        DateTime                    @default(now())
   updatedAt        DateTime                    @updatedAt
   tenants          TenantUser[] // User can belong to multiple tenants
-  stockAdjustments IngredientStockAdjustment[] // [核心修改] 新增反向关联
+  stockAdjustments IngredientStockAdjustment[]
 }
 
 // 租户/店铺模型
@@ -260,7 +260,7 @@ model Ingredient {
   waterContent        Float                       @default(0)
   activeSkuId         String?
   currentStockInGrams Float                       @default(0)
-  currentStockValue   Decimal                     @default(0)
+  currentStockValue   Decimal                     @default(0) // [核心修改] 新增字段，用于记录当前库存的总价值
   createdAt           DateTime                    @default(now())
   updatedAt           DateTime                    @updatedAt
   deletedAt           DateTime?
@@ -270,7 +270,7 @@ model Ingredient {
   activeSku           IngredientSKU?              @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   doughIngredients    DoughIngredient[]
   productIngredients  ProductIngredient[]
-  stockAdjustments    IngredientStockAdjustment[] // [核心修改] 新增反向关联
+  stockAdjustments    IngredientStockAdjustment[]
 
   @@unique([tenantId, name, deletedAt])
 }

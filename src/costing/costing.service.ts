@@ -1,21 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { Decimal } from '@prisma/client/runtime/library';
+import { Prisma } from '@prisma/client';
 import {
     Dough,
     DoughIngredient,
     Ingredient,
-    IngredientSKU,
     Product,
     ProductIngredient,
     ProductIngredientType,
     RecipeFamily,
     RecipeVersion,
 } from '@prisma/client';
-
-type IngredientWithAllInfo = Ingredient & {
-    activeSku: IngredientSKU | null;
-};
 
 interface ConsumptionDetail {
     ingredientId: string;
@@ -55,7 +50,6 @@ export interface CalculatedProductCostDetails {
     groupedExtraIngredients: Record<string, CalculatedExtraIngredientInfo[]>;
 }
 
-// [核心修改] 更新类型定义以包含通过ID关联的实体
 type FullDoughIngredient = DoughIngredient & {
     ingredient: Ingredient | null;
     linkedPreDough:
@@ -130,7 +124,7 @@ export class CostingService {
         const costHistory: { cost: number; date: string }[] = [];
 
         for (const date of costChangeDates) {
-            let snapshotTotalCost = new Decimal(0);
+            let snapshotTotalCost = new Prisma.Decimal(0);
             for (const [id, weight] of flatIngredients.entries()) {
                 const ingredientInfo = ingredientsWithSkus.find((ing) => ing.id === id);
                 if (!ingredientInfo || ingredientInfo.skus.length === 0) continue;
@@ -146,7 +140,7 @@ export class CostingService {
                 });
 
                 if (latestProcurement) {
-                    const pricePerGram = new Decimal(latestProcurement.pricePerPackage).div(
+                    const pricePerGram = new Prisma.Decimal(latestProcurement.pricePerPackage).div(
                         latestProcurement.sku.specWeightInGrams,
                     );
                     snapshotTotalCost = snapshotTotalCost.add(pricePerGram.mul(weight));
@@ -200,8 +194,8 @@ export class CostingService {
         }
 
         const costHistory = procurementRecords.map((record) => {
-            const pricePerPackage = new Decimal(record.pricePerPackage);
-            const specWeightInGrams = new Decimal(record.sku.specWeightInGrams);
+            const pricePerPackage = new Prisma.Decimal(record.pricePerPackage);
+            const specWeightInGrams = new Prisma.Decimal(record.sku.specWeightInGrams);
             if (specWeightInGrams.isZero()) {
                 return { cost: 0 };
             }
@@ -248,9 +242,7 @@ export class CostingService {
 
         const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientIds = Array.from(flatIngredients.keys());
-        const pricePerGramMap = await this._getLatestPricePerGramMap(tenantId, ingredientIds);
-        const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
-        const ingredientMap = new Map(ingredients.map((i) => [i.id, i]));
+        const pricePerGramMap = await this._getWeightedAveragePricePerGramMap(tenantId, ingredientIds);
 
         const getPricePerKg = (id: string) => {
             const pricePerGram = pricePerGramMap.get(id);
@@ -258,8 +250,8 @@ export class CostingService {
         };
 
         const doughGroups: CalculatedDoughGroup[] = [];
-        let totalCost = new Decimal(0);
-        let totalFlourWeight = new Decimal(0);
+        let totalCost = new Prisma.Decimal(0);
+        let totalFlourWeight = new Prisma.Decimal(0);
 
         const processDough = (dough: FullRecipeVersion['doughs'][0], doughWeight: number): CalculatedDoughGroup => {
             const group: CalculatedDoughGroup = {
@@ -272,19 +264,23 @@ export class CostingService {
             const totalRatio = dough.ingredients.reduce((sum, i) => sum + i.ratio, 0);
             if (totalRatio === 0) return group;
 
-            const weightPerRatioPoint = new Decimal(doughWeight).div(totalRatio);
+            const weightPerRatioPoint = new Prisma.Decimal(doughWeight).div(totalRatio);
 
             for (const ingredient of dough.ingredients) {
                 const weight = weightPerRatioPoint.mul(ingredient.ratio);
                 const preDough = ingredient.linkedPreDough?.versions?.[0];
 
                 if (preDough && preDough.doughs[0]) {
-                    const preDoughGroup = processDough(preDough.doughs[0] as any, weight.toNumber());
+                    // [核心修改] 使用更安全的类型断言，修复lint错误
+                    const preDoughGroup = processDough(
+                        preDough.doughs[0] as FullRecipeVersion['doughs'][0],
+                        weight.toNumber(),
+                    );
                     preDoughGroup.name = `${ingredient.linkedPreDough?.name} (用量: ${weight.toDP(1).toNumber()}g)`;
                     doughGroups.push(preDoughGroup);
                 } else if (ingredient.ingredient) {
                     const pricePerKg = getPricePerKg(ingredient.ingredient.id);
-                    const cost = new Decimal(pricePerKg).div(1000).mul(weight);
+                    const cost = new Prisma.Decimal(pricePerKg).div(1000).mul(weight);
                     group.ingredients.push({
                         name: ingredient.ingredient.name,
                         ratio: ingredient.ratio,
@@ -292,7 +288,7 @@ export class CostingService {
                         pricePerKg: pricePerKg.toFixed(2),
                         cost: cost.toDP(2).toNumber(),
                     });
-                    group.totalCost = new Decimal(group.totalCost).add(cost).toNumber();
+                    group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
 
                     if (ingredient.ingredient.isFlour) {
                         totalFlourWeight = totalFlourWeight.add(weight);
@@ -319,13 +315,13 @@ export class CostingService {
             const name = ing.ingredient?.name || ing.linkedExtra?.name || '未知';
             const id = ing.ingredient?.id || ing.linkedExtra?.id || ing.id;
             const pricePerKg = getPricePerKg(id);
-            let finalWeightInGrams = new Decimal(0);
+            let finalWeightInGrams = new Prisma.Decimal(0);
             if (ing.type === 'MIX_IN' && ing.ratio) {
                 finalWeightInGrams = totalFlourWeight.mul(ing.ratio).div(100);
             } else if (ing.weightInGrams) {
-                finalWeightInGrams = new Decimal(ing.weightInGrams);
+                finalWeightInGrams = new Prisma.Decimal(ing.weightInGrams);
             }
-            const cost = new Decimal(pricePerKg).div(1000).mul(finalWeightInGrams);
+            const cost = new Prisma.Decimal(pricePerKg).div(1000).mul(finalWeightInGrams);
             totalCost = totalCost.add(cost);
 
             return {
@@ -375,9 +371,9 @@ export class CostingService {
 
         const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientIds = Array.from(flatIngredients.keys());
-        const pricePerGramMap = await this._getLatestPricePerGramMap(tenantId, ingredientIds);
+        const pricePerGramMap = await this._getWeightedAveragePricePerGramMap(tenantId, ingredientIds);
 
-        let totalCost = new Decimal(0);
+        let totalCost = new Prisma.Decimal(0);
 
         for (const [id, weight] of flatIngredients.entries()) {
             const pricePerGram = pricePerGramMap.get(id);
@@ -405,7 +401,7 @@ export class CostingService {
 
         const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientIds = Array.from(flatIngredients.keys());
-        const pricePerGramMap = await this._getLatestPricePerGramMap(tenantId, ingredientIds);
+        const pricePerGramMap = await this._getWeightedAveragePricePerGramMap(tenantId, ingredientIds);
         const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
         const ingredientMap = new Map(ingredients.map((i) => [i.id, i]));
 
@@ -448,7 +444,7 @@ export class CostingService {
                             include: {
                                 ingredients: {
                                     include: {
-                                        ingredient: true, // [核心修改] 包含关联的原料实体
+                                        ingredient: true,
                                         linkedPreDough: {
                                             include: {
                                                 versions: {
@@ -475,7 +471,7 @@ export class CostingService {
                 },
                 ingredients: {
                     include: {
-                        ingredient: true, // [核心修改] 包含关联的原料实体
+                        ingredient: true,
                         linkedExtra: true,
                     },
                 },
@@ -490,14 +486,15 @@ export class CostingService {
             const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
             if (totalRatio === 0) return;
 
-            const weightPerRatioPoint = new Decimal(doughWeight).div(totalRatio);
+            const weightPerRatioPoint = new Prisma.Decimal(doughWeight).div(totalRatio);
 
             for (const ing of dough.ingredients) {
                 const ingredientWeight = weightPerRatioPoint.mul(ing.ratio).toNumber();
                 const preDough = ing.linkedPreDough?.versions?.[0];
 
                 if (preDough && preDough.doughs[0]) {
-                    processDough(preDough.doughs[0] as any, ingredientWeight);
+                    // [核心修改] 使用更安全的类型断言，修复lint错误
+                    processDough(preDough.doughs[0] as FullRecipeVersion['doughs'][0], ingredientWeight);
                 } else if (ing.ingredientId) {
                     const currentWeight = flattenedIngredients.get(ing.ingredientId) || 0;
                     flattenedIngredients.set(ing.ingredientId, currentWeight + ingredientWeight);
@@ -509,7 +506,7 @@ export class CostingService {
             processDough(dough, product.baseDoughWeight);
         });
 
-        let totalFlourWeight = new Decimal(0);
+        let totalFlourWeight = new Prisma.Decimal(0);
         const ingredientIds = Array.from(flattenedIngredients.keys());
         const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
         const ingredientMap = new Map(ingredients.map((i) => [i.id, i]));
@@ -582,18 +579,10 @@ export class CostingService {
         return result;
     }
 
-    private async getIngredientsMap(tenantId: string): Promise<Map<string, IngredientWithAllInfo>> {
-        const ingredients = await this.prisma.ingredient.findMany({
-            where: { tenantId, deletedAt: null },
-            include: {
-                activeSku: true,
-            },
-        });
-
-        return new Map(ingredients.map((i) => [i.name, i as IngredientWithAllInfo]));
-    }
-
-    private async _getLatestPricePerGramMap(tenantId: string, ingredientIds: string[]): Promise<Map<string, Decimal>> {
+    private async _getWeightedAveragePricePerGramMap(
+        tenantId: string,
+        ingredientIds: string[],
+    ): Promise<Map<string, Prisma.Decimal>> {
         const ingredients = await this.prisma.ingredient.findMany({
             where: {
                 tenantId,
@@ -601,44 +590,21 @@ export class CostingService {
             },
             select: {
                 id: true,
-                skus: {
-                    select: {
-                        id: true,
-                    },
-                },
+                currentStockInGrams: true,
+                currentStockValue: true,
             },
         });
 
-        const priceMap = new Map<string, Decimal>();
+        const priceMap = new Map<string, Prisma.Decimal>();
 
         for (const ingredient of ingredients) {
-            const skuIds = ingredient.skus.map((s) => s.id);
-            if (skuIds.length === 0) {
-                priceMap.set(ingredient.id, new Decimal(0));
-                continue;
-            }
-
-            const latestProcurement = await this.prisma.procurementRecord.findFirst({
-                where: {
-                    skuId: { in: skuIds },
-                },
-                orderBy: {
-                    purchaseDate: 'desc',
-                },
-                include: {
-                    sku: {
-                        select: { specWeightInGrams: true },
-                    },
-                },
-            });
-
-            if (latestProcurement && latestProcurement.sku.specWeightInGrams > 0) {
-                const pricePerGram = new Decimal(latestProcurement.pricePerPackage).div(
-                    latestProcurement.sku.specWeightInGrams,
+            if (ingredient.currentStockInGrams > 0 && ingredient.currentStockValue.gt(0)) {
+                const pricePerGram = new Prisma.Decimal(ingredient.currentStockValue).div(
+                    ingredient.currentStockInGrams,
                 );
                 priceMap.set(ingredient.id, pricePerGram);
             } else {
-                priceMap.set(ingredient.id, new Decimal(0));
+                priceMap.set(ingredient.id, new Prisma.Decimal(0));
             }
         }
 
