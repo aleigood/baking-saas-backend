@@ -395,15 +395,13 @@ export class ProductionTasksService {
             });
 
             for (const consumption of finalConsumptions) {
-                if (!consumption.activeSkuId) {
-                    continue;
-                }
-
+                // [核心修改] 移除此处的if判断，确保所有原料的消耗都被记录和扣减
+                // The skuId can be null, which is valid.
                 await tx.ingredientConsumptionLog.create({
                     data: {
                         productionLogId: productionLog.id,
                         ingredientId: consumption.ingredientId,
-                        skuId: consumption.activeSkuId,
+                        skuId: consumption.activeSkuId, // 此处可以为null
                         quantityInGrams: consumption.totalConsumed,
                     },
                 });
@@ -412,7 +410,6 @@ export class ProductionTasksService {
                 if (ingredient) {
                     const decrementAmount = Math.min(ingredient.currentStockInGrams, consumption.totalConsumed);
 
-                    // [核心修改] 计算本次消耗的价值，并从库存总价值中扣除
                     const currentStockValue = new Prisma.Decimal(ingredient.currentStockValue.toString());
                     let valueToDecrement = new Prisma.Decimal(0);
                     if (ingredient.currentStockInGrams > 0) {
