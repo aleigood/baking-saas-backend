@@ -1,14 +1,8 @@
-import { IsDateString, IsNumber, IsOptional } from 'class-validator';
+import { IsNotEmpty, IsNumber } from 'class-validator';
 
-/**
- * [新增] 用于修改采购记录的DTO
- */
 export class UpdateProcurementDto {
+    // 根据业务需求，只允许修改每包的价格
     @IsNumber()
-    @IsOptional()
-    pricePerPackage?: number;
-
-    @IsDateString()
-    @IsOptional()
-    purchaseDate?: string;
+    @IsNotEmpty()
+    pricePerPackage: number;
 }

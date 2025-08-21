@@ -432,7 +432,10 @@ export class IngredientsService {
             await tx.procurementRecord.create({
                 data: {
                     skuId,
-                    ...createProcurementDto,
+                    packagesPurchased: createProcurementDto.packagesPurchased,
+                    pricePerPackage: createProcurementDto.pricePerPackage,
+                    // 如果DTO中没有提供采购日期（补录情况），则使用当前时间
+                    purchaseDate: createProcurementDto.purchaseDate || new Date(),
                 },
             });
 
@@ -471,9 +474,12 @@ export class IngredientsService {
             throw new NotFoundException('采购记录不存在');
         }
 
+        // 2. 仅更新采购记录的价格，不涉及库存变动
         return this.prisma.procurementRecord.update({
             where: { id: procurementId },
-            data: updateProcurementDto,
+            data: {
+                pricePerPackage: updateProcurementDto.pricePerPackage,
+            },
         });
     }
 }
