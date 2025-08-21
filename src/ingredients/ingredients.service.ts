@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
@@ -7,14 +7,13 @@ import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { SkuStatus } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
-import { UpdateStockDto } from './dto/update-stock.dto';
+import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class IngredientsService {
     constructor(private readonly prisma: PrismaService) {}
 
-    // 创建原料品类
     async create(tenantId: string, createIngredientDto: CreateIngredientDto) {
         return this.prisma.ingredient.create({
             data: {
@@ -24,9 +23,7 @@ export class IngredientsService {
         });
     }
 
-    // [REFACTORED] findAll 方法现在使用数据库聚合查询，以解决性能问题
     async findAll(tenantId: string) {
-        // 1. 过滤掉作为半成品的原料名称
         const intermediateRecipes = await this.prisma.recipeFamily.findMany({
             where: {
                 tenantId,
@@ -39,7 +36,6 @@ export class IngredientsService {
         });
         const intermediateRecipeNames = intermediateRecipes.map((r) => r.name);
 
-        // 2. 查询基础原料信息
         const ingredients = await this.prisma.ingredient.findMany({
             where: {
                 tenantId,
@@ -66,11 +62,10 @@ export class IngredientsService {
             return [];
         }
 
-        // 3. [核心性能优化] 使用原生SQL聚合查询，将计算任务交给数据库
         const consumptionStats: {
             ingredientId: string;
             total: number;
-            taskCount: bigint; // Prisma返回的COUNT结果是BigInt类型
+            taskCount: bigint;
             firstDate: Date;
             lastDate: Date;
         }[] = await this.prisma.$queryRaw(
@@ -92,18 +87,16 @@ export class IngredientsService {
             `,
         );
 
-        // 4. 将查询结果转换为Map，方便快速查找
         const statsMap = new Map(
             consumptionStats.map((stat) => [
                 stat.ingredientId,
                 {
                     ...stat,
-                    taskCount: Number(stat.taskCount), // 将BigInt转换为Number
+                    taskCount: Number(stat.taskCount),
                 },
             ]),
         );
 
-        // 5. 将统计数据合并到原料信息中，计算最终结果
         return ingredients.map((ingredient) => {
             const stats = statsMap.get(ingredient.id);
             if (!stats || stats.total === 0) {
@@ -134,7 +127,6 @@ export class IngredientsService {
         });
     }
 
-    // 查询单个原料详情
     async findOne(tenantId: string, id: string) {
         const ingredient = await this.prisma.ingredient.findFirst({
             where: {
@@ -166,7 +158,6 @@ export class IngredientsService {
         return ingredient;
     }
 
-    // 更新原料品类信息
     async update(tenantId: string, id: string, updateIngredientDto: UpdateIngredientDto) {
         await this.findOne(tenantId, id);
         return this.prisma.ingredient.update({
@@ -175,13 +166,55 @@ export class IngredientsService {
         });
     }
 
-    async updateStock(tenantId: string, id: string, updateStockDto: UpdateStockDto) {
-        await this.findOne(tenantId, id);
-        return this.prisma.ingredient.update({
-            where: { id },
-            data: {
-                currentStockInGrams: updateStockDto.currentStockInGrams,
-            },
+    async adjustStock(tenantId: string, id: string, userId: string, adjustStockDto: AdjustStockDto) {
+        const member = await this.prisma.tenantUser.findUnique({
+            where: { userId_tenantId: { userId, tenantId } },
+        });
+
+        if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) {
+            throw new ForbiddenException('您没有权限调整库存。');
+        }
+
+        return this.prisma.$transaction(async (tx) => {
+            const ingredient = await tx.ingredient.findFirst({
+                where: { id, tenantId },
+            });
+
+            if (!ingredient) {
+                throw new NotFoundException('原料不存在');
+            }
+
+            const { changeInGrams, reason } = adjustStockDto;
+
+            await tx.ingredientStockAdjustment.create({
+                data: {
+                    ingredientId: id,
+                    userId,
+                    changeInGrams,
+                    reason,
+                },
+            });
+
+            const oldStock = ingredient.currentStockInGrams;
+            const oldStockValue = new Prisma.Decimal(ingredient.currentStockValue.toString());
+            let valueChange = new Prisma.Decimal(0);
+
+            if (oldStock > 0) {
+                const avgCostPerGram = oldStockValue.div(oldStock);
+                valueChange = avgCostPerGram.mul(changeInGrams);
+            }
+
+            return tx.ingredient.update({
+                where: { id },
+                data: {
+                    currentStockInGrams: {
+                        increment: changeInGrams,
+                    },
+                    currentStockValue: {
+                        increment: valueChange,
+                    },
+                },
+            });
         });
     }
 
@@ -203,7 +236,6 @@ export class IngredientsService {
             throw new NotFoundException('原料不存在');
         }
 
-        // 2. [核心修改] 使用反向关联的_count来检查原料是否被使用
         const usageCount = ingredientToDelete._count.doughIngredients + ingredientToDelete._count.productIngredients;
 
         if (usageCount > 0) {
@@ -238,7 +270,74 @@ export class IngredientsService {
         });
     }
 
-    // 为原料创建新的SKU
+    /**
+     * [新增] 获取单个原料的完整库存流水
+     * @param tenantId 租户ID
+     * @param ingredientId 原料ID
+     */
+    async getIngredientLedger(tenantId: string, ingredientId: string) {
+        // 1. 确保原料存在
+        await this.findOne(tenantId, ingredientId);
+
+        // 2. 查询三种类型的流水记录
+        const procurements = await this.prisma.procurementRecord.findMany({
+            where: { sku: { ingredientId: ingredientId } },
+            include: { sku: true },
+            orderBy: { purchaseDate: 'desc' },
+        });
+
+        const consumptions = await this.prisma.ingredientConsumptionLog.findMany({
+            where: { ingredientId: ingredientId },
+            include: {
+                productionLog: {
+                    include: {
+                        task: {
+                            select: { id: true }, // 只选择需要的字段
+                        },
+                    },
+                },
+            },
+            orderBy: { productionLog: { completedAt: 'desc' } },
+        });
+
+        const adjustments = await this.prisma.ingredientStockAdjustment.findMany({
+            where: { ingredientId: ingredientId },
+            include: { user: { select: { name: true, phone: true } } }, // 选择操作人信息
+            orderBy: { createdAt: 'desc' },
+        });
+
+        // 3. 将不同类型的记录格式化为统一的流水格式
+        const procurementLedger = procurements.map((p) => ({
+            date: p.purchaseDate,
+            type: '采购入库',
+            change: p.packagesPurchased * p.sku.specWeightInGrams,
+            details: `采购 ${p.sku.brand || ''} ${p.sku.specName} × ${p.packagesPurchased}`,
+            operator: '系统', // 采购目前没有记录操作人
+        }));
+
+        const consumptionLedger = consumptions.map((c) => ({
+            date: c.productionLog.completedAt,
+            type: '生产消耗',
+            change: -c.quantityInGrams,
+            details: `生产任务 #${c.productionLog.task.id.split('-')[0]}`, // 截取任务ID以简化显示
+            operator: '系统', // 生产完成目前没有记录操作人
+        }));
+
+        const adjustmentLedger = adjustments.map((a) => ({
+            date: a.createdAt,
+            type: '库存调整',
+            change: a.changeInGrams,
+            details: a.reason || '无原因',
+            operator: a.user.name || a.user.phone,
+        }));
+
+        // 4. 合并并排序所有流水记录
+        const ledger = [...procurementLedger, ...consumptionLedger, ...adjustmentLedger];
+        ledger.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+        return ledger;
+    }
+
     async createSku(tenantId: string, ingredientId: string, createSkuDto: CreateSkuDto) {
         await this.findOne(tenantId, ingredientId);
         return this.prisma.ingredientSKU.create({
@@ -283,7 +382,6 @@ export class IngredientsService {
             throw new BadRequestException('不能删除当前激活的SKU，请先激活其他SKU。');
         }
 
-        // 3. [核心修改] 使用反向关联的_count来检查原料是否被使用
         const isIngredientInUse =
             skuToDelete.ingredient._count.doughIngredients > 0 || skuToDelete.ingredient._count.productIngredients > 0;
 
@@ -370,11 +468,18 @@ export class IngredientsService {
                 },
             });
 
+            const purchaseValue = new Prisma.Decimal(createProcurementDto.pricePerPackage).mul(
+                createProcurementDto.packagesPurchased,
+            );
+
             return tx.ingredient.update({
                 where: { id: sku.ingredientId },
                 data: {
                     currentStockInGrams: {
                         increment: createProcurementDto.packagesPurchased * sku.specWeightInGrams,
+                    },
+                    currentStockValue: {
+                        increment: purchaseValue,
                     },
                 },
             });
@@ -382,26 +487,44 @@ export class IngredientsService {
     }
 
     async updateProcurement(tenantId: string, procurementId: string, updateProcurementDto: UpdateProcurementDto) {
-        const procurement = await this.prisma.procurementRecord.findFirst({
-            where: {
-                id: procurementId,
-                sku: {
-                    ingredient: {
-                        tenantId: tenantId,
+        return this.prisma.$transaction(async (tx) => {
+            const procurement = await tx.procurementRecord.findFirst({
+                where: {
+                    id: procurementId,
+                    sku: {
+                        ingredient: {
+                            tenantId: tenantId,
+                        },
                     },
                 },
-            },
-        });
+                include: {
+                    sku: true,
+                },
+            });
 
-        if (!procurement) {
-            throw new NotFoundException('采购记录不存在');
-        }
+            if (!procurement) {
+                throw new NotFoundException('采购记录不存在');
+            }
 
-        return this.prisma.procurementRecord.update({
-            where: { id: procurementId },
-            data: {
-                pricePerPackage: updateProcurementDto.pricePerPackage,
-            },
+            const oldPrice = new Prisma.Decimal(procurement.pricePerPackage.toString());
+            const newPrice = new Prisma.Decimal(updateProcurementDto.pricePerPackage);
+            const priceDifference = newPrice.sub(oldPrice).mul(procurement.packagesPurchased);
+
+            await tx.ingredient.update({
+                where: { id: procurement.sku.ingredientId },
+                data: {
+                    currentStockValue: {
+                        increment: priceDifference,
+                    },
+                },
+            });
+
+            return tx.procurementRecord.update({
+                where: { id: procurementId },
+                data: {
+                    pricePerPackage: updateProcurementDto.pricePerPackage,
+                },
+            });
         });
     }
 }

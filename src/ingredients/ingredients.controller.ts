@@ -4,15 +4,13 @@ import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { UserPayload } from 'src/auth/interfaces/user-payload.interface';
-// [FIX] 修复守卫的使用方式，与项目中其他控制器保持一致
 import { AuthGuard } from '@nestjs/passport';
 import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
-import { UpdateStockDto } from './dto/update-stock.dto'; // [新增] 导入更新库存的DTO
+import { AdjustStockDto } from './dto/adjust-stock.dto';
 
-// [FIX] 使用 NestJS 内置的 AuthGuard('jwt')，而不是不存在的自定义 JwtAuthGuard
 @UseGuards(AuthGuard('jwt'))
 @Controller('ingredients')
 export class IngredientsController {
@@ -38,20 +36,24 @@ export class IngredientsController {
         return this.ingredientsService.update(user.tenantId, id, updateIngredientDto);
     }
 
-    /**
-     * [新增] 更新原料的库存
-     * @param user 当前用户
-     * @param id 原料ID
-     * @param updateStockDto 包含新库存的对象
-     */
     @Patch(':id/stock')
-    updateStock(@GetUser() user: UserPayload, @Param('id') id: string, @Body() updateStockDto: UpdateStockDto) {
-        return this.ingredientsService.updateStock(user.tenantId, id, updateStockDto);
+    adjustStock(@GetUser() user: UserPayload, @Param('id') id: string, @Body() adjustStockDto: AdjustStockDto) {
+        return this.ingredientsService.adjustStock(user.tenantId, id, user.sub, adjustStockDto);
     }
 
     @Delete(':id')
     remove(@GetUser() user: UserPayload, @Param('id') id: string) {
         return this.ingredientsService.remove(user.tenantId, id);
+    }
+
+    /**
+     * [新增] 获取单个原料的库存流水
+     * @param user 当前用户
+     * @param id 原料ID
+     */
+    @Get(':id/ledger')
+    getIngredientLedger(@GetUser() user: UserPayload, @Param('id') id: string) {
+        return this.ingredientsService.getIngredientLedger(user.tenantId, id);
     }
 
     @Post(':ingredientId/skus')
@@ -63,19 +65,11 @@ export class IngredientsController {
         return this.ingredientsService.createSku(user.tenantId, ingredientId, createSkuDto);
     }
 
-    /**
-     * [新增] 删除一个SKU
-     * @param user 当前用户
-     * @param skuId SKU的ID
-     */
     @Delete('skus/:skuId')
     deleteSku(@GetUser() user: UserPayload, @Param('skuId') skuId: string) {
         return this.ingredientsService.deleteSku(user.tenantId, skuId);
     }
 
-    /**
-     * [V2.1 接口变更] 设置激活的SKU
-     */
     @Post(':ingredientId/active-sku')
     setActiveSku(
         @GetUser() user: UserPayload,
@@ -94,12 +88,6 @@ export class IngredientsController {
         return this.ingredientsService.createProcurement(user.tenantId, skuId, createProcurementDto);
     }
 
-    /**
-     * [核心修改] 将删除采购记录改为修改采购记录
-     * @param user 当前用户
-     * @param id 采购记录的ID
-     * @returns
-     */
     @Patch('procurements/:id')
     updateProcurement(
         @GetUser() user: UserPayload,
