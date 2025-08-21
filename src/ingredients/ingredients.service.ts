@@ -8,6 +8,7 @@ import { SkuStatus } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
 import { UpdateStockDto } from './dto/update-stock.dto'; // [新增] 导入更新库存的DTO
+import { Prisma } from '@prisma/client'; // [核心修改] 导入Prisma，用于使用原生查询功能
 
 @Injectable()
 export class IngredientsService {
@@ -23,10 +24,9 @@ export class IngredientsService {
         });
     }
 
-    // [REFACTORED] findAll 方法现在直接计算每日消耗和可供应天数
+    // [REFACTORED] findAll 方法现在使用数据库聚合查询，以解决性能问题
     async findAll(tenantId: string) {
-        // [核心修改] 过滤掉作为半成品的原料（例如：烫种、卡仕达酱等）
-        // 1. 首先找出所有类型为 PRE_DOUGH 或 EXTRA 的配方名称
+        // 1. 过滤掉作为半成品的原料名称
         const intermediateRecipes = await this.prisma.recipeFamily.findMany({
             where: {
                 tenantId,
@@ -39,13 +39,13 @@ export class IngredientsService {
         });
         const intermediateRecipeNames = intermediateRecipes.map((r) => r.name);
 
-        // 2. 查询原料，并排除掉名称在上面列表中的原料
+        // 2. 查询基础原料信息
         const ingredients = await this.prisma.ingredient.findMany({
             where: {
                 tenantId,
                 deletedAt: null,
                 name: {
-                    notIn: intermediateRecipeNames, // 过滤条件
+                    notIn: intermediateRecipeNames,
                 },
             },
             include: {
@@ -61,69 +61,52 @@ export class IngredientsService {
             },
         });
 
-        // [ADDED] 为每个原料计算平均每日消耗和可供应天数
         const ingredientIds = ingredients.map((i) => i.id);
         if (ingredientIds.length === 0) {
-            // 如果没有原料，直接返回空数组，避免后续计算
             return [];
         }
 
-        const consumptionLogs = await this.prisma.ingredientConsumptionLog.findMany({
-            where: {
-                ingredientId: { in: ingredientIds },
-            },
-            select: {
-                ingredientId: true,
-                quantityInGrams: true,
-                productionLog: {
-                    // [FIXED] 同时查询 taskId 和 completedAt 以修复编译错误
-                    select: {
-                        completedAt: true,
-                        taskId: true,
-                    },
+        // 3. [核心性能优化] 使用原生SQL聚合查询，将计算任务交给数据库
+        // 这个查询会连接消耗日志和生产日志，按原料ID分组，一次性计算出所有统计数据
+        const consumptionStats: {
+            ingredientId: string;
+            total: number;
+            taskCount: bigint; // Prisma返回的COUNT结果是BigInt类型
+            firstDate: Date;
+            lastDate: Date;
+        }[] = await this.prisma.$queryRaw(
+            Prisma.sql`
+                SELECT
+                    icl."ingredientId",
+                    SUM(icl."quantityInGrams")::float AS total,
+                    COUNT(DISTINCT pl."taskId") AS "taskCount",
+                    MIN(pl."completedAt") AS "firstDate",
+                    MAX(pl."completedAt") AS "lastDate"
+                FROM
+                    "IngredientConsumptionLog" AS icl
+                JOIN
+                    "ProductionLog" AS pl ON icl."productionLogId" = pl.id
+                WHERE
+                    icl."ingredientId" IN (${Prisma.join(ingredientIds)})
+                GROUP BY
+                    icl."ingredientId"
+            `,
+        );
+
+        // 4. 将查询结果转换为Map，方便快速查找
+        const statsMap = new Map(
+            consumptionStats.map((stat) => [
+                stat.ingredientId,
+                {
+                    ...stat,
+                    taskCount: Number(stat.taskCount), // 将BigInt转换为Number
                 },
-            },
-        });
+            ]),
+        );
 
-        // 如果没有任何消耗记录，则所有原料的可供应天数都视为无限
-        if (consumptionLogs.length === 0) {
-            return ingredients.map((i) => ({
-                ...i,
-                daysOfSupply: Infinity,
-                avgDailyConsumption: 0,
-                avgConsumptionPerTask: 0,
-                totalConsumptionInGrams: 0,
-            }));
-        }
-
-        // 按原料ID对消耗记录进行分组和统计
-        const consumptionStats = new Map<
-            string,
-            { total: number; count: number; firstDate: Date; lastDate: Date; taskIds: Set<string> }
-        >();
-        for (const log of consumptionLogs) {
-            const stats = consumptionStats.get(log.ingredientId);
-            const completedAt = log.productionLog.completedAt;
-
-            if (!stats) {
-                consumptionStats.set(log.ingredientId, {
-                    total: log.quantityInGrams,
-                    count: 1,
-                    firstDate: completedAt,
-                    lastDate: completedAt,
-                    taskIds: new Set([log.productionLog.taskId]),
-                });
-            } else {
-                stats.total += log.quantityInGrams;
-                stats.count++;
-                if (completedAt < stats.firstDate) stats.firstDate = completedAt;
-                if (completedAt > stats.lastDate) stats.lastDate = completedAt;
-                stats.taskIds.add(log.productionLog.taskId);
-            }
-        }
-
+        // 5. 将统计数据合并到原料信息中，计算最终结果
         return ingredients.map((ingredient) => {
-            const stats = consumptionStats.get(ingredient.id);
+            const stats = statsMap.get(ingredient.id);
             if (!stats || stats.total === 0) {
                 return {
                     ...ingredient,
@@ -134,21 +117,20 @@ export class IngredientsService {
                 };
             }
 
-            // 计算消耗周期的天数（至少为1天，避免除以0）
             const timeDiff = stats.lastDate.getTime() - stats.firstDate.getTime();
             const dayDiff = Math.max(1, Math.ceil(timeDiff / (1000 * 3600 * 24)));
 
             const avgDailyConsumption = stats.total / dayDiff;
             const daysOfSupply =
                 avgDailyConsumption > 0 ? ingredient.currentStockInGrams / avgDailyConsumption : Infinity;
-            const avgConsumptionPerTask = stats.taskIds.size > 0 ? stats.total / stats.taskIds.size : 0;
+            const avgConsumptionPerTask = stats.taskCount > 0 ? stats.total / stats.taskCount : 0;
 
             return {
                 ...ingredient,
                 daysOfSupply,
                 avgDailyConsumption,
                 avgConsumptionPerTask,
-                totalConsumptionInGrams: stats.total, // [ADDED] 新增总消耗量字段
+                totalConsumptionInGrams: stats.total,
             };
         });
     }
