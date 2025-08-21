@@ -7,6 +7,7 @@ import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { SkuStatus } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
+import { UpdateStockDto } from './dto/update-stock.dto'; // [新增] 导入更新库存的DTO
 
 @Injectable()
 export class IngredientsService {
@@ -192,6 +193,25 @@ export class IngredientsService {
         return this.prisma.ingredient.update({
             where: { id },
             data: updateIngredientDto,
+        });
+    }
+
+    /**
+     * [新增] 更新原料的库存
+     * @param tenantId 租户ID
+     * @param id 原料ID
+     * @param updateStockDto DTO，包含新的库存量
+     */
+    async updateStock(tenantId: string, id: string, updateStockDto: UpdateStockDto) {
+        // 1. 确保该原料存在且属于该租户
+        await this.findOne(tenantId, id);
+
+        // 2. 更新库存
+        return this.prisma.ingredient.update({
+            where: { id },
+            data: {
+                currentStockInGrams: updateStockDto.currentStockInGrams,
+            },
         });
     }
 

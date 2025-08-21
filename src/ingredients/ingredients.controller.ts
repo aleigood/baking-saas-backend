@@ -10,6 +10,7 @@ import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
+import { UpdateStockDto } from './dto/update-stock.dto'; // [新增] 导入更新库存的DTO
 
 // [FIX] 使用 NestJS 内置的 AuthGuard('jwt')，而不是不存在的自定义 JwtAuthGuard
 @UseGuards(AuthGuard('jwt'))
@@ -35,6 +36,17 @@ export class IngredientsController {
     @Patch(':id')
     update(@GetUser() user: UserPayload, @Param('id') id: string, @Body() updateIngredientDto: UpdateIngredientDto) {
         return this.ingredientsService.update(user.tenantId, id, updateIngredientDto);
+    }
+
+    /**
+     * [新增] 更新原料的库存
+     * @param user 当前用户
+     * @param id 原料ID
+     * @param updateStockDto 包含新库存的对象
+     */
+    @Patch(':id/stock')
+    updateStock(@GetUser() user: UserPayload, @Param('id') id: string, @Body() updateStockDto: UpdateStockDto) {
+        return this.ingredientsService.updateStock(user.tenantId, id, updateStockDto);
     }
 
     @Delete(':id')
