@@ -116,8 +116,8 @@ CREATE TABLE "public"."Dough" (
 CREATE TABLE "public"."DoughIngredient" (
     "id" TEXT NOT NULL,
     "doughId" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
     "ratio" DOUBLE PRECISION NOT NULL,
+    "ingredientId" TEXT,
     "linkedPreDoughId" TEXT,
 
     CONSTRAINT "DoughIngredient_pkey" PRIMARY KEY ("id")
@@ -138,8 +138,8 @@ CREATE TABLE "public"."Product" (
 CREATE TABLE "public"."ProductIngredient" (
     "id" TEXT NOT NULL,
     "productId" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
     "type" "public"."ProductIngredientType" NOT NULL,
+    "ingredientId" TEXT,
     "ratio" DOUBLE PRECISION,
     "weightInGrams" DOUBLE PRECISION,
     "linkedExtraId" TEXT,
@@ -157,7 +157,7 @@ CREATE TABLE "public"."Ingredient" (
     "waterContent" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "activeSkuId" TEXT,
     "currentStockInGrams" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "currentPricePerGram" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "currentStockValue" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
@@ -188,6 +188,18 @@ CREATE TABLE "public"."ProcurementRecord" (
     "purchaseDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "ProcurementRecord_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."IngredientStockAdjustment" (
+    "id" TEXT NOT NULL,
+    "ingredientId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "changeInGrams" DOUBLE PRECISION NOT NULL,
+    "reason" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "IngredientStockAdjustment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -263,6 +275,9 @@ CREATE INDEX "DoughIngredient_doughId_idx" ON "public"."DoughIngredient"("doughI
 CREATE INDEX "DoughIngredient_linkedPreDoughId_idx" ON "public"."DoughIngredient"("linkedPreDoughId");
 
 -- CreateIndex
+CREATE INDEX "DoughIngredient_ingredientId_idx" ON "public"."DoughIngredient"("ingredientId");
+
+-- CreateIndex
 CREATE INDEX "Product_recipeVersionId_idx" ON "public"."Product"("recipeVersionId");
 
 -- CreateIndex
@@ -272,7 +287,16 @@ CREATE INDEX "ProductIngredient_productId_idx" ON "public"."ProductIngredient"("
 CREATE INDEX "ProductIngredient_linkedExtraId_idx" ON "public"."ProductIngredient"("linkedExtraId");
 
 -- CreateIndex
+CREATE INDEX "ProductIngredient_ingredientId_idx" ON "public"."ProductIngredient"("ingredientId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Ingredient_tenantId_name_deletedAt_key" ON "public"."Ingredient"("tenantId", "name", "deletedAt");
+
+-- CreateIndex
+CREATE INDEX "IngredientStockAdjustment_ingredientId_idx" ON "public"."IngredientStockAdjustment"("ingredientId");
+
+-- CreateIndex
+CREATE INDEX "IngredientStockAdjustment_userId_idx" ON "public"."IngredientStockAdjustment"("userId");
 
 -- CreateIndex
 CREATE INDEX "ProductionTask_tenantId_idx" ON "public"."ProductionTask"("tenantId");
@@ -317,6 +341,9 @@ ALTER TABLE "public"."RecipeVersion" ADD CONSTRAINT "RecipeVersion_familyId_fkey
 ALTER TABLE "public"."Dough" ADD CONSTRAINT "Dough_recipeVersionId_fkey" FOREIGN KEY ("recipeVersionId") REFERENCES "public"."RecipeVersion"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "public"."DoughIngredient" ADD CONSTRAINT "DoughIngredient_ingredientId_fkey" FOREIGN KEY ("ingredientId") REFERENCES "public"."Ingredient"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "public"."DoughIngredient" ADD CONSTRAINT "DoughIngredient_doughId_fkey" FOREIGN KEY ("doughId") REFERENCES "public"."Dough"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -324,6 +351,9 @@ ALTER TABLE "public"."DoughIngredient" ADD CONSTRAINT "DoughIngredient_linkedPre
 
 -- AddForeignKey
 ALTER TABLE "public"."Product" ADD CONSTRAINT "Product_recipeVersionId_fkey" FOREIGN KEY ("recipeVersionId") REFERENCES "public"."RecipeVersion"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."ProductIngredient" ADD CONSTRAINT "ProductIngredient_ingredientId_fkey" FOREIGN KEY ("ingredientId") REFERENCES "public"."Ingredient"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."ProductIngredient" ADD CONSTRAINT "ProductIngredient_productId_fkey" FOREIGN KEY ("productId") REFERENCES "public"."Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -342,6 +372,12 @@ ALTER TABLE "public"."IngredientSKU" ADD CONSTRAINT "IngredientSKU_ingredientId_
 
 -- AddForeignKey
 ALTER TABLE "public"."ProcurementRecord" ADD CONSTRAINT "ProcurementRecord_skuId_fkey" FOREIGN KEY ("skuId") REFERENCES "public"."IngredientSKU"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."IngredientStockAdjustment" ADD CONSTRAINT "IngredientStockAdjustment_ingredientId_fkey" FOREIGN KEY ("ingredientId") REFERENCES "public"."Ingredient"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."IngredientStockAdjustment" ADD CONSTRAINT "IngredientStockAdjustment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."ProductionTask" ADD CONSTRAINT "ProductionTask_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "public"."Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

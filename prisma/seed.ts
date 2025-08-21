@@ -1,36 +1,375 @@
-import { PrismaClient, Role } from '@prisma/client';
+import { PrismaClient, Role, RecipeType, ProductIngredientType } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
+// 定义配方数据的类型，以便在代码中使用
+type RecipeSeedData = {
+    name: string;
+    type: RecipeType;
+    targetTemp?: number;
+    lossRatio?: number;
+    ingredients: {
+        name: string;
+        ratio: number;
+        isFlour?: boolean;
+        waterContent?: number;
+    }[];
+    products?: {
+        name: string;
+        weight: number;
+        fillings?: { name: string; type: ProductIngredientType; weightInGrams: number }[];
+        mixIn?: { name: string; type: ProductIngredientType; ratio: number }[];
+        procedure?: string[];
+    }[];
+    procedure?: string[];
+};
+
+// 您提供的配方数据
+const recipesData: RecipeSeedData[] = [
+    {
+        name: '恰巴塔',
+        type: 'MAIN',
+        targetTemp: 26,
+        ingredients: [
+            { name: '高筋粉', ratio: 92, isFlour: true },
+            { name: '鲁邦种', ratio: 25.76 },
+            { name: '水', ratio: 40, waterContent: 1 },
+            { name: '盐', ratio: 0.84 },
+            { name: '糖', ratio: 18.4 },
+            { name: '半干酵母', ratio: 1.3 },
+            { name: '橄榄油', ratio: 8 },
+        ],
+        products: [
+            {
+                name: '恰巴塔',
+                weight: 250,
+                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
+            },
+        ],
+        procedure: [
+            '搅拌：采用后糖法，搅拌至完全扩展，出缸温度26度',
+            '发酵：二发温度35度50分钟',
+            '烘烤：烤前刷过筛蛋液，两个杏仁片 一盘10个 上火210 下火180 烤10分钟',
+        ],
+    },
+    {
+        name: '云朵吐司面团',
+        type: 'MAIN',
+        targetTemp: 26,
+        ingredients: [
+            { name: '高筋粉', ratio: 92, isFlour: true },
+            { name: '烫种', ratio: 25.76 },
+            { name: '水', ratio: 40, waterContent: 1 },
+            { name: '盐', ratio: 0.84 },
+            { name: '糖', ratio: 18.4 },
+            { name: '半干酵母', ratio: 1.3 },
+            { name: '黄油', ratio: 8 },
+            { name: '奶粉', ratio: 2 },
+            { name: '全蛋', ratio: 20, waterContent: 0.75 },
+            { name: '麦芽精', ratio: 1 },
+        ],
+        products: [
+            {
+                name: '云朵吐司',
+                weight: 250,
+                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
+            },
+            {
+                name: '云朵吐司2',
+                weight: 250,
+                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
+            },
+            {
+                name: '云朵吐司3',
+                weight: 250,
+                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
+            },
+            {
+                name: '云朵吐司4',
+                weight: 250,
+                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
+            },
+        ],
+        procedure: [
+            '搅拌：采用后糖法，搅拌至完全扩展，出缸温度26度',
+            '发酵：二发温度35度50分钟',
+            '烘烤：烤前刷过筛蛋液，两个杏仁片 一盘10个 上火210 下火180 烤10分钟',
+        ],
+    },
+    {
+        name: '烫种',
+        type: 'PRE_DOUGH',
+        lossRatio: 0.1,
+        ingredients: [
+            { name: '高筋粉', ratio: 100, isFlour: true },
+            { name: '水', ratio: 200, waterContent: 1 },
+            { name: '糖', ratio: 20 },
+            { name: '盐', ratio: 2 },
+        ],
+        procedure: ['在室温放置冷却后放入冰箱第二天使用'],
+    },
+    {
+        name: '卡仕达酱',
+        type: 'EXTRA',
+        lossRatio: 0.05,
+        ingredients: [
+            { name: '低筋粉', ratio: 12, isFlour: true },
+            { name: '牛奶', ratio: 100, waterContent: 0.87 },
+            { name: '蛋黄', ratio: 20 },
+            { name: '糖', ratio: 20 },
+            { name: '黄油', ratio: 5 },
+        ],
+        procedure: ['牛奶温度达到90度后搅拌'],
+    },
+    {
+        name: '甜面团',
+        type: 'MAIN',
+        targetTemp: 26,
+        ingredients: [
+            { name: '高筋粉', ratio: 92, isFlour: true },
+            { name: '烫种', ratio: 25.76 },
+            { name: '水', ratio: 40, waterContent: 1 },
+            { name: '盐', ratio: 0.84 },
+            { name: '糖', ratio: 18.4 },
+            { name: '半干酵母', ratio: 1.3 },
+            { name: '黄油', ratio: 8 },
+            { name: '奶粉', ratio: 2 },
+            { name: '全蛋', ratio: 20, waterContent: 0.75 },
+            { name: '麦芽精', ratio: 1 },
+        ],
+        products: [
+            {
+                name: '熊掌卡仕达',
+                weight: 50,
+                fillings: [{ name: '卡仕达酱', type: 'FILLING', weightInGrams: 30 }],
+                mixIn: [{ name: '香草籽', type: 'MIX_IN', ratio: 1 }],
+                procedure: ['烘烤：烤前刷过筛蛋液，一盘10个 上火210 下火180 烤10分钟'],
+            },
+            {
+                name: '小吐司',
+                weight: 250,
+                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
+            },
+        ],
+        procedure: [
+            '搅拌：采用后糖法，搅拌至完全扩展，出缸温度26度',
+            '发酵：二发温度35度50分钟',
+            '烘烤：烤前刷过筛蛋液，两个杏仁片 一盘10个 上火210 下火180 烤10分钟',
+        ],
+    },
+];
+
+/**
+ * 为指定的店铺导入所有配方数据
+ * @param tenantId 店铺ID
+ * @param recipes 配方数据数组
+ */
+async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[]) {
+    console.log(`为店铺 ID: ${tenantId} 开始导入配方...`);
+
+    // 预先创建所有在配方中出现的原料
+    const allIngredientNames = new Set<string>();
+    recipes.forEach((recipe) => {
+        recipe.ingredients.forEach((ing) => allIngredientNames.add(ing.name));
+        recipe.products?.forEach((p) => {
+            p.fillings?.forEach((f) => allIngredientNames.add(f.name));
+            p.mixIn?.forEach((m) => allIngredientNames.add(m.name));
+        });
+    });
+
+    for (const name of allIngredientNames) {
+        // [核心修改] 使用 findFirst + create 替代 upsert 来处理软删除的唯一约束问题
+        const existingIngredient = await prisma.ingredient.findFirst({
+            where: {
+                tenantId,
+                name,
+                deletedAt: null,
+            },
+        });
+
+        if (!existingIngredient) {
+            await prisma.ingredient.create({
+                data: {
+                    tenantId,
+                    name,
+                },
+            });
+        }
+    }
+    console.log(`为店铺 ID: ${tenantId} 创建了 ${allIngredientNames.size} 种基础原料。`);
+
+    // 导入配方
+    for (const recipeData of recipes) {
+        await prisma.$transaction(async (tx) => {
+            // 1. 创建配方族
+            const recipeFamily = await tx.recipeFamily.create({
+                data: {
+                    name: recipeData.name,
+                    tenantId: tenantId,
+                    type: recipeData.type,
+                },
+            });
+
+            // 2. 创建配方版本
+            const recipeVersion = await tx.recipeVersion.create({
+                data: {
+                    familyId: recipeFamily.id,
+                    version: 1,
+                    notes: '初始版本',
+                    isActive: true,
+                },
+            });
+
+            // 3. 创建面团和面团原料
+            if (recipeData.ingredients) {
+                const dough = await tx.dough.create({
+                    data: {
+                        recipeVersionId: recipeVersion.id,
+                        name: recipeData.name,
+                        targetTemp: recipeData.targetTemp,
+                        lossRatio: recipeData.lossRatio,
+                        procedure: recipeData.procedure,
+                    },
+                });
+
+                for (const ing of recipeData.ingredients) {
+                    const linkedIngredient = await tx.ingredient.findFirst({
+                        where: { tenantId, name: ing.name, deletedAt: null },
+                    });
+                    const linkedPreDough = await tx.recipeFamily.findFirst({
+                        where: { tenantId, name: ing.name, type: 'PRE_DOUGH', deletedAt: null },
+                    });
+
+                    await tx.doughIngredient.create({
+                        data: {
+                            doughId: dough.id,
+                            ratio: ing.ratio,
+                            ingredientId: linkedIngredient ? linkedIngredient.id : null,
+                            linkedPreDoughId: linkedPreDough ? linkedPreDough.id : null,
+                        },
+                    });
+                }
+            }
+
+            // 4. 创建产品和产品原料
+            if (recipeData.products) {
+                for (const p of recipeData.products) {
+                    const product = await tx.product.create({
+                        data: {
+                            recipeVersionId: recipeVersion.id,
+                            name: p.name,
+                            baseDoughWeight: p.weight,
+                            procedure: p.procedure,
+                        },
+                    });
+
+                    const productIngredients = [...(p.fillings || []), ...(p.mixIn || [])];
+
+                    for (const pi of productIngredients) {
+                        const linkedIngredient = await tx.ingredient.findFirst({
+                            where: { tenantId, name: pi.name, deletedAt: null },
+                        });
+                        const linkedExtra = await tx.recipeFamily.findFirst({
+                            where: { tenantId, name: pi.name, type: 'EXTRA', deletedAt: null },
+                        });
+
+                        await tx.productIngredient.create({
+                            data: {
+                                productId: product.id,
+                                type: pi.type,
+                                ratio: 'ratio' in pi ? pi.ratio : undefined,
+                                weightInGrams: 'weightInGrams' in pi ? pi.weightInGrams : undefined,
+                                ingredientId: linkedIngredient ? linkedIngredient.id : null,
+                                linkedExtraId: linkedExtra ? linkedExtra.id : null,
+                            },
+                        });
+                    }
+                }
+            }
+        });
+        console.log(`  - 成功导入配方: ${recipeData.name}`);
+    }
+}
+
 async function main() {
+    console.log('开始执行种子脚本...');
+
+    // 1. 创建超级管理员
     const adminPhone = process.env.SUPER_ADMIN_PHONE || '13955555555';
     const adminPassword = process.env.SUPER_ADMIN_PASSWORD || 'admin';
+    const hashedAdminPassword = await bcrypt.hash(adminPassword, 10);
 
-    if (!adminPhone || !adminPassword) {
-        throw new Error('SUPER_ADMIN_PHONE and SUPER_ADMIN_PASSWORD must be set in .env');
-    }
-
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
-
-    const admin = await prisma.user.upsert({
-        where: { phone: adminPhone }, // 修复：使用 phone 代替 email
+    await prisma.user.upsert({
+        where: { phone: adminPhone },
         update: {},
         create: {
-            name: '超级管理员', // 修复：添加 name 字段
-            phone: adminPhone, // 修复：使用 phone 代替 email
-            password: hashedPassword, // 修复：使用 password 代替 passwordHash
-            role: Role.SUPER_ADMIN, // 修复：使用集成的 Role 枚举
+            name: '超级管理员',
+            phone: adminPhone,
+            password: hashedAdminPassword,
+            role: Role.SUPER_ADMIN,
             status: 'ACTIVE',
         },
     });
+    console.log(`超级管理员已创建/确认存在: ${adminPhone}`);
 
-    console.log(`超级管理员已创建: ${admin.phone}`); // 修复：使用 phone
+    // 2. 创建普通用户 Leo
+    const leoPhone = '13666666666';
+    const leoPassword = '123';
+    const hashedLeoPassword = await bcrypt.hash(leoPassword, 10);
+
+    const leo = await prisma.user.upsert({
+        where: { phone: leoPhone },
+        update: {},
+        create: {
+            name: 'Leo',
+            phone: leoPhone,
+            password: hashedLeoPassword,
+            role: Role.OWNER,
+            status: 'ACTIVE',
+        },
+    });
+    console.log(`用户 "Leo" 已创建/确认存在: ${leoPhone}`);
+
+    // 3. 为 Leo 创建两个店铺
+    const tenant1 = await prisma.tenant.create({
+        data: {
+            name: '小时光',
+            members: {
+                create: {
+                    userId: leo.id,
+                    role: 'OWNER',
+                    status: 'ACTIVE',
+                },
+            },
+        },
+    });
+    console.log(`店铺 "小时光" 已创建`);
+
+    const tenant2 = await prisma.tenant.create({
+        data: {
+            name: '大时光',
+            members: {
+                create: {
+                    userId: leo.id,
+                    role: 'OWNER',
+                    status: 'ACTIVE',
+                },
+            },
+        },
+    });
+    console.log(`店铺 "大时光" 已创建`);
+
+    // 4. 为这两个店铺导入配方数据
+    await seedRecipesForTenant(tenant1.id, recipesData);
+    await seedRecipesForTenant(tenant2.id, recipesData);
+
+    console.log('种子脚本执行完毕！');
 }
 
 main()
     .catch((e) => {
-        console.error(e);
+        console.error('种子脚本执行失败:', e);
         process.exit(1);
     })
     .finally(() => {
