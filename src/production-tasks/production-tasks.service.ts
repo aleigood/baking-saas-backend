@@ -219,25 +219,7 @@ export class ProductionTasksService {
             include: {
                 items: {
                     include: {
-                        product: {
-                            include: {
-                                recipeVersion: {
-                                    include: {
-                                        family: true,
-                                        doughs: {
-                                            include: {
-                                                ingredients: true,
-                                            },
-                                        },
-                                        products: {
-                                            include: {
-                                                ingredients: true,
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
+                        product: true, // 保持基础查询
                     },
                 },
                 log: {
@@ -257,38 +239,50 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
-        if (task.status === 'COMPLETED' || task.status === 'CANCELLED') {
-            return { ...task, stockWarning: null };
-        }
+        // [核心修改] 开始计算任务所需的原料总量，用于称重
+        const totalIngredientsMap = new Map<string, { name: string; totalWeight: number }>();
 
-        const allConsumptions = new Map<
-            string,
-            { ingredientId: string; ingredientName: string; totalConsumed: number }
-        >();
-        for (const item of task.items) {
-            const consumptions = await this.costingService.calculateProductConsumptions(
-                tenantId,
-                item.productId,
-                item.quantity,
-            );
-            for (const consumption of consumptions) {
-                const existing = allConsumptions.get(consumption.ingredientId);
-                if (existing) {
-                    existing.totalConsumed += consumption.totalConsumed;
-                } else {
-                    allConsumptions.set(consumption.ingredientId, {
-                        ingredientId: consumption.ingredientId,
-                        ingredientName: consumption.ingredientName,
-                        totalConsumed: consumption.totalConsumed,
-                    });
+        // 并发计算所有任务项的原料消耗
+        await Promise.all(
+            task.items.map(async (item) => {
+                const consumptions = await this.costingService.calculateProductConsumptions(
+                    tenantId,
+                    item.productId,
+                    item.quantity,
+                );
+
+                for (const consumption of consumptions) {
+                    const existing = totalIngredientsMap.get(consumption.ingredientId);
+                    if (existing) {
+                        existing.totalWeight += consumption.totalConsumed;
+                    } else {
+                        totalIngredientsMap.set(consumption.ingredientId, {
+                            name: consumption.ingredientName,
+                            totalWeight: consumption.totalConsumed,
+                        });
+                    }
                 }
-            }
-        }
-        const finalConsumptions = Array.from(allConsumptions.values());
+            }),
+        );
 
+        // 将Map转换为数组并排序，方便客户端展示
+        const totalIngredients = Array.from(totalIngredientsMap.entries())
+            .map(([ingredientId, data]) => ({
+                ingredientId,
+                name: data.name,
+                totalWeightInGrams: data.totalWeight,
+            }))
+            .sort((a, b) => b.totalWeightInGrams - a.totalWeightInGrams); // 按重量降序排列
+
+        // 如果任务已完成或取消，则不显示库存警告
+        if (task.status === 'COMPLETED' || task.status === 'CANCELLED') {
+            return { ...task, totalIngredients, stockWarning: null };
+        }
+
+        // 实时计算库存警告
         let stockWarning: string | null = null;
-        if (finalConsumptions.length > 0) {
-            const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
+        const ingredientIds = totalIngredients.map((c) => c.ingredientId);
+        if (ingredientIds.length > 0) {
             const ingredients = await this.prisma.ingredient.findMany({
                 where: { id: { in: ingredientIds } },
                 select: { id: true, name: true, currentStockInGrams: true },
@@ -296,9 +290,9 @@ export class ProductionTasksService {
             const ingredientStockMap = new Map(ingredients.map((i) => [i.id, i]));
             const insufficientIngredients: string[] = [];
 
-            for (const consumption of finalConsumptions) {
+            for (const consumption of totalIngredients) {
                 const ingredient = ingredientStockMap.get(consumption.ingredientId);
-                if (ingredient && ingredient.currentStockInGrams < consumption.totalConsumed) {
+                if (ingredient && ingredient.currentStockInGrams < consumption.totalWeightInGrams) {
                     insufficientIngredients.push(ingredient.name);
                 }
             }
@@ -308,7 +302,7 @@ export class ProductionTasksService {
             }
         }
 
-        return { ...task, stockWarning };
+        return { ...task, totalIngredients, stockWarning };
     }
 
     async update(tenantId: string, id: string, updateProductionTaskDto: UpdateProductionTaskDto) {
@@ -395,13 +389,11 @@ export class ProductionTasksService {
             });
 
             for (const consumption of finalConsumptions) {
-                // [核心修改] 移除此处的if判断，确保所有原料的消耗都被记录和扣减
-                // The skuId can be null, which is valid.
                 await tx.ingredientConsumptionLog.create({
                     data: {
                         productionLogId: productionLog.id,
                         ingredientId: consumption.ingredientId,
-                        skuId: consumption.activeSkuId, // 此处可以为null
+                        skuId: consumption.activeSkuId,
                         quantityInGrams: consumption.totalConsumed,
                     },
                 });

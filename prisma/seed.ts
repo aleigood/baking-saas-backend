@@ -326,7 +326,7 @@ async function main() {
     console.log(`超级管理员已创建/确认存在: ${adminPhone}`);
 
     // 2. 创建普通用户 Leo
-    const leoPhone = '13666666666';
+    const leoPhone = '13966666666';
     const leoPassword = '123';
     const hashedLeoPassword = await bcrypt.hash(leoPassword, 10);
 
