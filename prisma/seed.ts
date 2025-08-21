@@ -168,18 +168,27 @@ const recipesData: RecipeSeedData[] = [
 async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[]) {
     console.log(`为店铺 ID: ${tenantId} 开始导入配方...`);
 
-    // 预先创建所有在配方中出现的原料
-    const allIngredientNames = new Set<string>();
+    // [核心修改] 创建一个Map来存储原料的完整信息，而不仅仅是名字
+    const allIngredients = new Map<string, (typeof recipes)[0]['ingredients'][0]>();
     recipes.forEach((recipe) => {
-        recipe.ingredients.forEach((ing) => allIngredientNames.add(ing.name));
+        recipe.ingredients.forEach((ing) => {
+            // 只有当原料信息更完整时才更新Map
+            const existing = allIngredients.get(ing.name);
+            if (!existing || (!existing.isFlour && ing.isFlour)) {
+                allIngredients.set(ing.name, ing);
+            }
+        });
         recipe.products?.forEach((p) => {
-            p.fillings?.forEach((f) => allIngredientNames.add(f.name));
-            p.mixIn?.forEach((m) => allIngredientNames.add(m.name));
+            p.fillings?.forEach((f) => {
+                if (!allIngredients.has(f.name)) allIngredients.set(f.name, { name: f.name, ratio: 0 });
+            });
+            p.mixIn?.forEach((m) => {
+                if (!allIngredients.has(m.name)) allIngredients.set(m.name, { name: m.name, ratio: 0 });
+            });
         });
     });
 
-    for (const name of allIngredientNames) {
-        // [核心修改] 使用 findFirst + create 替代 upsert 来处理软删除的唯一约束问题
+    for (const [name, details] of allIngredients.entries()) {
         const existingIngredient = await prisma.ingredient.findFirst({
             where: {
                 tenantId,
@@ -189,15 +198,18 @@ async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[])
         });
 
         if (!existingIngredient) {
+            // [核心修改] 创建原料时，传入isFlour和waterContent
             await prisma.ingredient.create({
                 data: {
                     tenantId,
                     name,
+                    isFlour: details.isFlour ?? false,
+                    waterContent: details.waterContent ?? 0,
                 },
             });
         }
     }
-    console.log(`为店铺 ID: ${tenantId} 创建了 ${allIngredientNames.size} 种基础原料。`);
+    console.log(`为店铺 ID: ${tenantId} 创建了 ${allIngredients.size} 种基础原料。`);
 
     // 导入配方
     for (const recipeData of recipes) {

@@ -340,7 +340,13 @@ export class IngredientsService {
         });
     }
 
+    /**
+     * [核心修改] 简化删除SKU的业务逻辑
+     * @param tenantId 租户ID
+     * @param skuId SKU ID
+     */
     async deleteSku(tenantId: string, skuId: string) {
+        // 1. 验证SKU是否存在且属于该租户
         const skuToDelete = await this.prisma.ingredientSKU.findFirst({
             where: {
                 id: skuId,
@@ -349,16 +355,6 @@ export class IngredientsService {
                 },
             },
             include: {
-                ingredient: {
-                    include: {
-                        _count: {
-                            select: {
-                                doughIngredients: true,
-                                productIngredients: true,
-                            },
-                        },
-                    },
-                },
                 _count: {
                     select: { procurementRecords: true },
                 },
@@ -369,28 +365,20 @@ export class IngredientsService {
             throw new NotFoundException('SKU不存在');
         }
 
+        // 2. 业务规则：如果SKU是激活状态，则不允许删除
         if (skuToDelete.status === SkuStatus.ACTIVE) {
             throw new BadRequestException('不能删除当前激活的SKU，请先激活其他SKU。');
         }
 
-        const isIngredientInUse =
-            skuToDelete.ingredient._count.doughIngredients > 0 || skuToDelete.ingredient._count.productIngredients > 0;
-
+        // 3. [核心修改] 应用新的、更简单的删除规则
         const hasProcurementRecords = skuToDelete._count.procurementRecords > 0;
-
-        if (isIngredientInUse && hasProcurementRecords) {
-            throw new BadRequestException('该SKU所属原料已被配方使用，且该SKU存在采购记录，无法删除。');
+        if (hasProcurementRecords) {
+            throw new BadRequestException('该SKU存在采购记录，无法删除。');
         }
 
-        return this.prisma.$transaction(async (tx) => {
-            if (hasProcurementRecords) {
-                await tx.procurementRecord.deleteMany({
-                    where: { skuId: skuId },
-                });
-            }
-            return tx.ingredientSKU.delete({
-                where: { id: skuId },
-            });
+        // 4. 执行删除 (由于没有采购记录，无需再处理关联的采购记录)
+        return this.prisma.ingredientSKU.delete({
+            where: { id: skuId },
         });
     }
 
