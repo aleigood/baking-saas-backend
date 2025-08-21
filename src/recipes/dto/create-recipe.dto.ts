@@ -7,6 +7,7 @@ import {
     IsNumber,
     IsEnum,
     IsBoolean,
+    IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ProductIngredientType, RecipeType } from '@prisma/client';
@@ -15,7 +16,7 @@ import { ProductIngredientType, RecipeType } from '@prisma/client';
 class ProductIngredientDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name: string; // name 字段用于创建新原料或关联预制/附加配方
 
     @IsEnum(ProductIngredientType)
     @IsNotEmpty()
@@ -28,6 +29,10 @@ class ProductIngredientDto {
     @IsNumber()
     @IsOptional()
     weightInGrams?: number; // 馅料/装饰类原料的克重
+
+    @IsUUID()
+    @IsOptional()
+    ingredientId?: string; // [核心修改] 客户端可传入已存在原料的ID
 }
 
 // 用于最终产品的DTO
@@ -65,17 +70,15 @@ class ProductDto {
 }
 
 // 用于面团中原料的DTO
-// [核心修正] 增加 export 关键字，使其可以在模块外被导入
 export class DoughIngredientDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name: string; // name 字段用于创建新原料或关联预制/附加配方
 
     @IsNumber()
     @IsNotEmpty()
     ratio: number;
 
-    // [核心修正] 增加 isFlour 和 waterContent 字段以接收导入数据
     @IsBoolean()
     @IsOptional()
     isFlour?: boolean;
@@ -83,6 +86,10 @@ export class DoughIngredientDto {
     @IsNumber()
     @IsOptional()
     waterContent?: number;
+
+    @IsUUID()
+    @IsOptional()
+    ingredientId?: string; // [核心修改] 客户端可传入已存在原料的ID
 }
 
 // 主创建DTO

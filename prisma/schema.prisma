@@ -144,16 +144,15 @@ model Invitation {
 // 配方族：用于管理一个配方的所有版本
 // 例如，“甜面团”是一个Family，它可能有V1, V2等多个Version
 model RecipeFamily {
-  id        String     @id @default(uuid())
+  id        String          @id @default(uuid())
   name      String // 配方名称，如“甜面团”、“烫种”
   tenantId  String
   type      RecipeType // 配方类型 (主配方, 预制面团, 或附加项)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
   deletedAt DateTime?
-
-  tenant   Tenant          @relation(fields: [tenantId], references: [id])
-  versions RecipeVersion[] // 一个配方族包含多个版本
+  tenant    Tenant          @relation(fields: [tenantId], references: [id])
+  versions  RecipeVersion[] // 一个配方族包含多个版本
 
   // 当此配方作为预制面团在其他配方中使用时
   usedInDoughs   DoughIngredient[]   @relation("PreDoughLink")
@@ -199,20 +198,21 @@ model Dough {
 
 // 面团中的原料
 model DoughIngredient {
-  id      String @id @default(uuid())
-  doughId String // 所属面团ID
-  name    String // 原料名称
-  ratio   Float // 基于总面粉的百分比
+  id           String      @id @default(uuid())
+  doughId      String // 所属面团ID
+  ratio        Float // 基于总面粉的百分比
+  ingredientId String? // [核心修改] 新增字段，用于关联Ingredient模型
+  ingredient   Ingredient? @relation(fields: [ingredientId], references: [id], onUpdate: Cascade, onDelete: SetNull) // [核心修改] 新增关联关系
 
   // 如果这个原料本身是一个预制面团配方，这里会有关联
   linkedPreDoughId String?
-
-  dough          Dough         @relation(fields: [doughId], references: [id], onDelete: Cascade)
+  dough            Dough         @relation(fields: [doughId], references: [id], onDelete: Cascade)
   // 关联到作为预制面团的配方族
-  linkedPreDough RecipeFamily? @relation("PreDoughLink", fields: [linkedPreDoughId], references: [id])
+  linkedPreDough   RecipeFamily? @relation("PreDoughLink", fields: [linkedPreDoughId], references: [id])
 
   @@index([doughId])
   @@index([linkedPreDoughId])
+  @@index([ingredientId]) // [核心修改] 为新字段添加索引
 }
 
 // 最终产品：由配方制作出的具体面包或产品
@@ -232,10 +232,11 @@ model Product {
 
 // 产品的附加原料：搅拌、馅料、装饰
 model ProductIngredient {
-  id        String                @id @default(uuid())
-  productId String // 所属产品ID
-  name      String // 原料名称
-  type      ProductIngredientType // 原料类型 (搅拌/馅料/装饰)
+  id           String                @id @default(uuid())
+  productId    String // 所属产品ID
+  type         ProductIngredientType // 原料类型 (搅拌/馅料/装饰)
+  ingredientId String? // [核心修改] 新增字段，用于关联Ingredient模型
+  ingredient   Ingredient?           @relation(fields: [ingredientId], references: [id], onUpdate: Cascade, onDelete: SetNull) // [核心修改] 新增关联关系
 
   // 根据类型不同，单位也不同
   ratio         Float? // 搅拌类(MIX_IN)原料，基于总面粉的百分比
@@ -243,13 +244,13 @@ model ProductIngredient {
 
   // 如果这个原料本身是一个附加配方(如卡仕达酱)，这里会有关联
   linkedExtraId String?
-
-  product     Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
   // 关联到作为附加项的配方族
-  linkedExtra RecipeFamily? @relation("ExtraLink", fields: [linkedExtraId], references: [id])
+  linkedExtra   RecipeFamily? @relation("ExtraLink", fields: [linkedExtraId], references: [id])
 
   @@index([productId])
   @@index([linkedExtraId])
+  @@index([ingredientId]) // [核心修改] 为新字段添加索引
 }
 
 // ================================================================= //
@@ -258,38 +259,37 @@ model ProductIngredient {
 
 // 原料品类模型
 model Ingredient {
-  id                  String         @id @default(uuid())
+  id                  String                     @id @default(uuid())
   tenantId            String
   name                String // e.g., "High-gluten flour"
-  type                IngredientType @default(STANDARD)
-  isFlour             Boolean        @default(false)
-  waterContent        Float          @default(0)
+  type                IngredientType             @default(STANDARD)
+  isFlour             Boolean                    @default(false)
+  waterContent        Float                      @default(0)
   activeSkuId         String?
-  currentStockInGrams Float          @default(0)
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  tenant          Tenant                     @relation(fields: [tenantId], references: [id])
-  skus            IngredientSKU[]
-  consumptionLogs IngredientConsumptionLog[]
-  activeSku       IngredientSKU?             @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  currentStockInGrams Float                      @default(0)
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  deletedAt           DateTime?
+  tenant              Tenant                     @relation(fields: [tenantId], references: [id])
+  skus                IngredientSKU[]
+  consumptionLogs     IngredientConsumptionLog[]
+  activeSku           IngredientSKU?             @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  doughIngredients    DoughIngredient[] // [核心修改] 新增反向关联
+  productIngredients  ProductIngredient[] // [核心修改] 新增反向关联
 
   @@unique([tenantId, name, deletedAt])
 }
 
 // 原料SKU模型
 model IngredientSKU {
-  id                String    @id @default(uuid())
-  brand             String?
-  specName          String // e.g., "1kg bag"
-  specWeightInGrams Float
-  ingredientId      String
-  status            SkuStatus @default(INACTIVE)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-
+  id                   String                     @id @default(uuid())
+  brand                String?
+  specName             String // e.g., "1kg bag"
+  specWeightInGrams    Float
+  ingredientId         String
+  status               SkuStatus                  @default(INACTIVE)
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
   ingredient           Ingredient                 @relation(fields: [ingredientId], references: [id])
   procurementRecords   ProcurementRecord[]
   consumptionLogs      IngredientConsumptionLog[]
@@ -321,10 +321,9 @@ model ProductionTask {
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
   deletedAt   DateTime?
-
-  tenant Tenant               @relation(fields: [tenantId], references: [id])
-  log    ProductionLog?
-  items  ProductionTaskItem[]
+  tenant      Tenant               @relation(fields: [tenantId], references: [id])
+  log         ProductionLog?
+  items       ProductionTaskItem[]
 
   @@index([tenantId])
 }
@@ -349,11 +348,10 @@ model ProductionTaskItem {
 
 // 生产日志模型
 model ProductionLog {
-  id          String   @id @default(uuid())
-  taskId      String   @unique
-  completedAt DateTime @default(now())
-  notes       String?
-
+  id              String                     @id @default(uuid())
+  taskId          String                     @unique
+  completedAt     DateTime                   @default(now())
+  notes           String?
   task            ProductionTask             @relation(fields: [taskId], references: [id])
   consumptionLogs IngredientConsumptionLog[]
 
@@ -362,15 +360,14 @@ model ProductionLog {
 
 // 原料消耗日志模型
 model IngredientConsumptionLog {
-  id              String  @id @default(uuid())
+  id              String         @id @default(uuid())
   productionLogId String
   ingredientId    String
   skuId           String?
   quantityInGrams Float
-
-  productionLog ProductionLog  @relation(fields: [productionLogId], references: [id])
-  ingredient    Ingredient     @relation(fields: [ingredientId], references: [id])
-  sku           IngredientSKU? @relation(fields: [skuId], references: [id])
+  productionLog   ProductionLog  @relation(fields: [productionLogId], references: [id])
+  ingredient      Ingredient     @relation(fields: [ingredientId], references: [id])
+  sku             IngredientSKU? @relation(fields: [skuId], references: [id])
 
   @@index([productionLogId])
   @@index([ingredientId])
