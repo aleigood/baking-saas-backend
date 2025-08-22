@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, HttpStatus } from '@nestjs/common';
 import { IngredientsService } from './ingredients.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
@@ -10,38 +10,50 @@ import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Ingredients')
+@ApiBearerAuth()
 @UseGuards(AuthGuard('jwt'))
 @Controller('ingredients')
 export class IngredientsController {
     constructor(private readonly ingredientsService: IngredientsService) {}
 
     @Post()
+    @ApiOperation({ summary: 'Create a new ingredient' })
+    @ApiResponse({ status: HttpStatus.CREATED, description: 'The ingredient has been successfully created.' })
+    @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Unauthorized.' })
     create(@GetUser() user: UserPayload, @Body() createIngredientDto: CreateIngredientDto) {
         return this.ingredientsService.create(user.tenantId, createIngredientDto);
     }
 
     @Get()
+    @ApiOperation({ summary: 'Get all ingredients for the tenant' })
+    @ApiResponse({ status: HttpStatus.OK, description: 'Return all ingredients.' })
     findAll(@GetUser() user: UserPayload) {
         return this.ingredientsService.findAll(user.tenantId);
     }
 
     @Get(':id')
+    @ApiOperation({ summary: 'Get a single ingredient by ID' })
     findOne(@GetUser() user: UserPayload, @Param('id') id: string) {
         return this.ingredientsService.findOne(user.tenantId, id);
     }
 
     @Patch(':id')
+    @ApiOperation({ summary: 'Update an ingredient' })
     update(@GetUser() user: UserPayload, @Param('id') id: string, @Body() updateIngredientDto: UpdateIngredientDto) {
         return this.ingredientsService.update(user.tenantId, id, updateIngredientDto);
     }
 
     @Patch(':id/stock')
+    @ApiOperation({ summary: 'Adjust ingredient stock' })
     adjustStock(@GetUser() user: UserPayload, @Param('id') id: string, @Body() adjustStockDto: AdjustStockDto) {
         return this.ingredientsService.adjustStock(user.tenantId, id, user.sub, adjustStockDto);
     }
 
     @Delete(':id')
+    @ApiOperation({ summary: 'Delete an ingredient' })
     remove(@GetUser() user: UserPayload, @Param('id') id: string) {
         return this.ingredientsService.remove(user.tenantId, id);
     }
@@ -52,11 +64,13 @@ export class IngredientsController {
      * @param id 原料ID
      */
     @Get(':id/ledger')
+    @ApiOperation({ summary: "Get an ingredient's stock ledger" })
     getIngredientLedger(@GetUser() user: UserPayload, @Param('id') id: string) {
         return this.ingredientsService.getIngredientLedger(user.tenantId, id);
     }
 
     @Post(':ingredientId/skus')
+    @ApiOperation({ summary: 'Create a new SKU for an ingredient' })
     createSku(
         @GetUser() user: UserPayload,
         @Param('ingredientId') ingredientId: string,
@@ -66,11 +80,13 @@ export class IngredientsController {
     }
 
     @Delete('skus/:skuId')
+    @ApiOperation({ summary: 'Delete a SKU' })
     deleteSku(@GetUser() user: UserPayload, @Param('skuId') skuId: string) {
         return this.ingredientsService.deleteSku(user.tenantId, skuId);
     }
 
     @Post(':ingredientId/active-sku')
+    @ApiOperation({ summary: 'Set the active SKU for an ingredient' })
     setActiveSku(
         @GetUser() user: UserPayload,
         @Param('ingredientId') ingredientId: string,
@@ -80,6 +96,7 @@ export class IngredientsController {
     }
 
     @Post('skus/:skuId/procurements')
+    @ApiOperation({ summary: 'Create a procurement record for a SKU' })
     createProcurement(
         @GetUser() user: UserPayload,
         @Param('skuId') skuId: string,
@@ -89,6 +106,7 @@ export class IngredientsController {
     }
 
     @Patch('procurements/:id')
+    @ApiOperation({ summary: 'Update a procurement record' })
     updateProcurement(
         @GetUser() user: UserPayload,
         @Param('id') id: string,

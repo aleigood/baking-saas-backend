@@ -220,7 +220,11 @@ export class IngredientsService {
 
     async remove(tenantId: string, id: string) {
         const ingredientToDelete = await this.prisma.ingredient.findFirst({
-            where: { id, tenantId },
+            where: {
+                id,
+                tenantId,
+                deletedAt: null,
+            },
             include: {
                 _count: {
                     select: {
@@ -228,45 +232,28 @@ export class IngredientsService {
                         productIngredients: true,
                     },
                 },
-                skus: true,
             },
         });
 
         if (!ingredientToDelete) {
-            throw new NotFoundException('原料不存在');
+            throw new NotFoundException('原料不存在或已被删除');
         }
 
-        const usageCount = ingredientToDelete._count.doughIngredients + ingredientToDelete._count.productIngredients;
+        const usageCount =
+            ingredientToDelete._count.doughIngredients + ingredientToDelete._count.productIngredients;
 
         if (usageCount > 0) {
             throw new BadRequestException('该原料正在被一个或多个配方使用，无法删除。');
         }
 
-        return this.prisma.$transaction(async (tx) => {
-            const skuIds = ingredientToDelete.skus.map((sku) => sku.id);
-
-            if (skuIds.length > 0) {
-                await tx.procurementRecord.deleteMany({
-                    where: {
-                        skuId: { in: skuIds },
-                    },
-                });
-            }
-
-            await tx.ingredient.update({
-                where: { id },
-                data: { activeSkuId: null },
-            });
-
-            await tx.ingredientSKU.deleteMany({
-                where: {
-                    ingredientId: id,
-                },
-            });
-
-            return tx.ingredient.delete({
-                where: { id },
-            });
+        // Soft delete the ingredient by setting the deletedAt field
+        // and un-setting the active SKU
+        return this.prisma.ingredient.update({
+            where: { id },
+            data: {
+                deletedAt: new Date(),
+                activeSkuId: null,
+            },
         });
     }
 

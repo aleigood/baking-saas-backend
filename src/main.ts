@@ -1,20 +1,35 @@
-import { NestFactory } from '@nestjs/core';
+import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common'; // 1. 导入 ValidationPipe
+import { ValidationPipe } from '@nestjs/common';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
     const app = await NestFactory.create(AppModule);
 
-    // 2. 启用全局验证管道
-    // 这会让所有进入应用的请求体都经过 class-validator 的检查
+    // Global Filters
+    const httpAdapterHost = app.get(HttpAdapterHost);
+    app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
+
+    // Swagger Document Setup
+    const config = new DocumentBuilder()
+        .setTitle('Baking SaaS API')
+        .setDescription('The Baking SaaS API documentation')
+        .setVersion('1.0')
+        .addBearerAuth()
+        .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api-docs', app, document);
+
+    // Global Pipes
     app.useGlobalPipes(
         new ValidationPipe({
-            whitelist: true, // 自动剥离 DTO 中未定义的属性
-            transform: true, // 自动转换传入的数据类型
+            whitelist: true,
+            transform: true,
         }),
     );
 
-    // 启用 CORS
+    // Enable CORS
     app.enableCors();
 
     await app.listen(3000);

@@ -347,7 +347,7 @@ model ProductionTaskItem {
   quantity  Int
 
   task    ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  product Product        @relation(fields: [productId], references: [id])
+  product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([taskId])
   @@index([productId])
