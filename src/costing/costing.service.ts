@@ -50,6 +50,21 @@ export interface CalculatedProductCostDetails {
     groupedExtraIngredients: Record<string, CalculatedExtraIngredientInfo[]>;
 }
 
+// [新增] 为前置准备任务定义新的类型接口
+export interface CalculatedRecipeIngredient {
+    name: string;
+    weightInGrams: number;
+}
+
+// [新增] 为前置准备任务定义新的类型接口
+export interface CalculatedRecipeDetails {
+    id: string;
+    name: string;
+    totalWeight: number;
+    procedure: string[];
+    ingredients: CalculatedRecipeIngredient[];
+}
+
 type FullDoughIngredient = DoughIngredient & {
     ingredient: Ingredient | null;
     linkedPreDough:
@@ -84,6 +99,72 @@ type FullProduct = Product & {
 @Injectable()
 export class CostingService {
     constructor(private readonly prisma: PrismaService) {}
+
+    // [新增] 新增一个公共方法，用于计算任何配方在指定总重下的原料明细
+    // (New: Add a public method to calculate ingredient details for any recipe at a specified total weight)
+    async getCalculatedRecipeDetails(
+        tenantId: string,
+        recipeFamilyId: string,
+        totalWeight: number,
+    ): Promise<CalculatedRecipeDetails> {
+        const recipeFamily = await this.prisma.recipeFamily.findFirst({
+            where: { id: recipeFamilyId, tenantId },
+            include: {
+                versions: {
+                    where: { isActive: true },
+                    include: {
+                        doughs: {
+                            include: {
+                                ingredients: {
+                                    include: {
+                                        ingredient: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!recipeFamily || !recipeFamily.versions[0]?.doughs[0]) {
+            throw new NotFoundException('配方或其激活的版本不存在');
+        }
+
+        const activeVersion = recipeFamily.versions[0];
+        const mainDough = activeVersion.doughs[0];
+
+        const totalRatio = mainDough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+        if (totalRatio === 0) {
+            return {
+                id: recipeFamily.id,
+                name: recipeFamily.name,
+                totalWeight,
+                procedure: mainDough.procedure,
+                ingredients: [],
+            };
+        }
+
+        const weightPerRatioPoint = new Prisma.Decimal(totalWeight).div(totalRatio);
+
+        const calculatedIngredients = mainDough.ingredients
+            .filter((ing) => ing.ingredient)
+            .map((ing) => {
+                const weight = weightPerRatioPoint.mul(ing.ratio);
+                return {
+                    name: ing.ingredient!.name,
+                    weightInGrams: parseFloat(weight.toFixed(1)),
+                };
+            });
+
+        return {
+            id: recipeFamily.id,
+            name: recipeFamily.name,
+            totalWeight,
+            procedure: mainDough.procedure,
+            ingredients: calculatedIngredients,
+        };
+    }
 
     async getProductCostHistory(tenantId: string, productId: string) {
         const product = await this.getFullProduct(tenantId, productId);

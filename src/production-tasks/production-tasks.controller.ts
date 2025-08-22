@@ -25,8 +25,6 @@ import { QueryProductionTaskDto } from './dto/query-production-task.dto';
 export class ProductionTasksController {
     constructor(private readonly productionTasksService: ProductionTasksService) {}
 
-    // [修改] create 方法现在使用新的 DTO
-    // (Modified: create method now uses the new DTO)
     @Post()
     create(@GetUser() user: UserPayload, @Body() createProductionTaskDto: CreateProductionTaskDto) {
         return this.productionTasksService.create(user.tenantId, createProductionTaskDto);
@@ -38,11 +36,14 @@ export class ProductionTasksController {
         @Query(new ValidationPipe({ transform: true }))
         queryDto: QueryProductionTaskDto,
     ) {
+        // 此处无需修改，它会直接返回 service 中新的 { tasks, prepTask } 结构
+        // (No changes needed here, it will directly return the new { tasks, prepTask } structure from the service)
         return this.productionTasksService.findAll(user.tenantId, queryDto);
     }
 
     @Get(':id')
-    findOne(@GetUser() user: UserPayload, @Param('id', ParseUUIDPipe) id: string) {
+    findOne(@GetUser() user: UserPayload, @Param('id') id: string) {
+        // [修改] id 不再强制为 UUID，因为前置任务的 ID 是一个固定字符串
         return this.productionTasksService.findOne(user.tenantId, id);
     }
 
@@ -60,10 +61,6 @@ export class ProductionTasksController {
         return this.productionTasksService.remove(user.tenantId, id);
     }
 
-    /**
-     * 新增：完成一个生产任务
-     * (New: Complete a production task)
-     */
     @Post(':id/complete')
     complete(
         @GetUser() user: UserPayload,

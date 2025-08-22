@@ -3,9 +3,18 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductionTaskDto } from './dto/create-production-task.dto';
 import { UpdateProductionTaskDto } from './dto/update-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
-import { IngredientType, Prisma, ProductionTaskStatus } from '@prisma/client';
+import { IngredientType, Prisma, ProductionTaskStatus, RecipeType } from '@prisma/client';
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
-import { CostingService } from '../costing/costing.service';
+import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
+
+// [修复] 导出 PrepTask 接口以解决 TS4053 错误
+// (Fix: Export the PrepTask interface to resolve the TS4053 error)
+export interface PrepTask {
+    id: string;
+    title: string;
+    details: string;
+    items: CalculatedRecipeDetails[];
+}
 
 @Injectable()
 export class ProductionTasksService {
@@ -13,6 +22,134 @@ export class ProductionTasksService {
         private readonly prisma: PrismaService,
         private readonly costingService: CostingService,
     ) {}
+
+    private async _getPrepTask(tenantId: string): Promise<PrepTask | null> {
+        const activeTasks = await this.prisma.productionTask.findMany({
+            where: {
+                tenantId,
+                deletedAt: null,
+                status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
+            },
+            include: {
+                items: {
+                    include: {
+                        product: {
+                            include: {
+                                recipeVersion: {
+                                    include: {
+                                        doughs: {
+                                            include: {
+                                                ingredients: {
+                                                    include: {
+                                                        linkedPreDough: true,
+                                                        ingredient: true, // [修复] 增加 ingredient 的查询以解决 TS2551 错误
+                                                    },
+                                                },
+                                            },
+                                        },
+                                        family: true,
+                                    },
+                                },
+                                ingredients: {
+                                    include: {
+                                        linkedExtra: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (activeTasks.length === 0) {
+            return null;
+        }
+
+        const requiredPrepItems = new Map<string, { family: any; totalWeight: number }>();
+
+        for (const task of activeTasks) {
+            for (const item of task.items) {
+                const product = item.product;
+                const recipeVersion = product.recipeVersion;
+                let totalFlourWeight = 0;
+
+                // 计算总粉量
+                for (const dough of recipeVersion.doughs) {
+                    const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+                    if (totalRatio > 0) {
+                        const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+                        for (const ing of dough.ingredients) {
+                            if (ing.ingredient?.isFlour) {
+                                totalFlourWeight += weightPerRatioPoint.mul(ing.ratio).toNumber();
+                            }
+                        }
+                    }
+                }
+
+                // 遍历面团中的预制面团
+                for (const dough of recipeVersion.doughs) {
+                    const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+                    if (totalRatio > 0) {
+                        const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+                        for (const ing of dough.ingredients) {
+                            if (ing.linkedPreDoughId && ing.linkedPreDough?.type === RecipeType.PRE_DOUGH) {
+                                const weight = weightPerRatioPoint.mul(ing.ratio).toNumber() * item.quantity;
+                                const existing = requiredPrepItems.get(ing.linkedPreDoughId);
+                                if (existing) {
+                                    existing.totalWeight += weight;
+                                } else {
+                                    requiredPrepItems.set(ing.linkedPreDoughId, {
+                                        family: ing.linkedPreDough,
+                                        totalWeight: weight,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 遍历产品中的附加项（馅料等）
+                for (const pIng of product.ingredients) {
+                    if (pIng.linkedExtraId && pIng.linkedExtra?.type === RecipeType.EXTRA) {
+                        let weight = 0;
+                        if (pIng.weightInGrams) {
+                            weight = pIng.weightInGrams * item.quantity;
+                        } else if (pIng.ratio) {
+                            weight = ((totalFlourWeight * pIng.ratio) / 100) * item.quantity;
+                        }
+
+                        const existing = requiredPrepItems.get(pIng.linkedExtraId);
+                        if (existing) {
+                            existing.totalWeight += weight;
+                        } else {
+                            requiredPrepItems.set(pIng.linkedExtraId, {
+                                family: pIng.linkedExtra,
+                                totalWeight: weight,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if (requiredPrepItems.size === 0) {
+            return null;
+        }
+
+        const prepTaskItems: CalculatedRecipeDetails[] = [];
+        for (const [id, data] of requiredPrepItems.entries()) {
+            const details = await this.costingService.getCalculatedRecipeDetails(tenantId, id, data.totalWeight);
+            prepTaskItems.push(details);
+        }
+
+        return {
+            id: 'prep-task-01',
+            title: '前置准备任务',
+            details: `包含 ${prepTaskItems.length} 种预制件`,
+            items: prepTaskItems,
+        };
+    }
 
     async create(tenantId: string, createProductionTaskDto: CreateProductionTaskDto) {
         const { plannedDate, notes, products } = createProductionTaskDto;
@@ -63,10 +200,9 @@ export class ProductionTasksService {
             const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
             const ingredients = await this.prisma.ingredient.findMany({
                 where: { id: { in: ingredientIds } },
-                select: { id: true, name: true, currentStockInGrams: true, type: true }, // [修复] 查询原料类型
+                select: { id: true, name: true, currentStockInGrams: true, type: true },
             });
 
-            // [新增] 只对“标准原料”进行库存检查
             const ingredientsToCheck = ingredients.filter((ing) => ing.type === IngredientType.STANDARD);
 
             const ingredientStockMap = new Map(ingredientsToCheck.map((i) => [i.id, i]));
@@ -74,7 +210,6 @@ export class ProductionTasksService {
 
             for (const consumption of finalConsumptions) {
                 const ingredient = ingredientStockMap.get(consumption.ingredientId);
-                // [修改] 仅当原料在待检查列表中时才进行比较
                 if (ingredient && ingredient.currentStockInGrams < consumption.totalConsumed) {
                     insufficientIngredients.push(ingredient.name);
                 }
@@ -191,7 +326,7 @@ export class ProductionTasksService {
             };
         }
 
-        return this.prisma.productionTask.findMany({
+        const tasks = await this.prisma.productionTask.findMany({
             where,
             include: {
                 items: {
@@ -212,9 +347,20 @@ export class ProductionTasksService {
                 plannedDate: 'asc',
             },
         });
+
+        const prepTask = await this._getPrepTask(tenantId);
+
+        return {
+            tasks,
+            prepTask,
+        };
     }
 
     async findOne(tenantId: string, id: string) {
+        if (id === 'prep-task-01') {
+            return this._getPrepTask(tenantId);
+        }
+
         const task = await this.prisma.productionTask.findFirst({
             where: {
                 id,
@@ -224,8 +370,6 @@ export class ProductionTasksService {
             include: {
                 items: {
                     include: {
-                        // [修复] 修复任务详情页面无法打开的问题
-                        // [修改] 之前只查询了 product: true，现在需要深入查询，以确保前端能获取到 recipeVersion 和 family
                         product: {
                             include: {
                                 recipeVersion: {
@@ -254,10 +398,8 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
-        // [核心修改] 开始计算任务所需的原料总量，用于称重
         const totalIngredientsMap = new Map<string, { name: string; totalWeight: number }>();
 
-        // 并发计算所有任务项的原料消耗
         await Promise.all(
             task.items.map(async (item) => {
                 const consumptions = await this.costingService.calculateProductConsumptions(
@@ -280,30 +422,26 @@ export class ProductionTasksService {
             }),
         );
 
-        // 将Map转换为数组并排序，方便客户端展示
         const totalIngredients = Array.from(totalIngredientsMap.entries())
             .map(([ingredientId, data]) => ({
                 ingredientId,
                 name: data.name,
                 totalWeightInGrams: data.totalWeight,
             }))
-            .sort((a, b) => b.totalWeightInGrams - a.totalWeightInGrams); // 按重量降序排列
+            .sort((a, b) => b.totalWeightInGrams - a.totalWeightInGrams);
 
-        // 如果任务已完成或取消，则不显示库存警告
         if (task.status === 'COMPLETED' || task.status === 'CANCELLED') {
             return { ...task, totalIngredients, stockWarning: null };
         }
 
-        // 实时计算库存警告
         let stockWarning: string | null = null;
         const ingredientIds = totalIngredients.map((c) => c.ingredientId);
         if (ingredientIds.length > 0) {
             const ingredients = await this.prisma.ingredient.findMany({
                 where: { id: { in: ingredientIds } },
-                select: { id: true, name: true, currentStockInGrams: true, type: true }, // [修复] 查询原料类型
+                select: { id: true, name: true, currentStockInGrams: true, type: true },
             });
 
-            // [新增] 只对“标准原料”进行库存检查
             const ingredientsToCheck = ingredients.filter((ing) => ing.type === IngredientType.STANDARD);
 
             const ingredientStockMap = new Map(ingredientsToCheck.map((i) => [i.id, i]));
@@ -311,7 +449,6 @@ export class ProductionTasksService {
 
             for (const consumption of totalIngredients) {
                 const ingredient = ingredientStockMap.get(consumption.ingredientId);
-                // [修改] 仅当原料在待检查列表中时才进行比较
                 if (ingredient && ingredient.currentStockInGrams < consumption.totalWeightInGrams) {
                     insufficientIngredients.push(ingredient.name);
                 }
