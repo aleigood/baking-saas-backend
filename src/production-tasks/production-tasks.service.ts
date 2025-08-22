@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductionTaskDto } from './dto/create-production-task.dto';
 import { UpdateProductionTaskDto } from './dto/update-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
-import { Prisma, ProductionTaskStatus } from '@prisma/client';
+import { IngredientType, Prisma, ProductionTaskStatus } from '@prisma/client';
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService } from '../costing/costing.service';
 
@@ -63,13 +63,18 @@ export class ProductionTasksService {
             const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
             const ingredients = await this.prisma.ingredient.findMany({
                 where: { id: { in: ingredientIds } },
-                select: { id: true, name: true, currentStockInGrams: true },
+                select: { id: true, name: true, currentStockInGrams: true, type: true }, // [修复] 查询原料类型
             });
-            const ingredientStockMap = new Map(ingredients.map((i) => [i.id, i]));
+
+            // [新增] 只对“标准原料”进行库存检查
+            const ingredientsToCheck = ingredients.filter((ing) => ing.type === IngredientType.STANDARD);
+
+            const ingredientStockMap = new Map(ingredientsToCheck.map((i) => [i.id, i]));
             const insufficientIngredients: string[] = [];
 
             for (const consumption of finalConsumptions) {
                 const ingredient = ingredientStockMap.get(consumption.ingredientId);
+                // [修改] 仅当原料在待检查列表中时才进行比较
                 if (ingredient && ingredient.currentStockInGrams < consumption.totalConsumed) {
                     insufficientIngredients.push(ingredient.name);
                 }
@@ -219,7 +224,17 @@ export class ProductionTasksService {
             include: {
                 items: {
                     include: {
-                        product: true, // 保持基础查询
+                        // [修复] 修复任务详情页面无法打开的问题
+                        // [修改] 之前只查询了 product: true，现在需要深入查询，以确保前端能获取到 recipeVersion 和 family
+                        product: {
+                            include: {
+                                recipeVersion: {
+                                    include: {
+                                        family: true,
+                                    },
+                                },
+                            },
+                        },
                     },
                 },
                 log: {
@@ -285,13 +300,18 @@ export class ProductionTasksService {
         if (ingredientIds.length > 0) {
             const ingredients = await this.prisma.ingredient.findMany({
                 where: { id: { in: ingredientIds } },
-                select: { id: true, name: true, currentStockInGrams: true },
+                select: { id: true, name: true, currentStockInGrams: true, type: true }, // [修复] 查询原料类型
             });
-            const ingredientStockMap = new Map(ingredients.map((i) => [i.id, i]));
+
+            // [新增] 只对“标准原料”进行库存检查
+            const ingredientsToCheck = ingredients.filter((ing) => ing.type === IngredientType.STANDARD);
+
+            const ingredientStockMap = new Map(ingredientsToCheck.map((i) => [i.id, i]));
             const insufficientIngredients: string[] = [];
 
             for (const consumption of totalIngredients) {
                 const ingredient = ingredientStockMap.get(consumption.ingredientId);
+                // [修改] 仅当原料在待检查列表中时才进行比较
                 if (ingredient && ingredient.currentStockInGrams < consumption.totalWeightInGrams) {
                     insufficientIngredients.push(ingredient.name);
                 }
