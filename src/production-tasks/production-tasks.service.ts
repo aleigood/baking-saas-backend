@@ -374,8 +374,8 @@ export class ProductionTasksService {
     }
 
     async findAll(tenantId: string, query: QueryProductionTaskDto) {
-        const { status, plannedDate, page = '1', limit = '10' } = query;
-        const pageNum = parseInt(page, 10);
+        const { status, plannedDate, page, limit = '10' } = query;
+        const pageNum = parseInt(page || '1', 10);
         const limitNum = parseInt(limit, 10);
 
         const where: Prisma.ProductionTaskWhereInput = {
@@ -398,7 +398,8 @@ export class ProductionTasksService {
             };
         }
 
-        const isHistoryQuery = status && status.some((s) => ['COMPLETED', 'CANCELLED'].includes(s));
+        // [核心修复] 使用 `page` 参数的存在来更准确地判断是否为历史记录的分页查询
+        const isHistoryQuery = !!page;
 
         if (isHistoryQuery) {
             const tasks = await this.prisma.productionTask.findMany({
