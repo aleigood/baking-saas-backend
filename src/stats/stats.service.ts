@@ -2,35 +2,44 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatsDto } from './dto/stats.dto';
 import { ProductionTaskStatus } from '@prisma/client';
-import { ProductionTasksService } from '../production-tasks/production-tasks.service'; // [核心新增] 引入任务服务
+import { ProductionTasksService } from '../production-tasks/production-tasks.service';
 
 @Injectable()
 export class StatsService {
     constructor(
         private prisma: PrismaService,
-        private readonly productionTasksService: ProductionTasksService, // [核心新增] 注入服务
+        private readonly productionTasksService: ProductionTasksService,
     ) {}
 
     /**
-     * [核心新增] 新增获取生产主页聚合数据的方法
+     * [核心改造] 聚合接口增加 hasHistory 字段
      * @param tenantId 租户ID
      */
     async getProductionDashboard(tenantId: string) {
-        // 并行执行两个异步任务
-        const [stats, tasksPayload] = await Promise.all([
+        // 并行执行三个异步任务
+        const [stats, tasksPayload, completedCount] = await Promise.all([
             this.getProductionHomeStats(tenantId),
             this.productionTasksService.findActive(tenantId),
+            // [核心新增] 增加一个轻量化查询，仅用于判断是否存在历史任务
+            this.prisma.productionTask.count({
+                where: {
+                    tenantId,
+                    deletedAt: null,
+                    status: { in: [ProductionTaskStatus.COMPLETED, ProductionTaskStatus.CANCELLED] },
+                },
+            }),
         ]);
 
         return {
             stats,
             tasks: tasksPayload.tasks,
             prepTask: tasksPayload.prepTask,
+            hasHistory: completedCount > 0, // [核心新增] 返回布尔值
         };
     }
 
     /**
-     * [新增] 获取生产主页的核心统计指标
+     * 获取生产主页的核心统计指标
      * @param tenantId 租户ID
      */
     async getProductionHomeStats(tenantId: string) {
