@@ -16,12 +16,141 @@ export interface PrepTask {
     items: CalculatedRecipeDetails[];
 }
 
+// [核心修正] 为任务详情的复杂 Prisma 查询结果定义精确的类型
+// (Core Fix: Define a precise type for the complex Prisma query result of task details)
+type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
+    include: {
+        items: {
+            include: {
+                product: {
+                    include: {
+                        recipeVersion: {
+                            include: {
+                                family: true;
+                                doughs: {
+                                    include: {
+                                        ingredients: {
+                                            include: {
+                                                ingredient: true;
+                                                linkedPreDough: true;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                        ingredients: {
+                            include: {
+                                linkedExtra: true;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+    };
+}>;
+
 @Injectable()
 export class ProductionTasksService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly costingService: CostingService,
     ) {}
+
+    // [核心修正] 重构私有方法，使用精确类型并增加健壮性检查
+    private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<PrepTask | null> {
+        // [修正] 增加对 task 和 task.items 的有效性检查
+        if (!task || !task.items || task.items.length === 0) {
+            return null;
+        }
+
+        const requiredPrepItems = new Map<string, { family: any; totalWeight: number }>();
+
+        for (const item of task.items) {
+            // [修正] 增加对 product 和 recipeVersion 的存在性检查
+            const product = item.product;
+            if (!product) continue;
+            const recipeVersion = product.recipeVersion;
+            if (!recipeVersion) continue;
+
+            let totalFlourWeight = 0;
+
+            // 计算总粉量
+            for (const dough of recipeVersion.doughs) {
+                const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+                if (totalRatio > 0) {
+                    const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+                    for (const ing of dough.ingredients) {
+                        if (ing.ingredient?.isFlour) {
+                            totalFlourWeight += weightPerRatioPoint.mul(ing.ratio).toNumber();
+                        }
+                    }
+                }
+            }
+
+            // 遍历面团中的预制面团
+            for (const dough of recipeVersion.doughs) {
+                const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+                if (totalRatio > 0) {
+                    const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+                    for (const ing of dough.ingredients) {
+                        if (ing.linkedPreDoughId && ing.linkedPreDough?.type === RecipeType.PRE_DOUGH) {
+                            const weight = weightPerRatioPoint.mul(ing.ratio).toNumber() * item.quantity;
+                            const existing = requiredPrepItems.get(ing.linkedPreDoughId);
+                            if (existing) {
+                                existing.totalWeight += weight;
+                            } else {
+                                requiredPrepItems.set(ing.linkedPreDoughId, {
+                                    family: ing.linkedPreDough,
+                                    totalWeight: weight,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 遍历产品中的附加项（馅料等）
+            for (const pIng of product.ingredients) {
+                if (pIng.linkedExtraId && pIng.linkedExtra?.type === RecipeType.EXTRA) {
+                    let weight = 0;
+                    if (pIng.weightInGrams) {
+                        weight = pIng.weightInGrams * item.quantity;
+                    } else if (pIng.ratio) {
+                        weight = ((totalFlourWeight * pIng.ratio) / 100) * item.quantity;
+                    }
+
+                    const existing = requiredPrepItems.get(pIng.linkedExtraId);
+                    if (existing) {
+                        existing.totalWeight += weight;
+                    } else {
+                        requiredPrepItems.set(pIng.linkedExtraId, {
+                            family: pIng.linkedExtra,
+                            totalWeight: weight,
+                        });
+                    }
+                }
+            }
+        }
+
+        if (requiredPrepItems.size === 0) {
+            return null;
+        }
+
+        const prepTaskItems: CalculatedRecipeDetails[] = [];
+        for (const [id, data] of requiredPrepItems.entries()) {
+            const details = await this.costingService.getCalculatedRecipeDetails(tenantId, id, data.totalWeight);
+            prepTaskItems.push(details);
+        }
+
+        return {
+            id: `prep-task-for-${task.id}`,
+            title: '备料清单',
+            details: `包含 ${prepTaskItems.length} 种预制件`,
+            items: prepTaskItems,
+        };
+    }
 
     private async _getPrepTask(tenantId: string): Promise<PrepTask | null> {
         const activeTasks = await this.prisma.productionTask.findMany({
@@ -367,6 +496,7 @@ export class ProductionTasksService {
                 tenantId,
                 deletedAt: null,
             },
+            // [核心修正] 使用 Prisma.ProductionTaskGetPayload<T> 来帮助 TS 推断正确的类型
             include: {
                 items: {
                     include: {
@@ -375,6 +505,21 @@ export class ProductionTasksService {
                                 recipeVersion: {
                                     include: {
                                         family: true,
+                                        doughs: {
+                                            include: {
+                                                ingredients: {
+                                                    include: {
+                                                        ingredient: true,
+                                                        linkedPreDough: true,
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                                ingredients: {
+                                    include: {
+                                        linkedExtra: true,
                                     },
                                 },
                             },
@@ -397,6 +542,9 @@ export class ProductionTasksService {
         if (!task) {
             throw new NotFoundException('生产任务不存在');
         }
+
+        // [核心修正] 调用新的私有方法计算备料清单，并传入类型正确的 task 对象
+        const prepTask = await this._getPrepItemsForTask(tenantId, task);
 
         const totalIngredientsMap = new Map<string, { name: string; totalWeight: number }>();
 
@@ -431,7 +579,7 @@ export class ProductionTasksService {
             .sort((a, b) => b.totalWeightInGrams - a.totalWeightInGrams);
 
         if (task.status === 'COMPLETED' || task.status === 'CANCELLED') {
-            return { ...task, totalIngredients, stockWarning: null };
+            return { ...task, totalIngredients, stockWarning: null, prepTask };
         }
 
         let stockWarning: string | null = null;
@@ -459,7 +607,7 @@ export class ProductionTasksService {
             }
         }
 
-        return { ...task, totalIngredients, stockWarning };
+        return { ...task, totalIngredients, stockWarning, prepTask };
     }
 
     async update(tenantId: string, id: string, updateProductionTaskDto: UpdateProductionTaskDto) {
