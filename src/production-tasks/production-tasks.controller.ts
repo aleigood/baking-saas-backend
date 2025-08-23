@@ -30,20 +30,28 @@ export class ProductionTasksController {
         return this.productionTasksService.create(user.tenantId, createProductionTaskDto);
     }
 
-    @Get()
-    findAll(
+    /**
+     * [核心改造] 新增：专门用于获取生产主页的活动任务（进行中、待开始）
+     */
+    @Get('active')
+    findActive(@GetUser() user: UserPayload) {
+        return this.productionTasksService.findActive(user.tenantId);
+    }
+
+    /**
+     * [核心改造] 新增：专门用于获取历史任务（已完成、已取消），支持分页
+     */
+    @Get('history')
+    findHistory(
         @GetUser() user: UserPayload,
         @Query(new ValidationPipe({ transform: true }))
         queryDto: QueryProductionTaskDto,
     ) {
-        // 此处无需修改，它会直接返回 service 中新的 { tasks, prepTask } 结构
-        // (No changes needed here, it will directly return the new { tasks, prepTask } structure from the service)
-        return this.productionTasksService.findAll(user.tenantId, queryDto);
+        return this.productionTasksService.findHistory(user.tenantId, queryDto);
     }
 
     @Get(':id')
     findOne(@GetUser() user: UserPayload, @Param('id') id: string) {
-        // [修改] id 不再强制为 UUID，因为前置任务的 ID 是一个固定字符串
         return this.productionTasksService.findOne(user.tenantId, id);
     }
 

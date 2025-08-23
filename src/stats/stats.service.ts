@@ -2,34 +2,51 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatsDto } from './dto/stats.dto';
 import { ProductionTaskStatus } from '@prisma/client';
+import { ProductionTasksService } from '../production-tasks/production-tasks.service'; // [核心新增] 引入任务服务
 
 @Injectable()
 export class StatsService {
-    constructor(private prisma: PrismaService) {}
+    constructor(
+        private prisma: PrismaService,
+        private readonly productionTasksService: ProductionTasksService, // [核心新增] 注入服务
+    ) {}
+
+    /**
+     * [核心新增] 新增获取生产主页聚合数据的方法
+     * @param tenantId 租户ID
+     */
+    async getProductionDashboard(tenantId: string) {
+        // 并行执行两个异步任务
+        const [stats, tasksPayload] = await Promise.all([
+            this.getProductionHomeStats(tenantId),
+            this.productionTasksService.findActive(tenantId),
+        ]);
+
+        return {
+            stats,
+            tasks: tasksPayload.tasks,
+            prepTask: tasksPayload.prepTask,
+        };
+    }
 
     /**
      * [新增] 获取生产主页的核心统计指标
      * @param tenantId 租户ID
      */
     async getProductionHomeStats(tenantId: string) {
-        // [修正] 使用原生JavaScript Date对象计算本周的起止日期 (周一到周日)
         const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // 只取年月日，忽略时间
-        const dayOfWeek = today.getDay(); // 0 = 周日, 1 = 周一, ..., 6 = 周六
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const dayOfWeek = today.getDay();
 
-        // 计算周一的日期。如果今天是周日(0)，则减去6天；否则，减去(dayOfWeek - 1)天。
         const startOfThisWeek = new Date(today);
         const dateOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
         startOfThisWeek.setDate(today.getDate() + dateOffset);
 
-        // 计算周日的日期
         const endOfThisWeek = new Date(startOfThisWeek);
         endOfThisWeek.setDate(startOfThisWeek.getDate() + 6);
-        endOfThisWeek.setHours(23, 59, 59, 999); // 包含周日全天
+        endOfThisWeek.setHours(23, 59, 59, 999);
 
-        // 并行查询待完成任务总数和本周已完成任务总数
         const [pendingTasks, completedThisWeekTasks] = await this.prisma.$transaction([
-            // 查询所有状态为 PENDING 或 IN_PROGRESS 的任务
             this.prisma.productionTask.findMany({
                 where: {
                     tenantId,
@@ -39,10 +56,9 @@ export class StatsService {
                     deletedAt: null,
                 },
                 include: {
-                    items: true, // 包含任务项以计算总数
+                    items: true,
                 },
             }),
-            // 查询本周内已完成的任务
             this.prisma.productionTask.findMany({
                 where: {
                     tenantId,
@@ -56,17 +72,15 @@ export class StatsService {
                     },
                 },
                 include: {
-                    items: true, // 包含任务项以计算总数
+                    items: true,
                 },
             }),
         ]);
 
-        // 计算待完成总数
         const totalPendingCount = pendingTasks.reduce((sum, task) => {
             return sum + task.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
         }, 0);
 
-        // 计算本周已完成总数
         const totalCompletedThisWeekCount = completedThisWeekTasks.reduce((sum, task) => {
             return sum + task.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
         }, 0);
@@ -106,7 +120,6 @@ export class StatsService {
             },
         });
 
-        // [核心新增] 计算已完成的任务总数
         const totalTasks = completedTasks.length;
 
         const productStatsMap = new Map<string, { name: string; count: number }>();
@@ -143,7 +156,7 @@ export class StatsService {
         const ingredientMap = new Map(ingredients.map((i) => [i.id, i.name]));
 
         return {
-            totalTasks, // [核心新增] 返回任务总数
+            totalTasks,
             productStats: Array.from(productStatsMap.values()),
             ingredientConsumption: consumptionStats.map((s) => ({
                 name: ingredientMap.get(s.ingredientId) || '未知原料',

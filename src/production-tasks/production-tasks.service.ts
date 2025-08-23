@@ -7,8 +7,6 @@ import { IngredientType, Prisma, ProductionTaskStatus, RecipeType } from '@prism
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
 
-// [修复] 导出 PrepTask 接口以解决 TS4053 错误
-// (Fix: Export the PrepTask interface to resolve the TS4053 error)
 export interface PrepTask {
     id: string;
     title: string;
@@ -16,8 +14,6 @@ export interface PrepTask {
     items: CalculatedRecipeDetails[];
 }
 
-// [核心修正] 为任务详情的复杂 Prisma 查询结果定义精确的类型
-// (Core Fix: Define a precise type for the complex Prisma query result of task details)
 type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
     include: {
         items: {
@@ -58,9 +54,7 @@ export class ProductionTasksService {
         private readonly costingService: CostingService,
     ) {}
 
-    // [核心修正] 重构私有方法，使用精确类型并增加健壮性检查
     private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<PrepTask | null> {
-        // [修正] 增加对 task 和 task.items 的有效性检查
         if (!task || !task.items || task.items.length === 0) {
             return null;
         }
@@ -68,7 +62,6 @@ export class ProductionTasksService {
         const requiredPrepItems = new Map<string, { family: any; totalWeight: number }>();
 
         for (const item of task.items) {
-            // [修正] 增加对 product 和 recipeVersion 的存在性检查
             const product = item.product;
             if (!product) continue;
             const recipeVersion = product.recipeVersion;
@@ -76,7 +69,6 @@ export class ProductionTasksService {
 
             let totalFlourWeight = 0;
 
-            // 计算总粉量
             for (const dough of recipeVersion.doughs) {
                 const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
                 if (totalRatio > 0) {
@@ -89,7 +81,6 @@ export class ProductionTasksService {
                 }
             }
 
-            // 遍历面团中的预制面团
             for (const dough of recipeVersion.doughs) {
                 const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
                 if (totalRatio > 0) {
@@ -111,7 +102,6 @@ export class ProductionTasksService {
                 }
             }
 
-            // 遍历产品中的附加项（馅料等）
             for (const pIng of product.ingredients) {
                 if (pIng.linkedExtraId && pIng.linkedExtra?.type === RecipeType.EXTRA) {
                     let weight = 0;
@@ -171,7 +161,7 @@ export class ProductionTasksService {
                                                 ingredients: {
                                                     include: {
                                                         linkedPreDough: true,
-                                                        ingredient: true, // [修复] 增加 ingredient 的查询以解决 TS2551 错误
+                                                        ingredient: true,
                                                     },
                                                 },
                                             },
@@ -203,7 +193,6 @@ export class ProductionTasksService {
                 const recipeVersion = product.recipeVersion;
                 let totalFlourWeight = 0;
 
-                // 计算总粉量
                 for (const dough of recipeVersion.doughs) {
                     const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
                     if (totalRatio > 0) {
@@ -216,7 +205,6 @@ export class ProductionTasksService {
                     }
                 }
 
-                // 遍历面团中的预制面团
                 for (const dough of recipeVersion.doughs) {
                     const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
                     if (totalRatio > 0) {
@@ -238,7 +226,6 @@ export class ProductionTasksService {
                     }
                 }
 
-                // 遍历产品中的附加项（馅料等）
                 for (const pIng of product.ingredients) {
                     if (pIng.linkedExtraId && pIng.linkedExtra?.type === RecipeType.EXTRA) {
                         let weight = 0;
@@ -373,88 +360,15 @@ export class ProductionTasksService {
         return { task: createdTask, warning: stockWarning };
     }
 
-    async findAll(tenantId: string, query: QueryProductionTaskDto) {
-        const { status, plannedDate, page, limit = '10' } = query;
-        const pageNum = parseInt(page || '1', 10);
-        const limitNum = parseInt(limit, 10);
-
+    /**
+     * [核心改造] 拆分出 findActive 方法，专用于获取生产主页数据
+     */
+    async findActive(tenantId: string) {
         const where: Prisma.ProductionTaskWhereInput = {
             tenantId,
             deletedAt: null,
+            status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
         };
-
-        if (status && status.length > 0) {
-            where.status = { in: status };
-        }
-
-        if (plannedDate) {
-            const startOfDay = new Date(plannedDate);
-            startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(plannedDate);
-            endOfDay.setHours(23, 59, 59, 999);
-            where.plannedDate = {
-                gte: startOfDay,
-                lte: endOfDay,
-            };
-        }
-
-        // [核心修复] 使用 `page` 参数的存在来更准确地判断是否为历史记录的分页查询
-        const isHistoryQuery = !!page;
-
-        if (isHistoryQuery) {
-            const tasks = await this.prisma.productionTask.findMany({
-                where,
-                include: {
-                    items: {
-                        include: {
-                            product: {
-                                include: {
-                                    recipeVersion: {
-                                        include: {
-                                            family: true,
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                orderBy: {
-                    plannedDate: 'desc',
-                },
-                skip: (pageNum - 1) * limitNum,
-                take: limitNum,
-            });
-
-            const groupedTasks = tasks.reduce(
-                (acc, task) => {
-                    const date = new Date(task.plannedDate).toLocaleDateString('zh-CN', {
-                        month: 'long',
-                        day: 'numeric',
-                        weekday: 'long',
-                    });
-                    if (!acc[date]) {
-                        acc[date] = [];
-                    }
-                    acc[date].push(task);
-                    return acc;
-                },
-                {} as Record<string, any[]>,
-            );
-
-            const totalTasks = await this.prisma.productionTask.count({ where });
-
-            return {
-                data: groupedTasks,
-                meta: {
-                    total: totalTasks,
-                    page: pageNum,
-                    limit: limitNum,
-                    lastPage: Math.ceil(totalTasks / limitNum),
-                    hasMore: pageNum * limitNum < totalTasks,
-                },
-            };
-        }
 
         const tasks = await this.prisma.productionTask.findMany({
             where,
@@ -486,6 +400,74 @@ export class ProductionTasksService {
         };
     }
 
+    /**
+     * [核心改造] 拆分出 findHistory 方法，专用于获取历史任务数据
+     */
+    async findHistory(tenantId: string, query: QueryProductionTaskDto) {
+        const { page, limit = '10' } = query;
+        const pageNum = parseInt(page || '1', 10);
+        const limitNum = parseInt(limit, 10);
+
+        const where: Prisma.ProductionTaskWhereInput = {
+            tenantId,
+            deletedAt: null,
+            status: { in: [ProductionTaskStatus.COMPLETED, ProductionTaskStatus.CANCELLED] },
+        };
+
+        const tasks = await this.prisma.productionTask.findMany({
+            where,
+            include: {
+                items: {
+                    include: {
+                        product: {
+                            include: {
+                                recipeVersion: {
+                                    include: {
+                                        family: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            orderBy: {
+                plannedDate: 'desc',
+            },
+            skip: (pageNum - 1) * limitNum,
+            take: limitNum,
+        });
+
+        const groupedTasks = tasks.reduce(
+            (acc, task) => {
+                const date = new Date(task.plannedDate).toLocaleDateString('zh-CN', {
+                    month: 'long',
+                    day: 'numeric',
+                    weekday: 'long',
+                });
+                if (!acc[date]) {
+                    acc[date] = [];
+                }
+                acc[date].push(task);
+                return acc;
+            },
+            {} as Record<string, any[]>,
+        );
+
+        const totalTasks = await this.prisma.productionTask.count({ where });
+
+        return {
+            data: groupedTasks,
+            meta: {
+                total: totalTasks,
+                page: pageNum,
+                limit: limitNum,
+                lastPage: Math.ceil(totalTasks / limitNum),
+                hasMore: pageNum * limitNum < totalTasks,
+            },
+        };
+    }
+
     async findOne(tenantId: string, id: string) {
         if (id === 'prep-task-01') {
             return this._getPrepTask(tenantId);
@@ -497,7 +479,6 @@ export class ProductionTasksService {
                 tenantId,
                 deletedAt: null,
             },
-            // [核心修正] 使用 Prisma.ProductionTaskGetPayload<T> 来帮助 TS 推断正确的类型
             include: {
                 items: {
                     include: {
@@ -544,7 +525,6 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
-        // [核心修正] 调用新的私有方法计算备料清单，并传入类型正确的 task 对象
         const prepTask = await this._getPrepItemsForTask(tenantId, task);
 
         const totalIngredientsMap = new Map<string, { name: string; totalWeight: number }>();

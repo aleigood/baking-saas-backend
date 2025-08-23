@@ -8,5 +8,6 @@ import { CostingModule } from '../costing/costing.module';
     imports: [PrismaModule, CostingModule],
     controllers: [ProductionTasksController],
     providers: [ProductionTasksService],
+    exports: [ProductionTasksService], // [核心新增] 导出服务
 })
 export class ProductionTasksModule {}
