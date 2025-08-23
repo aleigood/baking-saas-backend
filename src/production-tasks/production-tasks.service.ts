@@ -7,6 +7,7 @@ import { IngredientType, Prisma, ProductionTaskStatus, RecipeType } from '@prism
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
 
+// ... (PrepTask interface remains the same)
 export interface PrepTask {
     id: string;
     title: string;
@@ -14,6 +15,7 @@ export interface PrepTask {
     items: CalculatedRecipeDetails[];
 }
 
+// [核心改造] 更新类型定义，以包含更深层次的关联数据
 type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
     include: {
         items: {
@@ -27,7 +29,7 @@ type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
                                     include: {
                                         ingredients: {
                                             include: {
-                                                ingredient: true;
+                                                ingredient: { include: { activeSku: true } }; // 包含 activeSku
                                                 linkedPreDough: true;
                                             };
                                         };
@@ -36,7 +38,9 @@ type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
                             };
                         };
                         ingredients: {
+                            // 产品自身的辅料、馅料
                             include: {
+                                ingredient: { include: { activeSku: true } }; // 包含 activeSku
                                 linkedExtra: true;
                             };
                         };
@@ -49,6 +53,7 @@ type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
 
 @Injectable()
 export class ProductionTasksService {
+    // ... (constructor, _getPrepItemsForTask, _getPrepTask, create, findActive, findHistory remain the same)
     constructor(
         private readonly prisma: PrismaService,
         private readonly costingService: CostingService,
@@ -360,9 +365,6 @@ export class ProductionTasksService {
         return { task: createdTask, warning: stockWarning };
     }
 
-    /**
-     * [核心改造] 拆分出 findActive 方法，专用于获取生产主页数据
-     */
     async findActive(tenantId: string) {
         const where: Prisma.ProductionTaskWhereInput = {
             tenantId,
@@ -400,9 +402,6 @@ export class ProductionTasksService {
         };
     }
 
-    /**
-     * [核心改造] 拆分出 findHistory 方法，专用于获取历史任务数据
-     */
     async findHistory(tenantId: string, query: QueryProductionTaskDto) {
         const { page, limit = '10' } = query;
         const pageNum = parseInt(page || '1', 10);
@@ -479,6 +478,7 @@ export class ProductionTasksService {
                 tenantId,
                 deletedAt: null,
             },
+            // [核心改造] 更新 include 查询以获取更详细的数据
             include: {
                 items: {
                     include: {
@@ -491,7 +491,7 @@ export class ProductionTasksService {
                                             include: {
                                                 ingredients: {
                                                     include: {
-                                                        ingredient: true,
+                                                        ingredient: { include: { activeSku: true } },
                                                         linkedPreDough: true,
                                                     },
                                                 },
@@ -501,6 +501,7 @@ export class ProductionTasksService {
                                 },
                                 ingredients: {
                                     include: {
+                                        ingredient: { include: { activeSku: true } },
                                         linkedExtra: true,
                                     },
                                 },
