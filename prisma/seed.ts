@@ -142,7 +142,10 @@ const recipesData: RecipeSeedData[] = [
             {
                 name: '熊掌卡仕达',
                 weight: 50,
-                fillings: [{ name: '卡仕达酱', type: 'FILLING', weightInGrams: 30 }],
+                fillings: [
+                    { name: '卡仕达酱', type: 'FILLING', weightInGrams: 30 },
+                    { name: '杏仁片', type: 'FILLING', weightInGrams: 1 },
+                ],
                 mixIn: [{ name: '香草籽', type: 'MIX_IN', ratio: 1 }],
                 procedure: ['烘烤：烤前刷过筛蛋液，一盘10个 上火210 下火180 烤10分钟'],
             },
