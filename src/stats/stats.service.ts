@@ -12,91 +12,49 @@ export class StatsService {
     ) {}
 
     /**
-     * [核心改造] 聚合接口增加 hasHistory 字段
+     * [核心改造] 聚合接口不再返回 hasHistory 字段
      * @param tenantId 租户ID
      */
     async getProductionDashboard(tenantId: string) {
-        // 并行执行三个异步任务
-        const [stats, tasksPayload, completedCount] = await Promise.all([
+        // [修改] 不再需要并行查询历史任务数量
+        const [stats, tasksPayload] = await Promise.all([
             this.getProductionHomeStats(tenantId),
             this.productionTasksService.findActive(tenantId),
-            // [核心新增] 增加一个轻量化查询，仅用于判断是否存在历史任务
-            this.prisma.productionTask.count({
-                where: {
-                    tenantId,
-                    deletedAt: null,
-                    status: { in: [ProductionTaskStatus.COMPLETED, ProductionTaskStatus.CANCELLED] },
-                },
-            }),
         ]);
 
         return {
             stats,
             tasks: tasksPayload.tasks,
             prepTask: tasksPayload.prepTask,
-            hasHistory: completedCount > 0, // [核心新增] 返回布尔值
         };
     }
 
     /**
-     * 获取生产主页的核心统计指标
+     * [修改] 获取生产主页的核心统计指标, 不再包含本周完成数量
      * @param tenantId 租户ID
      */
     async getProductionHomeStats(tenantId: string) {
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const dayOfWeek = today.getDay();
-
-        const startOfThisWeek = new Date(today);
-        const dateOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-        startOfThisWeek.setDate(today.getDate() + dateOffset);
-
-        const endOfThisWeek = new Date(startOfThisWeek);
-        endOfThisWeek.setDate(startOfThisWeek.getDate() + 6);
-        endOfThisWeek.setHours(23, 59, 59, 999);
-
-        const [pendingTasks, completedThisWeekTasks] = await this.prisma.$transaction([
-            this.prisma.productionTask.findMany({
-                where: {
-                    tenantId,
-                    status: {
-                        in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
-                    },
-                    deletedAt: null,
+        // [移除] 删除与“本周已完成”相关的日期计算逻辑
+        const pendingTasks = await this.prisma.productionTask.findMany({
+            where: {
+                tenantId,
+                status: {
+                    in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
                 },
-                include: {
-                    items: true,
-                },
-            }),
-            this.prisma.productionTask.findMany({
-                where: {
-                    tenantId,
-                    status: ProductionTaskStatus.COMPLETED,
-                    deletedAt: null,
-                    log: {
-                        completedAt: {
-                            gte: startOfThisWeek,
-                            lte: endOfThisWeek,
-                        },
-                    },
-                },
-                include: {
-                    items: true,
-                },
-            }),
-        ]);
+                deletedAt: null,
+            },
+            include: {
+                items: true,
+            },
+        });
 
         const totalPendingCount = pendingTasks.reduce((sum, task) => {
             return sum + task.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
         }, 0);
 
-        const totalCompletedThisWeekCount = completedThisWeekTasks.reduce((sum, task) => {
-            return sum + task.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
-        }, 0);
-
+        // [修改] 只返回待完成数量
         return {
             pendingCount: totalPendingCount,
-            completedThisWeekCount: totalCompletedThisWeekCount,
         };
     }
 

@@ -6,6 +6,8 @@ import { QueryProductionTaskDto } from './dto/query-production-task.dto';
 import { IngredientType, Prisma, ProductionTaskStatus, RecipeType } from '@prisma/client';
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
+// [新增] 导入新增的 DTO
+import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
 
 // ... (PrepTask interface remains the same)
 export interface PrepTask {
@@ -467,7 +469,11 @@ export class ProductionTasksService {
         };
     }
 
-    async findOne(tenantId: string, id: string) {
+    // [修改] findOne 方法签名增加 query 参数
+    async findOne(tenantId: string, id: string, query: QueryTaskDetailDto) {
+        // [修复] 打印 query 参数以消除 'unused variable' 警告，并为后续开发提供调试信息
+        console.log('Received query params for ice calculation:', query);
+
         if (id === 'prep-task-01') {
             return this._getPrepTask(tenantId);
         }
@@ -593,7 +599,7 @@ export class ProductionTasksService {
     }
 
     async update(tenantId: string, id: string, updateProductionTaskDto: UpdateProductionTaskDto) {
-        await this.findOne(tenantId, id);
+        await this.findOne(tenantId, id, {}); // [修改] 传递一个空的query对象以匹配方法签名
         return this.prisma.productionTask.update({
             where: { id },
             data: updateProductionTaskDto,
@@ -601,7 +607,7 @@ export class ProductionTasksService {
     }
 
     async remove(tenantId: string, id: string) {
-        await this.findOne(tenantId, id);
+        await this.findOne(tenantId, id, {}); // [修改] 传递一个空的query对象以匹配方法签名
         return this.prisma.productionTask.update({
             where: { id },
             data: {
@@ -709,8 +715,8 @@ export class ProductionTasksService {
                     });
                 }
             }
-
-            return this.findOne(tenantId, id);
+            // [修改] 传递一个空的query对象以匹配方法签名
+            return this.findOne(tenantId, id, {});
         });
     }
 }

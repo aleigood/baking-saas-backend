@@ -19,6 +19,7 @@ import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
+import { QueryTaskDetailDto } from './dto/query-task-detail.dto'; // [新增] 导入新的 DTO
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('production-tasks')
@@ -51,8 +52,14 @@ export class ProductionTasksController {
     }
 
     @Get(':id')
-    findOne(@GetUser() user: UserPayload, @Param('id') id: string) {
-        return this.productionTasksService.findOne(user.tenantId, id);
+    // [修改] findOne 方法现在接收 QueryTaskDetailDto 来处理温度相关的查询参数
+    findOne(
+        @GetUser() user: UserPayload,
+        @Param('id') id: string,
+        @Query(new ValidationPipe({ transform: true }))
+        query: QueryTaskDetailDto,
+    ) {
+        return this.productionTasksService.findOne(user.tenantId, id, query); // [修改] 将 query 传递给 service
     }
 
     @Patch(':id')
