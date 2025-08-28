@@ -149,12 +149,34 @@ export class ProductionTasksService {
         };
     }
 
-    private async _getPrepTask(tenantId: string): Promise<PrepTask | null> {
+    private async _getPrepTask(tenantId: string, date?: string): Promise<PrepTask | null> {
+        let targetDate: Date;
+        if (date) {
+            targetDate = new Date(date);
+        } else {
+            targetDate = new Date();
+        }
+        const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
+        const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+
         const activeTasks = await this.prisma.productionTask.findMany({
             where: {
                 tenantId,
                 deletedAt: null,
                 status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
+                startDate: {
+                    lte: endOfDay,
+                },
+                OR: [
+                    {
+                        endDate: {
+                            gte: startOfDay,
+                        },
+                    },
+                    {
+                        endDate: null,
+                    },
+                ],
             },
             include: {
                 items: {
@@ -275,7 +297,8 @@ export class ProductionTasksService {
     }
 
     async create(tenantId: string, createProductionTaskDto: CreateProductionTaskDto) {
-        const { plannedDate, notes, products } = createProductionTaskDto;
+        // [修改] 解构出 startDate 和 endDate
+        const { startDate, endDate, notes, products } = createProductionTaskDto;
 
         if (!products || products.length === 0) {
             throw new BadRequestException('一个生产任务至少需要包含一个产品。');
@@ -345,7 +368,8 @@ export class ProductionTasksService {
 
         const createdTask = await this.prisma.productionTask.create({
             data: {
-                plannedDate,
+                startDate, // [修改] 使用 startDate
+                endDate, // [修改] 使用 endDate
                 notes,
                 tenantId,
                 items: {
@@ -367,11 +391,35 @@ export class ProductionTasksService {
         return { task: createdTask, warning: stockWarning };
     }
 
-    async findActive(tenantId: string) {
+    async findActive(tenantId: string, date?: string) {
+        let targetDate: Date;
+        if (date) {
+            targetDate = new Date(date);
+        } else {
+            targetDate = new Date();
+        }
+        // [新增] 计算所选日期的开始和结束时间
+        const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
+        const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+
         const where: Prisma.ProductionTaskWhereInput = {
             tenantId,
             deletedAt: null,
             status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
+            // [修改] 新的日期筛选逻辑
+            startDate: {
+                lte: endOfDay, // 任务的开始时间必须在所选日期的结束之前
+            },
+            OR: [
+                {
+                    endDate: {
+                        gte: startOfDay, // 任务的结束时间必须在所选日期的开始之后
+                    },
+                },
+                {
+                    endDate: null, // 或者任务没有结束时间
+                },
+            ],
         };
 
         const tasks = await this.prisma.productionTask.findMany({
@@ -392,16 +440,52 @@ export class ProductionTasksService {
                 },
             },
             orderBy: {
-                plannedDate: 'asc',
+                startDate: 'asc', // [修改] 按开始日期排序
             },
         });
 
-        const prepTask = await this._getPrepTask(tenantId);
+        const prepTask = await this._getPrepTask(tenantId, date);
 
         return {
             tasks,
             prepTask,
         };
+    }
+
+    /**
+     * [新增] 获取所有任务的日期
+     * @param tenantId
+     * @returns
+     */
+    async getTaskDates(tenantId: string) {
+        const tasks = await this.prisma.productionTask.findMany({
+            where: {
+                tenantId,
+                deletedAt: null,
+            },
+            select: {
+                startDate: true,
+                endDate: true,
+            },
+        });
+
+        const dates = new Set<string>();
+        tasks.forEach((task) => {
+            // [修改] 将 let 改为 const 以修复 eslint 警告
+            const current = new Date(task.startDate);
+            const end = task.endDate ? new Date(task.endDate) : new Date(task.startDate);
+
+            // 确保我们将日期设置为午夜，以避免时区问题
+            current.setUTCHours(0, 0, 0, 0);
+            end.setUTCHours(0, 0, 0, 0);
+
+            while (current <= end) {
+                dates.add(current.toISOString().split('T')[0]);
+                current.setDate(current.getDate() + 1);
+            }
+        });
+
+        return Array.from(dates);
     }
 
     async findHistory(tenantId: string, query: QueryProductionTaskDto) {
@@ -433,7 +517,7 @@ export class ProductionTasksService {
                 },
             },
             orderBy: {
-                plannedDate: 'desc',
+                startDate: 'desc', // [修改] 按开始日期排序
             },
             skip: (pageNum - 1) * limitNum,
             take: limitNum,
@@ -441,7 +525,7 @@ export class ProductionTasksService {
 
         const groupedTasks = tasks.reduce(
             (acc, task) => {
-                const date = new Date(task.plannedDate).toLocaleDateString('zh-CN', {
+                const date = new Date(task.startDate).toLocaleDateString('zh-CN', {
                     month: 'long',
                     day: 'numeric',
                     weekday: 'long',
@@ -469,9 +553,7 @@ export class ProductionTasksService {
         };
     }
 
-    // [修改] findOne 方法签名增加 query 参数
     async findOne(tenantId: string, id: string, query: QueryTaskDetailDto) {
-        // [修复] 打印 query 参数以消除 'unused variable' 警告，并为后续开发提供调试信息
         console.log('Received query params for ice calculation:', query);
 
         if (id === 'prep-task-01') {
@@ -484,7 +566,6 @@ export class ProductionTasksService {
                 tenantId,
                 deletedAt: null,
             },
-            // [核心改造] 更新 include 查询以获取更详细的数据
             include: {
                 items: {
                     include: {
@@ -599,7 +680,7 @@ export class ProductionTasksService {
     }
 
     async update(tenantId: string, id: string, updateProductionTaskDto: UpdateProductionTaskDto) {
-        await this.findOne(tenantId, id, {}); // [修改] 传递一个空的query对象以匹配方法签名
+        await this.findOne(tenantId, id, {});
         return this.prisma.productionTask.update({
             where: { id },
             data: updateProductionTaskDto,
@@ -607,7 +688,7 @@ export class ProductionTasksService {
     }
 
     async remove(tenantId: string, id: string) {
-        await this.findOne(tenantId, id, {}); // [修改] 传递一个空的query对象以匹配方法签名
+        await this.findOne(tenantId, id, {});
         return this.prisma.productionTask.update({
             where: { id },
             data: {
@@ -715,7 +796,6 @@ export class ProductionTasksService {
                     });
                 }
             }
-            // [修改] 传递一个空的query对象以匹配方法签名
             return this.findOne(tenantId, id, {});
         });
     }

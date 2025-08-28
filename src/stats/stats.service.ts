@@ -16,7 +16,7 @@ export class StatsService {
      * @param tenantId 租户ID
      */
     async getProductionDashboard(tenantId: string) {
-        // [修改] 不再需要并行查询历史任务数量
+        // [修改] 调用 findActive 时不传参数，让其默认获取当天的任务
         const [stats, tasksPayload] = await Promise.all([
             this.getProductionHomeStats(tenantId),
             this.productionTasksService.findActive(tenantId),

@@ -324,17 +324,19 @@ model IngredientStockAdjustment {
 
 // 生产任务模型
 model ProductionTask {
-  id          String               @id @default(uuid())
-  tenantId    String
-  status      ProductionTaskStatus @default(PENDING)
-  plannedDate DateTime
-  notes       String?
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  deletedAt   DateTime?
-  tenant      Tenant               @relation(fields: [tenantId], references: [id])
-  log         ProductionLog?
-  items       ProductionTaskItem[]
+  id        String               @id @default(uuid())
+  tenantId  String
+  status    ProductionTaskStatus @default(PENDING)
+  // [修改] 将 plannedDate 重命名为 startDate，并新增 endDate
+  startDate DateTime
+  endDate   DateTime?
+  notes     String?
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  deletedAt DateTime?
+  tenant    Tenant               @relation(fields: [tenantId], references: [id])
+  log       ProductionLog?
+  items     ProductionTaskItem[]
 
   @@index([tenantId])
 }

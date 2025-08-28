@@ -35,7 +35,11 @@ class ProductionTaskItemDto {
 export class CreateProductionTaskDto {
     @IsDateString()
     @IsNotEmpty()
-    plannedDate: string; // 计划生产日期 (Planned production date)
+    startDate: string; // [修改] 计划生产日期 -> 开始日期
+
+    @IsDateString()
+    @IsOptional()
+    endDate?: string; // [新增] 结束日期 (可选)
 
     @IsString()
     @IsOptional()

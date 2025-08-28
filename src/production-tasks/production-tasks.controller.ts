@@ -19,7 +19,7 @@ import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
-import { QueryTaskDetailDto } from './dto/query-task-detail.dto'; // [新增] 导入新的 DTO
+import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('production-tasks')
@@ -33,10 +33,19 @@ export class ProductionTasksController {
 
     /**
      * [核心改造] 新增：专门用于获取生产主页的活动任务（进行中、待开始）
+     * [修改] 增加 date 查询参数，用于按日期筛选
      */
     @Get('active')
-    findActive(@GetUser() user: UserPayload) {
-        return this.productionTasksService.findActive(user.tenantId);
+    findActive(@GetUser() user: UserPayload, @Query('date') date?: string) {
+        return this.productionTasksService.findActive(user.tenantId, date);
+    }
+
+    /**
+     * [新增] 获取所有存在任务的日期
+     */
+    @Get('task-dates')
+    getTaskDates(@GetUser() user: UserPayload) {
+        return this.productionTasksService.getTaskDates(user.tenantId);
     }
 
     /**
@@ -52,14 +61,13 @@ export class ProductionTasksController {
     }
 
     @Get(':id')
-    // [修改] findOne 方法现在接收 QueryTaskDetailDto 来处理温度相关的查询参数
     findOne(
         @GetUser() user: UserPayload,
         @Param('id') id: string,
         @Query(new ValidationPipe({ transform: true }))
         query: QueryTaskDetailDto,
     ) {
-        return this.productionTasksService.findOne(user.tenantId, id, query); // [修改] 将 query 传递给 service
+        return this.productionTasksService.findOne(user.tenantId, id, query);
     }
 
     @Patch(':id')
