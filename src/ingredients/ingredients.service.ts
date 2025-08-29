@@ -117,6 +117,19 @@ export class IngredientsService {
 
         return ingredients.map((ingredient) => {
             const stats = statsMap.get(ingredient.id);
+            const totalConsumptionInGrams = stats?.total || 0;
+
+            // [核心修改] 专门处理非追踪原料
+            if (ingredient.type === IngredientType.UNTRACKED) {
+                return {
+                    ...ingredient,
+                    daysOfSupply: Infinity,
+                    avgDailyConsumption: 0,
+                    avgConsumptionPerTask: 0,
+                    totalConsumptionInGrams, // 仍然显示总消耗量
+                };
+            }
+
             if (!stats || stats.total === 0) {
                 return {
                     ...ingredient,
@@ -140,7 +153,7 @@ export class IngredientsService {
                 daysOfSupply,
                 avgDailyConsumption,
                 avgConsumptionPerTask,
-                totalConsumptionInGrams: stats.total,
+                totalConsumptionInGrams,
             };
         });
     }
