@@ -491,6 +491,10 @@ export class ProductionTasksService {
             where: {
                 tenantId,
                 deletedAt: null,
+                // [核心修复] 新增条件，排除已取消的任务
+                status: {
+                    not: ProductionTaskStatus.CANCELLED,
+                },
             },
             select: {
                 startDate: true,
