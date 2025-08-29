@@ -494,9 +494,9 @@ export class ProductionTasksService {
             where: {
                 tenantId,
                 deletedAt: null,
-                // [核心修复] 新增条件，排除已取消的任务
+                // [核心修复] 同时排除已完成和已取消的任务
                 status: {
-                    not: ProductionTaskStatus.CANCELLED,
+                    in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
                 },
             },
             select: {
@@ -911,6 +911,7 @@ export class ProductionTasksService {
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
             include: {
+                // [核心修改] 关联查询产品名称，用于生成损耗原因
                 items: {
                     include: {
                         product: {
