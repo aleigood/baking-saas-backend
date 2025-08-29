@@ -50,10 +50,11 @@ export interface CalculatedProductCostDetails {
     groupedExtraIngredients: Record<string, CalculatedExtraIngredientInfo[]>;
 }
 
-// [新增] 为前置准备任务定义新的类型接口
+// [核心修改] 为 CalculatedRecipeIngredient 接口增加可选的 brand 字段
 export interface CalculatedRecipeIngredient {
     name: string;
     weightInGrams: number;
+    brand?: string | null;
 }
 
 // [新增] 为前置准备任务定义新的类型接口
@@ -117,7 +118,12 @@ export class CostingService {
                             include: {
                                 ingredients: {
                                     include: {
-                                        ingredient: true,
+                                        // [核心修改] 在查询原料时，预加载其激活的SKU信息
+                                        ingredient: {
+                                            include: {
+                                                activeSku: true,
+                                            },
+                                        },
                                     },
                                 },
                             },
@@ -154,6 +160,8 @@ export class CostingService {
                 return {
                     name: ing.ingredient!.name,
                     weightInGrams: parseFloat(weight.toFixed(1)),
+                    // [核心修改] 将激活SKU的品牌信息一并返回
+                    brand: ing.ingredient!.activeSku?.brand,
                 };
             });
 
