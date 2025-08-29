@@ -1,62 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatsDto } from './dto/stats.dto';
-import { ProductionTaskStatus } from '@prisma/client';
-import { ProductionTasksService } from '../production-tasks/production-tasks.service';
+// [核心修改] ProductionTasksService 的导入已移除，因为它不再被使用
 
 @Injectable()
 export class StatsService {
     constructor(
         private prisma: PrismaService,
-        private readonly productionTasksService: ProductionTasksService,
+        // [核心修改] 移除了对 productionTasksService 的依赖
     ) {}
 
-    /**
-     * [核心改造] 聚合接口不再返回 hasHistory 字段
-     * @param tenantId 租户ID
-     */
-    async getProductionDashboard(tenantId: string) {
-        // [修改] 调用 findActive 时不传参数，让其默认获取当天的任务
-        const [stats, tasksPayload] = await Promise.all([
-            this.getProductionHomeStats(tenantId),
-            this.productionTasksService.findActive(tenantId),
-        ]);
-
-        return {
-            stats,
-            tasks: tasksPayload.tasks,
-            prepTask: tasksPayload.prepTask,
-        };
-    }
-
-    /**
-     * [修改] 获取生产主页的核心统计指标, 不再包含本周完成数量
-     * @param tenantId 租户ID
-     */
-    async getProductionHomeStats(tenantId: string) {
-        // [移除] 删除与“本周已完成”相关的日期计算逻辑
-        const pendingTasks = await this.prisma.productionTask.findMany({
-            where: {
-                tenantId,
-                status: {
-                    in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
-                },
-                deletedAt: null,
-            },
-            include: {
-                items: true,
-            },
-        });
-
-        const totalPendingCount = pendingTasks.reduce((sum, task) => {
-            return sum + task.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
-        }, 0);
-
-        // [修改] 只返回待完成数量
-        return {
-            pendingCount: totalPendingCount,
-        };
-    }
+    // [核心修改] 移除了已废弃的 getProductionDashboard 方法
+    // [核心修改] 移除了已废弃的 getProductionHomeStats 方法
 
     async getProductionStats(tenantId: string, dto: StatsDto) {
         const { startDate, endDate } = dto;

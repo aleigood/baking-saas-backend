@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { StatsService } from './stats.service';
 import { StatsController } from './stats.controller';
-import { ProductionTasksModule } from '../production-tasks/production-tasks.module'; // [核心新增] 导入任务模块
+// [核心修改] 移除了对 ProductionTasksModule 的导入，因为它不再被依赖
 
 @Module({
-    imports: [ProductionTasksModule], // [核心新增] 注入模块
+    imports: [], // [核心修改] imports 数组现在为空
     controllers: [StatsController],
     providers: [StatsService],
 })
