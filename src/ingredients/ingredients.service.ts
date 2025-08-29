@@ -4,22 +4,38 @@ import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
-import { SkuStatus } from '@prisma/client';
+import { SkuStatus, Prisma, IngredientType } from '@prisma/client'; // [修改] 导入Prisma和IngredientType
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
-import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class IngredientsService {
     constructor(private readonly prisma: PrismaService) {}
 
     async create(tenantId: string, createIngredientDto: CreateIngredientDto) {
-        return this.prisma.ingredient.create({
-            data: {
-                ...createIngredientDto,
-                tenantId,
+        const { name } = createIngredientDto;
+
+        // [核心修改] 创建一个用于构建数据的对象
+        const data: Prisma.IngredientCreateInput = {
+            ...createIngredientDto,
+            // [核心修复] 使用正确的 Prisma 关联数据语法
+            tenant: {
+                connect: {
+                    id: tenantId,
+                },
             },
+        };
+
+        // [核心修改] 如果原料是“水”，则覆盖其默认属性
+        if (name === '水') {
+            data.type = IngredientType.UNTRACKED; // 设置为非追踪类型
+            data.waterContent = 100; // 设置含水量为100%
+            data.isFlour = false; // 确保不被错误地标记为面粉
+        }
+
+        return this.prisma.ingredient.create({
+            data,
         });
     }
 
@@ -239,8 +255,7 @@ export class IngredientsService {
             throw new NotFoundException('原料不存在或已被删除');
         }
 
-        const usageCount =
-            ingredientToDelete._count.doughIngredients + ingredientToDelete._count.productIngredients;
+        const usageCount = ingredientToDelete._count.doughIngredients + ingredientToDelete._count.productIngredients;
 
         if (usageCount > 0) {
             throw new BadRequestException('该原料正在被一个或多个配方使用，无法删除。');

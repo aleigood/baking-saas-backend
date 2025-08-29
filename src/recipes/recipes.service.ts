@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRecipeDto, DoughIngredientDto } from './dto/create-recipe.dto';
-import { Prisma, RecipeFamily, RecipeVersion, ProductIngredientType, RecipeType } from '@prisma/client';
+import { Prisma, RecipeFamily, RecipeVersion, ProductIngredientType, RecipeType, IngredientType } from '@prisma/client'; // [修改] 导入IngredientType
 
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
 
@@ -84,13 +84,18 @@ export class RecipesService {
                     });
 
                     if (!existingIngredient) {
+                        // [核心修改] 新增对"水"的特殊处理逻辑
+                        const isWater = ing.name === '水';
                         existingIngredient = await tx.ingredient.create({
                             data: {
                                 tenantId,
                                 name: ing.name,
-                                type: 'STANDARD',
-                                isFlour: 'isFlour' in ing ? (ing.isFlour ?? false) : false,
-                                waterContent: 'waterContent' in ing ? (ing.waterContent ?? 0) : 0,
+                                // 如果是“水”，则类型为UNTRACKED，否则为STANDARD
+                                type: isWater ? IngredientType.UNTRACKED : IngredientType.STANDARD,
+                                // 如果是“水”，则不是面粉
+                                isFlour: isWater ? false : 'isFlour' in ing ? (ing.isFlour ?? false) : false,
+                                // 如果是“水”，含水量为100%，否则取DTO中的值或默认为0
+                                waterContent: isWater ? 100 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0,
                             },
                         });
                     }

@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductionTaskDto } from './dto/create-production-task.dto';
 import { UpdateProductionTaskDto } from './dto/update-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
-import { IngredientType, Prisma, ProductionTaskStatus, RecipeType } from '@prisma/client';
+import { IngredientType, Prisma, ProductionTask, ProductionTaskStatus, RecipeType } from '@prisma/client'; // [修改] 导入ProductionTask
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
 // [新增] 导入新增的 DTO
@@ -60,6 +60,35 @@ export class ProductionTasksService {
         private readonly prisma: PrismaService,
         private readonly costingService: CostingService,
     ) {}
+
+    /**
+     * @description [新增] 计算所需的水温
+     * @param targetTemp 面团目标温度
+     * @param mixerType 搅拌机温升系数
+     * @param flourTemp 面粉温度
+     * @param ambientTemp 环境温度
+     * @returns {number} 目标水温
+     */
+    private _calculateWaterTemp(targetTemp: number, mixerType: number, flourTemp: number, ambientTemp: number): number {
+        // T_w = (T_d - F) * 3 - T_f - T_a
+        return (targetTemp - mixerType) * 3 - flourTemp - ambientTemp;
+    }
+
+    /**
+     * @description [新增] 计算需要替换为冰块的水量
+     * @param targetWaterTemp 目标水温
+     * @param totalWater 总用水量
+     * @param initialWaterTemp 初始水温
+     * @returns {number} 需要的冰块克数 (四舍五入)
+     */
+    private _calculateIce(targetWaterTemp: number, totalWater: number, initialWaterTemp: number): number {
+        if (targetWaterTemp >= initialWaterTemp) {
+            return 0;
+        }
+        // Ice = (TotalWater * (InitialWaterTemp - TargetWaterTemp)) / (InitialWaterTemp + 80)
+        const ice = (totalWater * (initialWaterTemp - targetWaterTemp)) / (initialWaterTemp + 80);
+        return Math.round(ice);
+    }
 
     private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<PrepTask | null> {
         if (!task || !task.items || task.items.length === 0) {
@@ -523,8 +552,9 @@ export class ProductionTasksService {
             take: limitNum,
         });
 
+        // [核心修复] 为 reduce 的累加器提供显式类型，修复 ESLint 错误
         const groupedTasks = tasks.reduce(
-            (acc, task) => {
+            (acc: Record<string, ProductionTask[]>, task) => {
                 const date = new Date(task.startDate).toLocaleDateString('zh-CN', {
                     month: 'long',
                     day: 'numeric',
@@ -611,6 +641,64 @@ export class ProductionTasksService {
 
         if (!task) {
             throw new NotFoundException('生产任务不存在');
+        }
+
+        // [核心新增] 冰块计算逻辑
+        const { mixerType, envTemp, flourTemp, waterTemp } = query;
+        const canCalculateIce =
+            mixerType !== undefined && envTemp !== undefined && flourTemp !== undefined && waterTemp !== undefined;
+
+        if (canCalculateIce) {
+            // 1. 计算每个面团配方的总水量
+            const doughTotalWaterMap = new Map<string, number>();
+
+            task.items.forEach((item) => {
+                const product = item.product;
+                if (!product) return;
+
+                product.recipeVersion.doughs.forEach((dough) => {
+                    const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+                    if (totalRatio === 0) return;
+
+                    const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+
+                    dough.ingredients.forEach((ing) => {
+                        // 假设水的原料名称为'水'
+                        if (ing.ingredient?.name === '水') {
+                            const waterWeight = weightPerRatioPoint.mul(ing.ratio).mul(item.quantity).toNumber();
+                            const currentTotal = doughTotalWaterMap.get(dough.id) || 0;
+                            doughTotalWaterMap.set(dough.id, currentTotal + waterWeight);
+                        }
+                    });
+                });
+            });
+
+            // 2. 遍历任务，修改水的名称以包含冰块信息
+            task.items.forEach((item) => {
+                item.product?.recipeVersion.doughs.forEach((dough) => {
+                    const doughTargetTemp = dough.targetTemp;
+                    const totalWaterForDough = doughTotalWaterMap.get(dough.id);
+
+                    if (doughTargetTemp && totalWaterForDough && totalWaterForDough > 0) {
+                        const waterIngredient = dough.ingredients.find((ing) => ing.ingredient?.name === '水');
+
+                        if (waterIngredient && waterIngredient.ingredient) {
+                            const targetWaterTemp = this._calculateWaterTemp(
+                                doughTargetTemp,
+                                mixerType,
+                                flourTemp,
+                                envTemp,
+                            );
+                            const iceWeight = this._calculateIce(targetWaterTemp, totalWaterForDough, waterTemp);
+
+                            if (iceWeight > 0) {
+                                // [核心修复] 移除(as any)类型断言，直接对类型安全的属性进行赋值，以解决ESLint错误
+                                waterIngredient.ingredient.name = `水 (含 ${iceWeight}g 冰)`;
+                            }
+                        }
+                    }
+                });
+            });
         }
 
         const prepTask = await this._getPrepItemsForTask(tenantId, task);
