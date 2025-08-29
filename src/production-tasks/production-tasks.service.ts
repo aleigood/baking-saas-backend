@@ -421,13 +421,35 @@ export class ProductionTasksService {
     }
 
     async findActive(tenantId: string, date?: string) {
+        // [核心修改] 并行执行两个查询：一个是获取当天任务，另一个是获取全局统计
+        const [tasksForDate, stats] = await Promise.all([
+            this.findTasksForDate(tenantId, date),
+            this.getGlobalPendingStats(tenantId),
+        ]);
+
+        const prepTask = await this._getPrepTask(tenantId, date);
+
+        // [核心修改] 将统计数据和任务列表合并到同一个响应中返回
+        return {
+            stats,
+            tasks: tasksForDate,
+            prepTask,
+        };
+    }
+
+    /**
+     * @description [核心新增] 这是一个内部辅助函数，用于查询指定日期的任务
+     * @param tenantId 租户ID
+     * @param date 日期字符串
+     * @returns 返回任务列表
+     */
+    private async findTasksForDate(tenantId: string, date?: string) {
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
         } else {
             targetDate = new Date();
         }
-        // [新增] 计算所选日期的开始和结束时间
         const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
         const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
 
@@ -435,23 +457,22 @@ export class ProductionTasksService {
             tenantId,
             deletedAt: null,
             status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
-            // [修改] 新的日期筛选逻辑
             startDate: {
-                lte: endOfDay, // 任务的开始时间必须在所选日期的结束之前
+                lte: endOfDay,
             },
             OR: [
                 {
                     endDate: {
-                        gte: startOfDay, // 任务的结束时间必须在所选日期的开始之后
+                        gte: startOfDay,
                     },
                 },
                 {
-                    endDate: null, // 或者任务没有结束时间
+                    endDate: null,
                 },
             ],
         };
 
-        const tasks = await this.prisma.productionTask.findMany({
+        return this.prisma.productionTask.findMany({
             where,
             include: {
                 items: {
@@ -469,15 +490,36 @@ export class ProductionTasksService {
                 },
             },
             orderBy: {
-                startDate: 'asc', // [修改] 按开始日期排序
+                startDate: 'asc',
+            },
+        });
+    }
+
+    /**
+     * @description [核心新增] 这是一个内部辅助函数，用于计算全局的待完成任务统计
+     * @param tenantId 租户ID
+     * @returns 返回包含待完成数量的对象
+     */
+    private async getGlobalPendingStats(tenantId: string) {
+        const pendingTasks = await this.prisma.productionTask.findMany({
+            where: {
+                tenantId,
+                status: {
+                    in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
+                },
+                deletedAt: null,
+            },
+            include: {
+                items: true,
             },
         });
 
-        const prepTask = await this._getPrepTask(tenantId, date);
+        const totalPendingCount = pendingTasks.reduce((sum, task) => {
+            return sum + task.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
+        }, 0);
 
         return {
-            tasks,
-            prepTask,
+            pendingCount: totalPendingCount,
         };
     }
 
