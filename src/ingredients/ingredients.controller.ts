@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, HttpStatus } from '@nestjs/common';
+import {
+    Controller,
+    Get,
+    Post,
+    Body,
+    Patch,
+    Param,
+    Delete,
+    UseGuards,
+    HttpStatus,
+    Query,
+    ValidationPipe,
+} from '@nestjs/common';
 import { IngredientsService } from './ingredients.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
@@ -11,6 +23,8 @@ import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+// [核心新增] 导入分页查询 DTO
+import { QueryLedgerDto } from './dto/query-ledger.dto';
 
 @ApiTags('Ingredients')
 @ApiBearerAuth()
@@ -59,14 +73,20 @@ export class IngredientsController {
     }
 
     /**
-     * [新增] 获取单个原料的库存流水
+     * [修改] 获取单个原料的库存流水 (支持分页)
      * @param user 当前用户
      * @param id 原料ID
+     * @param queryDto 分页参数
      */
     @Get(':id/ledger')
     @ApiOperation({ summary: "Get an ingredient's stock ledger" })
-    getIngredientLedger(@GetUser() user: UserPayload, @Param('id') id: string) {
-        return this.ingredientsService.getIngredientLedger(user.tenantId, id);
+    getIngredientLedger(
+        @GetUser() user: UserPayload,
+        @Param('id') id: string,
+        // [核心修改] 应用 ValidationPipe 以便转换查询参数
+        @Query(new ValidationPipe({ transform: true })) queryDto: QueryLedgerDto,
+    ) {
+        return this.ingredientsService.getIngredientLedger(user.tenantId, id, queryDto);
     }
 
     @Post(':ingredientId/skus')

@@ -86,10 +86,11 @@ export class ProductionTasksController {
 
     @Post(':id/complete')
     complete(
-        @GetUser() user: UserPayload,
+        @GetUser() user: UserPayload, // [核心修改] 注入当前用户信息
         @Param('id', ParseUUIDPipe) id: string,
         @Body() completeProductionTaskDto: CompleteProductionTaskDto,
     ) {
-        return this.productionTasksService.complete(user.tenantId, id, completeProductionTaskDto);
+        // [核心修改] 将 tenantId 和 userId 传递给 service 层
+        return this.productionTasksService.complete(user.tenantId, user.sub, id, completeProductionTaskDto);
     }
 }

@@ -139,7 +139,7 @@ model Invitation {
 }
 
 // ================================================================= //
-//                         RECIPE MODELS                       //
+//                           RECIPE MODELS                       //
 // ================================================================= //
 
 // 配方族：用于管理一个配方的所有版本
@@ -215,15 +215,16 @@ model DoughIngredient {
 
 // 最终产品：由配方制作出的具体面包或产品
 model Product {
-  id              String   @id @default(uuid())
+  id              String                      @id @default(uuid())
   recipeVersionId String // 所属配方版本ID
   name            String // 产品名称，如“熊掌卡仕达”
   baseDoughWeight Float // 基础面团克重 (不含mixIn)
   procedure       String[] // 制作流程要点 (如烘烤参数)
-
-  recipeVersion   RecipeVersion        @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  recipeVersion   RecipeVersion               @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
   ingredients     ProductIngredient[] // 产品的附加原料 (搅拌、馅料、装饰)
   productionTasks ProductionTaskItem[]
+  // [核心新增] 新增与损耗日志的关联
+  spoilageLogs    ProductionTaskSpoilageLog[]
 
   @@index([recipeVersionId])
 }
@@ -361,14 +362,31 @@ model ProductionTaskItem {
 
 // 生产日志模型
 model ProductionLog {
-  id              String                     @id @default(uuid())
-  taskId          String                     @unique
-  completedAt     DateTime                   @default(now())
+  id              String                      @id @default(uuid())
+  taskId          String                      @unique
+  completedAt     DateTime                    @default(now())
   notes           String?
-  task            ProductionTask             @relation(fields: [taskId], references: [id])
+  task            ProductionTask              @relation(fields: [taskId], references: [id])
   consumptionLogs IngredientConsumptionLog[]
+  // [核心新增] 新增与损耗日志的关联
+  spoilageLogs    ProductionTaskSpoilageLog[]
 
   @@index([taskId])
+}
+
+// [核心新增] 生产任务损耗日志模型
+model ProductionTaskSpoilageLog {
+  id              String        @id @default(uuid())
+  productionLogId String
+  productId       String
+  stage           String // e.g., 'kneading', 'fermentation', 'baking'
+  quantity        Int
+  createdAt       DateTime      @default(now())
+  productionLog   ProductionLog @relation(fields: [productionLogId], references: [id], onDelete: Cascade)
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productionLogId])
+  @@index([productId])
 }
 
 // 原料消耗日志模型

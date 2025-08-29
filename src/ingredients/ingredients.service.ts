@@ -8,6 +8,8 @@ import { SkuStatus, Prisma, IngredientType } from '@prisma/client'; // [修改] 
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
+// [核心新增] 导入分页查询 DTO
+import { QueryLedgerDto } from './dto/query-ledger.dto';
 
 @Injectable()
 export class IngredientsService {
@@ -272,34 +274,36 @@ export class IngredientsService {
         });
     }
 
-    async getIngredientLedger(tenantId: string, ingredientId: string) {
+    // [核心修改] 实现库存流水分页逻辑
+    async getIngredientLedger(tenantId: string, ingredientId: string, query: QueryLedgerDto) {
         await this.findOne(tenantId, ingredientId);
+        const { page = 1, limit = 10 } = query;
+        const pageNum = Number(page);
+        const limitNum = Number(limit);
+        const skip = (pageNum - 1) * limitNum;
 
-        const procurements = await this.prisma.procurementRecord.findMany({
-            where: { sku: { ingredientId: ingredientId } },
-            include: { sku: true },
-            orderBy: { purchaseDate: 'desc' },
-        });
-
-        const consumptions = await this.prisma.ingredientConsumptionLog.findMany({
-            where: { ingredientId: ingredientId },
-            include: {
-                productionLog: {
-                    include: {
-                        task: {
-                            select: { id: true },
+        const [procurements, consumptions, adjustments] = await Promise.all([
+            this.prisma.procurementRecord.findMany({
+                where: { sku: { ingredientId: ingredientId } },
+                include: { sku: true },
+            }),
+            this.prisma.ingredientConsumptionLog.findMany({
+                where: { ingredientId: ingredientId },
+                include: {
+                    productionLog: {
+                        include: {
+                            task: {
+                                select: { id: true },
+                            },
                         },
                     },
                 },
-            },
-            orderBy: { productionLog: { completedAt: 'desc' } },
-        });
-
-        const adjustments = await this.prisma.ingredientStockAdjustment.findMany({
-            where: { ingredientId: ingredientId },
-            include: { user: { select: { name: true, phone: true } } },
-            orderBy: { createdAt: 'desc' },
-        });
+            }),
+            this.prisma.ingredientStockAdjustment.findMany({
+                where: { ingredientId: ingredientId },
+                include: { user: { select: { name: true, phone: true } } },
+            }),
+        ]);
 
         const procurementLedger = procurements.map((p) => ({
             date: p.purchaseDate,
@@ -313,13 +317,14 @@ export class IngredientsService {
             date: c.productionLog.completedAt,
             type: '生产消耗',
             change: -c.quantityInGrams,
-            details: `生产任务 #${c.productionLog.task.id.split('-')[0]}`,
+            details: `生产任务 #${c.productionLog.task.id.slice(0, 8)}`,
             operator: '系统',
         }));
 
         const adjustmentLedger = adjustments.map((a) => ({
             date: a.createdAt,
-            type: '库存调整',
+            // [核心修改] 根据变动量判断是“库存调整”还是“生产损耗”
+            type: a.reason?.startsWith('生产损耗') ? '生产损耗' : '库存调整',
             change: a.changeInGrams,
             details: a.reason || '无原因',
             operator: a.user.name || a.user.phone,
@@ -328,7 +333,18 @@ export class IngredientsService {
         const ledger = [...procurementLedger, ...consumptionLedger, ...adjustmentLedger];
         ledger.sort((a, b) => b.date.getTime() - a.date.getTime());
 
-        return ledger;
+        const paginatedData = ledger.slice(skip, skip + limitNum);
+        const total = ledger.length;
+
+        return {
+            data: paginatedData,
+            meta: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                hasMore: pageNum * limitNum < total,
+            },
+        };
     }
 
     async createSku(tenantId: string, ingredientId: string, createSkuDto: CreateSkuDto) {

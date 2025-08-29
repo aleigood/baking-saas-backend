@@ -906,10 +906,19 @@ export class ProductionTasksService {
         });
     }
 
-    async complete(tenantId: string, id: string, completeProductionTaskDto: CompleteProductionTaskDto) {
+    // [核心修改] 函数签名增加 userId 参数
+    async complete(tenantId: string, userId: string, id: string, completeProductionTaskDto: CompleteProductionTaskDto) {
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
-            include: { items: true },
+            include: {
+                items: {
+                    include: {
+                        product: {
+                            select: { name: true },
+                        },
+                    },
+                },
+            },
         });
 
         if (!task) {
@@ -920,45 +929,19 @@ export class ProductionTasksService {
             throw new BadRequestException('只有“待开始”或“进行中”的任务才能被完成');
         }
 
-        const { notes } = completeProductionTaskDto;
+        const { notes, losses = [] } = completeProductionTaskDto;
 
-        const allConsumptions = new Map<
-            string,
-            {
-                ingredientId: string;
-                ingredientName: string;
-                activeSkuId: string | null;
-                totalConsumed: number;
-            }
-        >();
+        const successfulQuantities = new Map<string, number>();
+        task.items.forEach((item) => {
+            successfulQuantities.set(item.productId, item.quantity);
+        });
 
-        for (const item of task.items) {
-            const consumptions = await this.costingService.calculateProductConsumptions(
-                tenantId,
-                item.productId,
-                item.quantity,
-            );
-
-            for (const consumption of consumptions) {
-                const existing = allConsumptions.get(consumption.ingredientId);
-                if (existing) {
-                    existing.totalConsumed += consumption.totalConsumed;
-                } else {
-                    allConsumptions.set(consumption.ingredientId, { ...consumption });
-                }
-            }
-        }
-
-        const finalConsumptions = Array.from(allConsumptions.values());
+        losses.forEach((loss) => {
+            const currentQuantity = successfulQuantities.get(loss.productId) || 0;
+            successfulQuantities.set(loss.productId, Math.max(0, currentQuantity - loss.quantity));
+        });
 
         return this.prisma.$transaction(async (tx) => {
-            const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
-            const ingredients = await tx.ingredient.findMany({
-                where: { id: { in: ingredientIds } },
-                select: { id: true, name: true, currentStockInGrams: true, currentStockValue: true },
-            });
-            const ingredientDataMap = new Map(ingredients.map((i) => [i.id, i]));
-
             await tx.productionTask.update({
                 where: { id },
                 data: { status: ProductionTaskStatus.COMPLETED },
@@ -971,20 +954,79 @@ export class ProductionTasksService {
                 },
             });
 
-            for (const consumption of finalConsumptions) {
+            for (const loss of losses) {
+                await tx.productionTaskSpoilageLog.create({
+                    data: {
+                        productionLogId: productionLog.id,
+                        productId: loss.productId,
+                        stage: loss.stage,
+                        quantity: loss.quantity,
+                    },
+                });
+
+                const spoiledConsumptions = await this.costingService.calculateProductConsumptions(
+                    tenantId,
+                    loss.productId,
+                    loss.quantity,
+                );
+
+                for (const consumption of spoiledConsumptions) {
+                    const productName =
+                        task.items.find((i) => i.productId === loss.productId)?.product.name || '未知产品';
+                    await tx.ingredientStockAdjustment.create({
+                        data: {
+                            ingredientId: consumption.ingredientId,
+                            userId: userId, // [核心修复] 使用传入的 userId
+                            changeInGrams: -consumption.totalConsumed,
+                            reason: `生产损耗: ${productName} - ${loss.stage}`,
+                        },
+                    });
+                }
+            }
+
+            const successfulConsumptions = new Map<string, { totalConsumed: number; activeSkuId: string | null }>();
+
+            for (const [productId, quantity] of successfulQuantities.entries()) {
+                if (quantity > 0) {
+                    const consumptions = await this.costingService.calculateProductConsumptions(
+                        tenantId,
+                        productId,
+                        quantity,
+                    );
+                    for (const consumption of consumptions) {
+                        const existing = successfulConsumptions.get(consumption.ingredientId);
+                        if (existing) {
+                            existing.totalConsumed += consumption.totalConsumed;
+                        } else {
+                            successfulConsumptions.set(consumption.ingredientId, {
+                                totalConsumed: consumption.totalConsumed,
+                                activeSkuId: consumption.activeSkuId,
+                            });
+                        }
+                    }
+                }
+            }
+
+            const ingredientIds = Array.from(successfulConsumptions.keys());
+            const ingredients = await tx.ingredient.findMany({
+                where: { id: { in: ingredientIds } },
+                select: { id: true, currentStockInGrams: true, currentStockValue: true },
+            });
+            const ingredientDataMap = new Map(ingredients.map((i) => [i.id, i]));
+
+            for (const [ingredientId, consumption] of successfulConsumptions.entries()) {
                 await tx.ingredientConsumptionLog.create({
                     data: {
                         productionLogId: productionLog.id,
-                        ingredientId: consumption.ingredientId,
+                        ingredientId: ingredientId,
                         skuId: consumption.activeSkuId,
                         quantityInGrams: consumption.totalConsumed,
                     },
                 });
 
-                const ingredient = ingredientDataMap.get(consumption.ingredientId);
+                const ingredient = ingredientDataMap.get(ingredientId);
                 if (ingredient) {
                     const decrementAmount = Math.min(ingredient.currentStockInGrams, consumption.totalConsumed);
-
                     const currentStockValue = new Prisma.Decimal(ingredient.currentStockValue.toString());
                     let valueToDecrement = new Prisma.Decimal(0);
                     if (ingredient.currentStockInGrams > 0) {
@@ -993,7 +1035,7 @@ export class ProductionTasksService {
                     }
 
                     await tx.ingredient.update({
-                        where: { id: consumption.ingredientId },
+                        where: { id: ingredientId },
                         data: {
                             currentStockInGrams: {
                                 decrement: decrementAmount,
