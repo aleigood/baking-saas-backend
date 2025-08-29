@@ -186,6 +186,7 @@ CREATE TABLE "ProcurementRecord" (
     "packagesPurchased" INTEGER NOT NULL,
     "pricePerPackage" DECIMAL(65,30) NOT NULL,
     "purchaseDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "userId" TEXT NOT NULL,
 
     CONSTRAINT "ProcurementRecord_pkey" PRIMARY KEY ("id")
 );
@@ -235,6 +236,18 @@ CREATE TABLE "ProductionLog" (
     "notes" TEXT,
 
     CONSTRAINT "ProductionLog_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ProductionTaskSpoilageLog" (
+    "id" TEXT NOT NULL,
+    "productionLogId" TEXT NOT NULL,
+    "productId" TEXT NOT NULL,
+    "stage" TEXT NOT NULL,
+    "quantity" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ProductionTaskSpoilageLog_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -294,6 +307,9 @@ CREATE INDEX "ProductIngredient_ingredientId_idx" ON "ProductIngredient"("ingred
 CREATE UNIQUE INDEX "Ingredient_tenantId_name_deletedAt_key" ON "Ingredient"("tenantId", "name", "deletedAt");
 
 -- CreateIndex
+CREATE INDEX "ProcurementRecord_userId_idx" ON "ProcurementRecord"("userId");
+
+-- CreateIndex
 CREATE INDEX "IngredientStockAdjustment_ingredientId_idx" ON "IngredientStockAdjustment"("ingredientId");
 
 -- CreateIndex
@@ -313,6 +329,12 @@ CREATE UNIQUE INDEX "ProductionLog_taskId_key" ON "ProductionLog"("taskId");
 
 -- CreateIndex
 CREATE INDEX "ProductionLog_taskId_idx" ON "ProductionLog"("taskId");
+
+-- CreateIndex
+CREATE INDEX "ProductionTaskSpoilageLog_productionLogId_idx" ON "ProductionTaskSpoilageLog"("productionLogId");
+
+-- CreateIndex
+CREATE INDEX "ProductionTaskSpoilageLog_productId_idx" ON "ProductionTaskSpoilageLog"("productId");
 
 -- CreateIndex
 CREATE INDEX "IngredientConsumptionLog_productionLogId_idx" ON "IngredientConsumptionLog"("productionLogId");
@@ -372,6 +394,9 @@ ALTER TABLE "Ingredient" ADD CONSTRAINT "Ingredient_activeSkuId_fkey" FOREIGN KE
 ALTER TABLE "IngredientSKU" ADD CONSTRAINT "IngredientSKU_ingredientId_fkey" FOREIGN KEY ("ingredientId") REFERENCES "Ingredient"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ProcurementRecord" ADD CONSTRAINT "ProcurementRecord_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ProcurementRecord" ADD CONSTRAINT "ProcurementRecord_skuId_fkey" FOREIGN KEY ("skuId") REFERENCES "IngredientSKU"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -391,6 +416,12 @@ ALTER TABLE "ProductionTaskItem" ADD CONSTRAINT "ProductionTaskItem_productId_fk
 
 -- AddForeignKey
 ALTER TABLE "ProductionLog" ADD CONSTRAINT "ProductionLog_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "ProductionTask"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductionTaskSpoilageLog" ADD CONSTRAINT "ProductionTaskSpoilageLog_productionLogId_fkey" FOREIGN KEY ("productionLogId") REFERENCES "ProductionLog"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductionTaskSpoilageLog" ADD CONSTRAINT "ProductionTaskSpoilageLog_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "IngredientConsumptionLog" ADD CONSTRAINT "IngredientConsumptionLog_productionLogId_fkey" FOREIGN KEY ("productionLogId") REFERENCES "ProductionLog"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

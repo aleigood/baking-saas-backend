@@ -118,11 +118,12 @@ export class IngredientsController {
     @Post('skus/:skuId/procurements')
     @ApiOperation({ summary: 'Create a procurement record for a SKU' })
     createProcurement(
-        @GetUser() user: UserPayload,
+        @GetUser() user: UserPayload, // [核心修改] 注入当前用户信息
         @Param('skuId') skuId: string,
         @Body() createProcurementDto: CreateProcurementDto,
     ) {
-        return this.ingredientsService.createProcurement(user.tenantId, skuId, createProcurementDto);
+        // [核心修改] 将 tenantId 和 userId 传递给 service 层
+        return this.ingredientsService.createProcurement(user.tenantId, user.sub, skuId, createProcurementDto);
     }
 
     @Patch('procurements/:id')

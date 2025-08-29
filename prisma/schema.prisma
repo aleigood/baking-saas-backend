@@ -84,16 +84,18 @@ enum SkuStatus {
 
 // 用户账户模型
 model User {
-  id               String                      @id @default(uuid())
-  phone            String                      @unique
-  name             String? // [新增] 用户姓名 (New: User's name)
-  password         String
-  role             Role                        @default(MEMBER) // Global role, SUPER_ADMIN is highest
-  status           UserStatus                  @default(ACTIVE)
-  createdAt        DateTime                    @default(now())
-  updatedAt        DateTime                    @updatedAt
-  tenants          TenantUser[] // User can belong to multiple tenants
-  stockAdjustments IngredientStockAdjustment[]
+  id                 String                      @id @default(uuid())
+  phone              String                      @unique
+  name               String? // [新增] 用户姓名 (New: User's name)
+  password           String
+  role               Role                        @default(MEMBER) // Global role, SUPER_ADMIN is highest
+  status             UserStatus                  @default(ACTIVE)
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+  tenants            TenantUser[] // User can belong to multiple tenants
+  stockAdjustments   IngredientStockAdjustment[]
+  // [核心新增] 新增与采购记录的关联
+  procurementRecords ProcurementRecord[]
 }
 
 // 租户/店铺模型
@@ -294,13 +296,18 @@ model IngredientSKU {
 
 // 采购记录模型
 model ProcurementRecord {
-  id                String   @id @default(uuid())
+  id                String        @id @default(uuid())
   skuId             String
   packagesPurchased Int
   pricePerPackage   Decimal
-  purchaseDate      DateTime @default(now())
+  purchaseDate      DateTime      @default(now())
+  // [核心新增] 新增 userId 字段，记录操作人
+  userId            String
+  user              User          @relation(fields: [userId], references: [id])
+  sku               IngredientSKU @relation(fields: [skuId], references: [id])
 
-  sku IngredientSKU @relation(fields: [skuId], references: [id])
+  // [核心新增] 新增索引
+  @@index([userId])
 }
 
 // [核心修改] 新增库存调整日志模型

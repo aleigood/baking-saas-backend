@@ -285,7 +285,7 @@ export class IngredientsService {
         const [procurements, consumptions, adjustments] = await Promise.all([
             this.prisma.procurementRecord.findMany({
                 where: { sku: { ingredientId: ingredientId } },
-                include: { sku: true },
+                include: { sku: true, user: { select: { name: true, phone: true } } }, // [核心修改] 关联查询用户信息
             }),
             this.prisma.ingredientConsumptionLog.findMany({
                 where: { ingredientId: ingredientId },
@@ -310,7 +310,7 @@ export class IngredientsService {
             type: '采购入库',
             change: p.packagesPurchased * p.sku.specWeightInGrams,
             details: `采购 ${p.sku.brand || ''} ${p.sku.specName} × ${p.packagesPurchased}`,
-            operator: '系统',
+            operator: p.user.name || p.user.phone, // [核心修改] 使用用户名作为操作人
         }));
 
         const consumptionLedger = consumptions.map((c) => ({
@@ -441,7 +441,13 @@ export class IngredientsService {
         });
     }
 
-    async createProcurement(tenantId: string, skuId: string, createProcurementDto: CreateProcurementDto) {
+    // [核心修改] 函数签名增加 userId 参数
+    async createProcurement(
+        tenantId: string,
+        userId: string,
+        skuId: string,
+        createProcurementDto: CreateProcurementDto,
+    ) {
         return this.prisma.$transaction(async (tx) => {
             const sku = await tx.ingredientSKU.findFirst({
                 where: {
@@ -462,6 +468,7 @@ export class IngredientsService {
                     packagesPurchased: createProcurementDto.packagesPurchased,
                     pricePerPackage: createProcurementDto.pricePerPackage,
                     purchaseDate: createProcurementDto.purchaseDate || new Date(),
+                    userId: userId, // [核心修改] 保存操作人ID
                 },
             });
 

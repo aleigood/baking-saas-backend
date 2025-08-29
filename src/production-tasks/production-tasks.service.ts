@@ -16,6 +16,15 @@ import {
     TaskIngredientDetail,
 } from './dto/task-detail.dto';
 
+// [核心新增] 定义损耗阶段的中英文映射
+const stageToChineseMap: Record<string, string> = {
+    kneading: '揉面失败',
+    fermentation: '发酵失败',
+    shaping: '整形失败',
+    baking: '烘烤失败',
+    other: '其他原因',
+};
+
 export interface PrepTask {
     id: string;
     title: string;
@@ -974,12 +983,17 @@ export class ProductionTasksService {
                 for (const consumption of spoiledConsumptions) {
                     const productName =
                         task.items.find((i) => i.productId === loss.productId)?.product.name || '未知产品';
+
+                    // [核心修改] 使用映射表将英文阶段转换为中文
+                    const translatedStage = stageToChineseMap[loss.stage] || loss.stage;
+
                     await tx.ingredientStockAdjustment.create({
                         data: {
                             ingredientId: consumption.ingredientId,
                             userId: userId, // [核心修复] 使用传入的 userId
                             changeInGrams: -consumption.totalConsumed,
-                            reason: `生产损耗: ${productName} - ${loss.stage}`,
+                            // [核心修改] 使用中文原因
+                            reason: `生产损耗: ${productName} - ${translatedStage}`,
                         },
                     });
                 }
