@@ -159,7 +159,9 @@ export class CostingService {
                 const weight = weightPerRatioPoint.mul(ing.ratio);
                 return {
                     name: ing.ingredient!.name,
-                    weightInGrams: parseFloat(weight.toFixed(1)),
+                    // [FIX] 移除 .toFixed(1) 和 parseFloat()，直接使用 .toNumber() 保留完整精度
+                    // (FIX: Remove .toFixed(1) and parseFloat(), use .toNumber() directly to preserve full precision)
+                    weightInGrams: weight.toNumber(),
                     // [核心修改] 将激活SKU的品牌信息一并返回
                     brand: ing.ingredient!.activeSku?.brand,
                 };
@@ -373,7 +375,9 @@ export class CostingService {
                     group.ingredients.push({
                         name: ingredient.ingredient.name,
                         ratio: ingredient.ratio,
-                        weightInGrams: weight.toDP(1).toNumber(),
+                        // [FIX] 移除 .toDP(1)，保留完整精度
+                        // (FIX: Remove .toDP(1) to preserve full precision)
+                        weightInGrams: weight.toNumber(),
                         pricePerKg: pricePerKg.toFixed(2),
                         cost: cost.toDP(2).toNumber(),
                     });
@@ -418,7 +422,9 @@ export class CostingService {
                 name: name,
                 type: getProductIngredientTypeName(ing.type),
                 cost: cost.toDP(2).toNumber(),
-                weightInGrams: finalWeightInGrams.toDP(1).toNumber(),
+                // [FIX] 移除 .toDP(1)，保留完整精度
+                // (FIX: Remove .toDP(1) to preserve full precision)
+                weightInGrams: finalWeightInGrams.toNumber(),
                 ratio: ing.ratio ?? undefined,
             };
         });

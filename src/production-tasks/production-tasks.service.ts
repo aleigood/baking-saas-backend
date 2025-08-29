@@ -97,7 +97,8 @@ export class ProductionTasksService {
             return 0;
         }
         const ice = (totalWater * (initialWaterTemp - targetWaterTemp)) / (initialWaterTemp + 80);
-        return Math.round(ice);
+        // [FIX] 移除 Math.round()，保留计算精度，避免将小于0.5的数值归零
+        return ice;
     }
 
     private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<PrepTask | null> {
@@ -702,7 +703,9 @@ export class ProductionTasksService {
                                         waterTemp,
                                     );
                                     if (iceWeight > 0) {
-                                        name = `水 (含 ${iceWeight}g 冰)`;
+                                        // 在显示时可以格式化，但计算时保留精度
+                                        const formattedIceWeight = iceWeight.toFixed(1);
+                                        name = `水 (含 ${formattedIceWeight}g 冰)`;
                                     }
                                 }
                             }
