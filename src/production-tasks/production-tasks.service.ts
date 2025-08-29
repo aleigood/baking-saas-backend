@@ -3,13 +3,19 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductionTaskDto } from './dto/create-production-task.dto';
 import { UpdateProductionTaskDto } from './dto/update-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
-import { IngredientType, Prisma, ProductionTask, ProductionTaskStatus, RecipeType } from '@prisma/client'; // [修改] 导入ProductionTask
+import { IngredientType, Prisma, ProductionTask, ProductionTaskStatus, RecipeType } from '@prisma/client'; // [修改] 移除了未使用的 'Dough' 导入
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
-// [新增] 导入新增的 DTO
 import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
+// [核心新增] 导入为任务详情页重构的DTO
+import {
+    DoughGroup,
+    DoughProductSummary,
+    ProductDetails,
+    TaskDetailResponseDto,
+    TaskIngredientDetail,
+} from './dto/task-detail.dto';
 
-// ... (PrepTask interface remains the same)
 export interface PrepTask {
     id: string;
     title: string;
@@ -17,75 +23,79 @@ export interface PrepTask {
     items: CalculatedRecipeDetails[];
 }
 
-// [核心改造] 更新类型定义，以包含更深层次的关联数据
+// [核心修复] 更新类型定义，使其与 findOne 中的 Prisma 查询完全匹配，特别是对 linkedPreDough 的深度嵌套
+const taskWithDetailsInclude = {
+    items: {
+        include: {
+            product: {
+                include: {
+                    recipeVersion: {
+                        include: {
+                            family: true,
+                            doughs: {
+                                include: {
+                                    ingredients: {
+                                        include: {
+                                            ingredient: { include: { activeSku: true } },
+                                            linkedPreDough: {
+                                                include: {
+                                                    versions: {
+                                                        where: { isActive: true },
+                                                        include: {
+                                                            doughs: {
+                                                                include: {
+                                                                    ingredients: {
+                                                                        include: {
+                                                                            ingredient: true,
+                                                                        },
+                                                                    },
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    ingredients: {
+                        include: {
+                            ingredient: { include: { activeSku: true } },
+                            linkedExtra: true,
+                        },
+                    },
+                },
+            },
+        },
+    },
+};
+
 type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
-    include: {
-        items: {
-            include: {
-                product: {
-                    include: {
-                        recipeVersion: {
-                            include: {
-                                family: true;
-                                doughs: {
-                                    include: {
-                                        ingredients: {
-                                            include: {
-                                                ingredient: { include: { activeSku: true } }; // 包含 activeSku
-                                                linkedPreDough: true;
-                                            };
-                                        };
-                                    };
-                                };
-                            };
-                        };
-                        ingredients: {
-                            // 产品自身的辅料、馅料
-                            include: {
-                                ingredient: { include: { activeSku: true } }; // 包含 activeSku
-                                linkedExtra: true;
-                            };
-                        };
-                    };
-                };
-            };
-        };
-    };
+    include: typeof taskWithDetailsInclude;
 }>;
+
+type TaskItemWithDetails = TaskWithDetails['items'][0];
+type ProductWithDetails = TaskItemWithDetails['product'];
+type DoughWithRecursiveIngredients = ProductWithDetails['recipeVersion']['doughs'][0];
 
 @Injectable()
 export class ProductionTasksService {
-    // ... (constructor, _getPrepItemsForTask, _getPrepTask, create, findActive, findHistory remain the same)
     constructor(
         private readonly prisma: PrismaService,
         private readonly costingService: CostingService,
     ) {}
 
-    /**
-     * @description [新增] 计算所需的水温
-     * @param targetTemp 面团目标温度
-     * @param mixerType 搅拌机温升系数
-     * @param flourTemp 面粉温度
-     * @param ambientTemp 环境温度
-     * @returns {number} 目标水温
-     */
     private _calculateWaterTemp(targetTemp: number, mixerType: number, flourTemp: number, ambientTemp: number): number {
-        // T_w = (T_d - F) * 3 - T_f - T_a
         return (targetTemp - mixerType) * 3 - flourTemp - ambientTemp;
     }
 
-    /**
-     * @description [新增] 计算需要替换为冰块的水量
-     * @param targetWaterTemp 目标水温
-     * @param totalWater 总用水量
-     * @param initialWaterTemp 初始水温
-     * @returns {number} 需要的冰块克数 (四舍五入)
-     */
     private _calculateIce(targetWaterTemp: number, totalWater: number, initialWaterTemp: number): number {
         if (targetWaterTemp >= initialWaterTemp) {
             return 0;
         }
-        // Ice = (TotalWater * (InitialWaterTemp - TargetWaterTemp)) / (InitialWaterTemp + 80)
         const ice = (totalWater * (initialWaterTemp - targetWaterTemp)) / (initialWaterTemp + 80);
         return Math.round(ice);
     }
@@ -103,19 +113,8 @@ export class ProductionTasksService {
             const recipeVersion = product.recipeVersion;
             if (!recipeVersion) continue;
 
-            let totalFlourWeight = 0;
-
-            for (const dough of recipeVersion.doughs) {
-                const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
-                if (totalRatio > 0) {
-                    const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
-                    for (const ing of dough.ingredients) {
-                        if (ing.ingredient?.isFlour) {
-                            totalFlourWeight += weightPerRatioPoint.mul(ing.ratio).toNumber();
-                        }
-                    }
-                }
-            }
+            // [核心修复] 调用新的、更准确的总面粉计算方法
+            const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
             for (const dough of recipeVersion.doughs) {
                 const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
@@ -207,36 +206,8 @@ export class ProductionTasksService {
                     },
                 ],
             },
-            include: {
-                items: {
-                    include: {
-                        product: {
-                            include: {
-                                recipeVersion: {
-                                    include: {
-                                        doughs: {
-                                            include: {
-                                                ingredients: {
-                                                    include: {
-                                                        linkedPreDough: true,
-                                                        ingredient: true,
-                                                    },
-                                                },
-                                            },
-                                        },
-                                        family: true,
-                                    },
-                                },
-                                ingredients: {
-                                    include: {
-                                        linkedExtra: true,
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
+            // [核心修复] 复用 taskWithDetailsInclude 以确保查询出的数据结构完整，从而修复 TypeScript 类型错误
+            include: taskWithDetailsInclude,
         });
 
         if (activeTasks.length === 0) {
@@ -249,19 +220,8 @@ export class ProductionTasksService {
             for (const item of task.items) {
                 const product = item.product;
                 const recipeVersion = product.recipeVersion;
-                let totalFlourWeight = 0;
-
-                for (const dough of recipeVersion.doughs) {
-                    const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
-                    if (totalRatio > 0) {
-                        const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
-                        for (const ing of dough.ingredients) {
-                            if (ing.ingredient?.isFlour) {
-                                totalFlourWeight += weightPerRatioPoint.mul(ing.ratio).toNumber();
-                            }
-                        }
-                    }
-                }
+                // [核心修复] 调用新的、更准确的总面粉计算方法
+                const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
                 for (const dough of recipeVersion.doughs) {
                     const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
@@ -629,87 +589,53 @@ export class ProductionTasksService {
         };
     }
 
-    async findOne(tenantId: string, id: string, query: QueryTaskDetailDto) {
-        console.log('Received query params for ice calculation:', query);
-
-        if (id === 'prep-task-01') {
-            return this._getPrepTask(tenantId);
-        }
-
+    // [核心重构] 将 findOne 拆分为多个更小的、可管理的私有方法
+    async findOne(tenantId: string, id: string, query: QueryTaskDetailDto): Promise<TaskDetailResponseDto> {
         const task = await this.prisma.productionTask.findFirst({
-            where: {
-                id,
-                tenantId,
-                deletedAt: null,
-            },
-            include: {
-                items: {
-                    include: {
-                        product: {
-                            include: {
-                                recipeVersion: {
-                                    include: {
-                                        family: true,
-                                        doughs: {
-                                            include: {
-                                                ingredients: {
-                                                    include: {
-                                                        ingredient: { include: { activeSku: true } },
-                                                        linkedPreDough: true,
-                                                    },
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                                ingredients: {
-                                    include: {
-                                        ingredient: { include: { activeSku: true } },
-                                        linkedExtra: true,
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                log: {
-                    include: {
-                        consumptionLogs: {
-                            include: {
-                                ingredient: true,
-                                sku: true,
-                            },
-                        },
-                    },
-                },
-            },
+            where: { id, tenantId, deletedAt: null },
+            include: taskWithDetailsInclude,
         });
 
         if (!task) {
             throw new NotFoundException('生产任务不存在');
         }
 
-        // [核心新增] 冰块计算逻辑
+        const doughGroups = this._calculateDoughGroups(task, query);
+        const { stockWarning } = await this._calculateStockWarning(tenantId, task);
+
+        return {
+            id: task.id,
+            status: task.status,
+            notes: task.notes,
+            stockWarning,
+            prepTask: await this._getPrepItemsForTask(tenantId, task),
+            doughGroups,
+            items: task.items.map((item) => ({
+                id: item.product.id,
+                name: item.product.name,
+                plannedQuantity: item.quantity,
+            })),
+        };
+    }
+
+    /**
+     * @description [核心重构] 新增的私有方法，用于计算所有面团分组的详细信息
+     */
+    private _calculateDoughGroups(task: TaskWithDetails, query: QueryTaskDetailDto): DoughGroup[] {
         const { mixerType, envTemp, flourTemp, waterTemp } = query;
         const canCalculateIce =
             mixerType !== undefined && envTemp !== undefined && flourTemp !== undefined && waterTemp !== undefined;
 
+        const doughTotalWaterMap = new Map<string, number>();
         if (canCalculateIce) {
-            // 1. 计算每个面团配方的总水量
-            const doughTotalWaterMap = new Map<string, number>();
-
             task.items.forEach((item) => {
                 const product = item.product;
                 if (!product) return;
-
                 product.recipeVersion.doughs.forEach((dough) => {
                     const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
                     if (totalRatio === 0) return;
-
                     const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
-
                     dough.ingredients.forEach((ing) => {
-                        // 假设水的原料名称为'水'
                         if (ing.ingredient?.name === '水') {
                             const waterWeight = weightPerRatioPoint.mul(ing.ratio).mul(item.quantity).toNumber();
                             const currentTotal = doughTotalWaterMap.get(dough.id) || 0;
@@ -718,39 +644,201 @@ export class ProductionTasksService {
                     });
                 });
             });
+        }
 
-            // 2. 遍历任务，修改水的名称以包含冰块信息
-            task.items.forEach((item) => {
-                item.product?.recipeVersion.doughs.forEach((dough) => {
-                    const doughTargetTemp = dough.targetTemp;
-                    const totalWaterForDough = doughTotalWaterMap.get(dough.id);
+        const doughsMap = new Map<string, { familyName: string; items: TaskItemWithDetails[] }>();
+        task.items.forEach((item) => {
+            const familyId = item.product.recipeVersion.family.id;
+            if (!doughsMap.has(familyId)) {
+                doughsMap.set(familyId, {
+                    familyName: item.product.recipeVersion.family.name,
+                    items: [],
+                });
+            }
+            doughsMap.get(familyId)!.items.push(item);
+        });
 
-                    if (doughTargetTemp && totalWaterForDough && totalWaterForDough > 0) {
-                        const waterIngredient = dough.ingredients.find((ing) => ing.ingredient?.name === '水');
+        const doughGroups: DoughGroup[] = [];
+        for (const [familyId, data] of doughsMap.entries()) {
+            const firstItem = data.items[0];
+            const mainDoughInfo = firstItem.product.recipeVersion.doughs[0];
+            const mainDoughIngredientsMap = new Map<string, TaskIngredientDetail>();
+            let totalDoughWeight = 0;
 
-                        if (waterIngredient && waterIngredient.ingredient) {
-                            const targetWaterTemp = this._calculateWaterTemp(
-                                doughTargetTemp,
-                                mixerType,
-                                flourTemp,
-                                envTemp,
-                            );
-                            const iceWeight = this._calculateIce(targetWaterTemp, totalWaterForDough, waterTemp);
+            data.items.forEach((item) => {
+                const { product, quantity } = item;
+                const { recipeVersion } = product;
+                recipeVersion.doughs.forEach((dough) => {
+                    if (dough.id === mainDoughInfo.id) {
+                        const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+                        if (totalRatio === 0) return;
+                        const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
 
-                            if (iceWeight > 0) {
-                                // [核心修复] 移除(as any)类型断言，直接对类型安全的属性进行赋值，以解决ESLint错误
-                                waterIngredient.ingredient.name = `水 (含 ${iceWeight}g 冰)`;
+                        dough.ingredients.forEach((ing) => {
+                            const weight = weightPerRatioPoint.mul(ing.ratio).mul(quantity).toNumber();
+                            totalDoughWeight += weight;
+                            const ingId = ing.ingredient?.id || ing.linkedPreDough?.id;
+                            if (!ingId) return;
+
+                            let name = '未知原料';
+                            if (ing.ingredient) {
+                                name = ing.ingredient.name;
+                            } else if (ing.linkedPreDough) {
+                                name = ing.linkedPreDough.name;
                             }
-                        }
+
+                            if (canCalculateIce && name === '水' && dough.targetTemp) {
+                                const totalWaterForDough = doughTotalWaterMap.get(dough.id);
+                                if (totalWaterForDough && totalWaterForDough > 0) {
+                                    const targetWaterTemp = this._calculateWaterTemp(
+                                        dough.targetTemp,
+                                        mixerType,
+                                        flourTemp,
+                                        envTemp,
+                                    );
+                                    const iceWeight = this._calculateIce(
+                                        targetWaterTemp,
+                                        totalWaterForDough,
+                                        waterTemp,
+                                    );
+                                    if (iceWeight > 0) {
+                                        name = `水 (含 ${iceWeight}g 冰)`;
+                                    }
+                                }
+                            }
+
+                            const existing = mainDoughIngredientsMap.get(ingId);
+                            if (existing) {
+                                existing.weightInGrams += weight;
+                            } else {
+                                mainDoughIngredientsMap.set(ingId, {
+                                    id: ingId,
+                                    name,
+                                    brand: ing.ingredient?.activeSku?.brand || null,
+                                    weightInGrams: weight,
+                                });
+                            }
+                        });
                     }
                 });
             });
+
+            const products: DoughProductSummary[] = [];
+            const productDetails: ProductDetails[] = [];
+            data.items.forEach((item) => {
+                const { product, quantity } = item;
+                const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
+                let totalMixInWeight = 0;
+
+                const mixIns = product.ingredients
+                    .filter((ing) => ing.type === 'MIX_IN' && ing.ingredient)
+                    .map((ing) => {
+                        const weight = ((totalFlourWeight * (ing.ratio || 0)) / 100) * quantity;
+                        totalMixInWeight += weight;
+                        return {
+                            id: ing.ingredient!.id,
+                            name: ing.ingredient!.name,
+                            brand: ing.ingredient!.activeSku?.brand || null,
+                            weightInGrams: weight,
+                        };
+                    });
+
+                products.push({
+                    id: product.id,
+                    name: product.name,
+                    quantity: quantity,
+                    totalBaseDoughWeight: product.baseDoughWeight * quantity,
+                    divisionWeight: product.baseDoughWeight + totalMixInWeight / quantity,
+                });
+
+                productDetails.push({
+                    id: product.id,
+                    name: product.name,
+                    mixIns: mixIns,
+                    fillings: product.ingredients
+                        .filter((ing) => ing.type === 'FILLING' && (ing.ingredient || ing.linkedExtra))
+                        .map((ing) => {
+                            const id = ing.ingredient ? ing.ingredient.id : ing.linkedExtra!.id;
+                            const name = ing.ingredient ? ing.ingredient.name : ing.linkedExtra!.name;
+                            const brand = ing.ingredient ? ing.ingredient.activeSku?.brand || null : null;
+
+                            return {
+                                id,
+                                name,
+                                brand,
+                                weightInGrams: ing.weightInGrams || 0,
+                            };
+                        }),
+                    procedure: product.procedure || [],
+                });
+            });
+
+            doughGroups.push({
+                familyId,
+                familyName: data.familyName,
+                productsDescription: data.items.map((i) => `${i.product.name} x${i.quantity}`).join(', '),
+                totalDoughWeight,
+                mainDoughIngredients: Array.from(mainDoughIngredientsMap.values()),
+                mainDoughProcedure: mainDoughInfo.procedure || [],
+                products,
+                productDetails,
+            });
         }
+        return doughGroups;
+    }
 
-        const prepTask = await this._getPrepItemsForTask(tenantId, task);
+    /**
+     * @description [核心新增] 新增的私有方法，用于递归计算一个产品中所有来源（主面团、预制面团）的面粉总重量
+     * @param product 包含完整配方信息的产品对象
+     * @returns {number} 以克为单位的总面粉重量
+     */
+    private _calculateTotalFlourWeightForProduct(product: ProductWithDetails): number {
+        const mainDough = product.recipeVersion.doughs[0];
+        if (!mainDough) return 0;
 
+        const totalRatio = mainDough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+        if (totalRatio === 0) return 0;
+
+        const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+
+        let totalFlourWeight = 0;
+        const processedDoughs = new Set<string>();
+
+        // 定义一个递归函数来计算面团中的面粉
+        const calculateFlourInDough = (
+            dough: DoughWithRecursiveIngredients,
+            currentWeightPerRatioPoint: Prisma.Decimal,
+        ) => {
+            if (processedDoughs.has(dough.id)) return;
+            processedDoughs.add(dough.id);
+
+            dough.ingredients.forEach((ing) => {
+                if (ing.ingredient?.isFlour) {
+                    totalFlourWeight += currentWeightPerRatioPoint.mul(ing.ratio).toNumber();
+                } else if (ing.linkedPreDough) {
+                    const activeVersion = ing.linkedPreDough.versions.find((v) => v.isActive);
+                    if (activeVersion && activeVersion.doughs[0]) {
+                        const preDough = activeVersion.doughs[0] as DoughWithRecursiveIngredients;
+                        const preDoughTotalRatio = preDough.ingredients.reduce((sum, i) => sum + i.ratio, 0);
+                        if (preDoughTotalRatio > 0) {
+                            const preDoughWeight = currentWeightPerRatioPoint.mul(ing.ratio).toNumber();
+                            const preDoughWeightPerRatioPoint = new Prisma.Decimal(preDoughWeight).div(
+                                preDoughTotalRatio,
+                            );
+                            calculateFlourInDough(preDough, preDoughWeightPerRatioPoint);
+                        }
+                    }
+                }
+            });
+        };
+
+        calculateFlourInDough(mainDough, weightPerRatioPoint);
+
+        return totalFlourWeight;
+    }
+
+    private async _calculateStockWarning(tenantId: string, task: TaskWithDetails) {
         const totalIngredientsMap = new Map<string, { name: string; totalWeight: number }>();
-
         await Promise.all(
             task.items.map(async (item) => {
                 const consumptions = await this.costingService.calculateProductConsumptions(
@@ -758,7 +846,6 @@ export class ProductionTasksService {
                     item.productId,
                     item.quantity,
                 );
-
                 for (const consumption of consumptions) {
                     const existing = totalIngredientsMap.get(consumption.ingredientId);
                     if (existing) {
@@ -773,34 +860,20 @@ export class ProductionTasksService {
             }),
         );
 
-        const totalIngredients = Array.from(totalIngredientsMap.entries())
-            .map(([ingredientId, data]) => ({
-                ingredientId,
-                name: data.name,
-                totalWeightInGrams: data.totalWeight,
-            }))
-            .sort((a, b) => b.totalWeightInGrams - a.totalWeightInGrams);
-
-        if (task.status === 'COMPLETED' || task.status === 'CANCELLED') {
-            return { ...task, totalIngredients, stockWarning: null, prepTask };
-        }
-
         let stockWarning: string | null = null;
-        const ingredientIds = totalIngredients.map((c) => c.ingredientId);
+        const ingredientIds = Array.from(totalIngredientsMap.keys());
         if (ingredientIds.length > 0) {
             const ingredients = await this.prisma.ingredient.findMany({
                 where: { id: { in: ingredientIds } },
                 select: { id: true, name: true, currentStockInGrams: true, type: true },
             });
-
             const ingredientsToCheck = ingredients.filter((ing) => ing.type === IngredientType.STANDARD);
-
             const ingredientStockMap = new Map(ingredientsToCheck.map((i) => [i.id, i]));
             const insufficientIngredients: string[] = [];
 
-            for (const consumption of totalIngredients) {
-                const ingredient = ingredientStockMap.get(consumption.ingredientId);
-                if (ingredient && ingredient.currentStockInGrams < consumption.totalWeightInGrams) {
+            for (const [ingredientId, data] of totalIngredientsMap.entries()) {
+                const ingredient = ingredientStockMap.get(ingredientId);
+                if (ingredient && ingredient.currentStockInGrams < data.totalWeight) {
                     insufficientIngredients.push(ingredient.name);
                 }
             }
@@ -809,8 +882,7 @@ export class ProductionTasksService {
                 stockWarning = `库存不足: ${insufficientIngredients.join(', ')}`;
             }
         }
-
-        return { ...task, totalIngredients, stockWarning, prepTask };
+        return { stockWarning };
     }
 
     async update(tenantId: string, id: string, updateProductionTaskDto: UpdateProductionTaskDto) {
