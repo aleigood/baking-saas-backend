@@ -732,15 +732,13 @@ export class ProductionTasksService {
                         dough.ingredients.forEach((ing) => {
                             const weight = weightPerRatioPoint.mul(ing.ratio).mul(quantity).toNumber();
                             totalDoughWeight += weight;
-                            const ingId = ing.ingredient?.id || ing.linkedPreDough?.id;
+                            // [核心修改] 优先使用 linkedPreDough 的 ID 作为 key
+                            const ingId = ing.linkedPreDough?.id || ing.ingredient?.id;
                             if (!ingId) return;
 
-                            let name = '未知原料';
-                            if (ing.ingredient) {
-                                name = ing.ingredient.name;
-                            } else if (ing.linkedPreDough) {
-                                name = ing.linkedPreDough.name;
-                            }
+                            // [核心重构] 采用更严谨的逻辑判断 isRecipe
+                            const isRecipe = !!ing.linkedPreDough;
+                            let name = isRecipe ? ing.linkedPreDough!.name : ing.ingredient!.name;
 
                             if (canCalculateIce && name === '水' && dough.targetTemp) {
                                 const totalWaterForDough = doughTotalWaterMap.get(dough.id);
@@ -757,7 +755,6 @@ export class ProductionTasksService {
                                         waterTemp,
                                     );
                                     if (iceWeight > 0) {
-                                        // 在显示时可以格式化，但计算时保留精度
                                         const formattedIceWeight = iceWeight.toFixed(1);
                                         name = `水 (含 ${formattedIceWeight}g 冰)`;
                                     }
@@ -773,6 +770,7 @@ export class ProductionTasksService {
                                     name,
                                     brand: ing.ingredient?.activeSku?.brand || null,
                                     weightInGrams: weight,
+                                    isRecipe,
                                 });
                             }
                         });
@@ -787,46 +785,60 @@ export class ProductionTasksService {
                 const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
                 let totalMixInWeight = 0;
 
+                const mapProductIngredient = (ing: (typeof product.ingredients)[0]): TaskIngredientDetail => {
+                    const isRecipe = !!ing.linkedExtra;
+                    const id = ing.ingredient?.id || ing.linkedExtra!.id;
+                    const name = ing.ingredient?.name || ing.linkedExtra!.name;
+                    const brand = ing.ingredient?.activeSku?.brand || null;
+
+                    let weightInGrams = 0;
+                    if (ing.type === 'MIX_IN' && ing.ratio) {
+                        const singleMixInWeight = totalFlourWeight * ing.ratio;
+                        totalMixInWeight += singleMixInWeight * quantity;
+                        weightInGrams = singleMixInWeight * quantity;
+                    } else if (ing.weightInGrams) {
+                        weightInGrams = ing.weightInGrams;
+                    }
+
+                    const finalWeight =
+                        ing.type === 'FILLING' || ing.type === 'TOPPING' ? ing.weightInGrams || 0 : weightInGrams;
+
+                    return { id, name, brand, weightInGrams: finalWeight, isRecipe };
+                };
+
                 const mixIns = product.ingredients
-                    .filter((ing) => ing.type === 'MIX_IN' && ing.ingredient)
-                    .map((ing) => {
-                        // [核心修改] 移除 / 100，因为ratio已经是小数
-                        const weight = totalFlourWeight * (ing.ratio || 0) * quantity;
-                        totalMixInWeight += weight;
-                        return {
-                            id: ing.ingredient!.id,
-                            name: ing.ingredient!.name,
-                            brand: ing.ingredient!.activeSku?.brand || null,
-                            weightInGrams: weight,
-                        };
-                    });
+                    .filter((ing) => ing.type === 'MIX_IN' && (ing.ingredient || ing.linkedExtra))
+                    .map(mapProductIngredient);
+
+                const fillings = product.ingredients
+                    .filter((ing) => ing.type === 'FILLING' && (ing.ingredient || ing.linkedExtra))
+                    .map(mapProductIngredient);
+
+                // [核心修复] BUG修复：计算分割重量的逻辑
+                const mainDoughInfo = product.recipeVersion.doughs[0];
+                const lossRatio = mainDoughInfo?.lossRatio || 0;
+                const divisor = 1 - lossRatio;
+                // 计算包含损耗的单个主面团重量
+                const adjustedBaseDoughWeight =
+                    divisor > 0 ? product.baseDoughWeight / divisor : product.baseDoughWeight;
+                // 计算单个产品的辅料总重
+                const mixInWeightPerUnit = totalMixInWeight / quantity;
+                // 正确的分割重量 = 包含损耗的主面团重量 + 辅料重量
+                const correctedDivisionWeight = adjustedBaseDoughWeight + mixInWeightPerUnit;
 
                 products.push({
                     id: product.id,
                     name: product.name,
                     quantity: quantity,
                     totalBaseDoughWeight: product.baseDoughWeight * quantity,
-                    divisionWeight: product.baseDoughWeight + totalMixInWeight / quantity,
+                    divisionWeight: correctedDivisionWeight, // 使用修正后的分割重量
                 });
 
                 productDetails.push({
                     id: product.id,
                     name: product.name,
-                    mixIns: mixIns,
-                    fillings: product.ingredients
-                        .filter((ing) => ing.type === 'FILLING' && (ing.ingredient || ing.linkedExtra))
-                        .map((ing) => {
-                            const id = ing.ingredient ? ing.ingredient.id : ing.linkedExtra!.id;
-                            const name = ing.ingredient ? ing.ingredient.name : ing.linkedExtra!.name;
-                            const brand = ing.ingredient ? ing.ingredient.activeSku?.brand || null : null;
-
-                            return {
-                                id,
-                                name,
-                                brand,
-                                weightInGrams: ing.weightInGrams || 0,
-                            };
-                        }),
+                    mixIns,
+                    fillings,
                     procedure: product.procedure || [],
                 });
             });

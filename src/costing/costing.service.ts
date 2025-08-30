@@ -50,11 +50,12 @@ export interface CalculatedProductCostDetails {
     groupedExtraIngredients: Record<string, CalculatedExtraIngredientInfo[]>;
 }
 
-// [核心修改] 为 CalculatedRecipeIngredient 接口增加可选的 brand 字段
+// [核心修改] 为 CalculatedRecipeIngredient 接口增加可选的 brand 和 isRecipe 字段
 export interface CalculatedRecipeIngredient {
     name: string;
     weightInGrams: number;
     brand?: string | null;
+    isRecipe: boolean; // 新增字段，用于标识该原料是否为另一个配方
 }
 
 // [新增] 为前置准备任务定义新的类型接口
@@ -118,12 +119,13 @@ export class CostingService {
                             include: {
                                 ingredients: {
                                     include: {
-                                        // [核心修改] 在查询原料时，预加载其激活的SKU信息
+                                        // [核心修改] 在查询原料时，预加载其激活的SKU信息，并同时加载linkedPreDough
                                         ingredient: {
                                             include: {
                                                 activeSku: true,
                                             },
                                         },
+                                        linkedPreDough: true, // 新增：加载关联的预制面团配方
                                     },
                                 },
                             },
@@ -153,19 +155,32 @@ export class CostingService {
 
         const weightPerRatioPoint = new Prisma.Decimal(totalWeight).div(totalRatio);
 
+        // [核心修改] 更新原料计算逻辑以区分普通原料和自制配方原料
         const calculatedIngredients = mainDough.ingredients
-            .filter((ing) => ing.ingredient)
             .map((ing) => {
                 const weight = weightPerRatioPoint.mul(ing.ratio);
-                return {
-                    name: ing.ingredient!.name,
-                    // [FIX] 移除 .toFixed(1) 和 parseFloat()，直接使用 .toNumber() 保留完整精度
-                    // (FIX: Remove .toFixed(1) and parseFloat(), use .toNumber() directly to preserve full precision)
-                    weightInGrams: weight.toNumber(),
-                    // [核心修改] 将激活SKU的品牌信息一并返回
-                    brand: ing.ingredient!.activeSku?.brand,
-                };
-            });
+
+                // 如果成分是另一个配方（例如预制面团）
+                if (ing.linkedPreDough) {
+                    return {
+                        name: ing.linkedPreDough.name,
+                        weightInGrams: weight.toNumber(),
+                        isRecipe: true, // 明确标识为自制配方
+                        brand: null, // 自制配方没有品牌
+                    };
+                }
+                // 如果成分是普通原料
+                else if (ing.ingredient) {
+                    return {
+                        name: ing.ingredient.name,
+                        weightInGrams: weight.toNumber(),
+                        isRecipe: false, // 明确标识为普通原料
+                        brand: ing.ingredient.activeSku?.brand, // 返回其品牌信息
+                    };
+                }
+                return null; // 如果一个成分既不是普通原料也不是配方，则过滤掉
+            })
+            .filter(Boolean) as CalculatedRecipeIngredient[];
 
         return {
             id: recipeFamily.id,

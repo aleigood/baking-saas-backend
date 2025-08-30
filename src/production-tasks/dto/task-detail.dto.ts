@@ -11,6 +11,7 @@ export interface TaskIngredientDetail {
     name: string;
     brand: string | null;
     weightInGrams: number;
+    isRecipe: boolean; // [核心新增] 新增字段，用于标识该原料是否为另一个配方
 }
 
 // 定义面团汇总中每个产品的数据结构
