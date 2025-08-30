@@ -405,17 +405,17 @@ export class ProductionTasksService {
     }
 
     async findActive(tenantId: string, date?: string) {
-        // [核心修改] 并行执行两个查询：一个是获取当天任务，另一个是获取全局统计
-        const [tasksForDate, stats] = await Promise.all([
+        // [核心修改] 并行执行两个查询：一个是获取当天任务，另一个是获取今日待完成统计
+        const [tasksForDate, todayStats] = await Promise.all([
             this.findTasksForDate(tenantId, date),
-            this.getGlobalPendingStats(tenantId),
+            this.getTodaysPendingStats(tenantId),
         ]);
 
         const prepTask = await this._getPrepTask(tenantId, date);
 
         // [核心修改] 将统计数据和任务列表合并到同一个响应中返回
         return {
-            stats,
+            stats: todayStats,
             tasks: tasksForDate,
             prepTask,
         };
@@ -480,11 +480,16 @@ export class ProductionTasksService {
     }
 
     /**
-     * @description [核心新增] 这是一个内部辅助函数，用于计算全局的待完成任务统计
+     * @description [核心修改] 此函数现在只计算今天的待完成任务总数
      * @param tenantId 租户ID
-     * @returns 返回包含待完成数量的对象
+     * @returns 返回包含今日待完成数量的对象
      */
-    private async getGlobalPendingStats(tenantId: string) {
+    private async getTodaysPendingStats(tenantId: string) {
+        // [核心新增] 获取今天的开始和结束时间，确保查询不受时区影响
+        const today = new Date();
+        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
+        const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+
         const pendingTasks = await this.prisma.productionTask.findMany({
             where: {
                 tenantId,
@@ -492,18 +497,32 @@ export class ProductionTasksService {
                     in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
                 },
                 deletedAt: null,
+                // [核心新增] 增加日期过滤条件，只查询今天的任务
+                startDate: {
+                    lte: endOfDay,
+                },
+                OR: [
+                    {
+                        endDate: {
+                            gte: startOfDay,
+                        },
+                    },
+                    {
+                        endDate: null,
+                    },
+                ],
             },
             include: {
                 items: true,
             },
         });
 
-        const totalPendingCount = pendingTasks.reduce((sum, task) => {
+        const todayPendingCount = pendingTasks.reduce((sum, task) => {
             return sum + task.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
         }, 0);
 
         return {
-            pendingCount: totalPendingCount,
+            todayPendingCount: todayPendingCount,
         };
     }
 
