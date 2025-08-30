@@ -352,10 +352,20 @@ export class CostingService {
                 totalCost: 0,
             };
 
+            // [核心修改] 根据损耗率计算投料总重
+            const lossRatio = dough.lossRatio || 0;
+            // 确保不会除以0或负数
+            const divisor = 1 - lossRatio;
+            if (divisor <= 0) {
+                // 如果损耗率大于等于100%，则无法生产，返回空组
+                return group;
+            }
+            const adjustedDoughWeight = new Prisma.Decimal(doughWeight).div(divisor);
+
             const totalRatio = dough.ingredients.reduce((sum, i) => sum + i.ratio, 0);
             if (totalRatio === 0) return group;
 
-            const weightPerRatioPoint = new Prisma.Decimal(doughWeight).div(totalRatio);
+            const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
 
             for (const ingredient of dough.ingredients) {
                 const weight = weightPerRatioPoint.mul(ingredient.ratio);
@@ -578,10 +588,20 @@ export class CostingService {
         const flattenedIngredients = new Map<string, number>(); // Map<ingredientId, weightInGrams>
 
         const processDough = (dough: FullRecipeVersion['doughs'][0], doughWeight: number) => {
+            // [核心修改] 根据损耗率计算投料总重
+            const lossRatio = dough.lossRatio || 0;
+            // 确保不会除以0或负数
+            const divisor = 1 - lossRatio;
+            if (divisor <= 0) {
+                // 如果损耗率大于等于100%，则无法生产，直接返回
+                return;
+            }
+            const adjustedDoughWeight = new Prisma.Decimal(doughWeight).div(divisor);
+
             const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
             if (totalRatio === 0) return;
 
-            const weightPerRatioPoint = new Prisma.Decimal(doughWeight).div(totalRatio);
+            const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
 
             for (const ing of dough.ingredients) {
                 const ingredientWeight = weightPerRatioPoint.mul(ing.ratio).toNumber();

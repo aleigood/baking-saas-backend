@@ -127,9 +127,15 @@ export class ProductionTasksService {
             const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
             for (const dough of recipeVersion.doughs) {
+                // [核心修改] 根据损耗率计算投料总重
+                const lossRatio = dough.lossRatio || 0;
+                const divisor = 1 - lossRatio;
+                if (divisor <= 0) continue;
+                const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
+
                 const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
                 if (totalRatio > 0) {
-                    const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+                    const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
                     for (const ing of dough.ingredients) {
                         if (ing.linkedPreDoughId && ing.linkedPreDough?.type === RecipeType.PRE_DOUGH) {
                             const weight = weightPerRatioPoint.mul(ing.ratio).toNumber() * item.quantity;
@@ -234,9 +240,15 @@ export class ProductionTasksService {
                 const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
                 for (const dough of recipeVersion.doughs) {
+                    // [核心修改] 根据损耗率计算投料总重
+                    const lossRatio = dough.lossRatio || 0;
+                    const divisor = 1 - lossRatio;
+                    if (divisor <= 0) continue;
+                    const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
+
                     const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
                     if (totalRatio > 0) {
-                        const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+                        const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
                         for (const ing of dough.ingredients) {
                             if (ing.linkedPreDoughId && ing.linkedPreDough?.type === RecipeType.PRE_DOUGH) {
                                 const weight = weightPerRatioPoint.mul(ing.ratio).toNumber() * item.quantity;
@@ -642,9 +654,15 @@ export class ProductionTasksService {
                 const product = item.product;
                 if (!product) return;
                 product.recipeVersion.doughs.forEach((dough) => {
+                    // [核心修改] 根据损耗率计算投料总重
+                    const lossRatio = dough.lossRatio || 0;
+                    const divisor = 1 - lossRatio;
+                    if (divisor <= 0) return;
+                    const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
+
                     const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
                     if (totalRatio === 0) return;
-                    const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+                    const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
                     dough.ingredients.forEach((ing) => {
                         if (ing.ingredient?.name === '水') {
                             const waterWeight = weightPerRatioPoint.mul(ing.ratio).mul(item.quantity).toNumber();
@@ -680,9 +698,15 @@ export class ProductionTasksService {
                 const { recipeVersion } = product;
                 recipeVersion.doughs.forEach((dough) => {
                     if (dough.id === mainDoughInfo.id) {
+                        // [核心修改] 根据损耗率计算投料总重
+                        const lossRatio = dough.lossRatio || 0;
+                        const divisor = 1 - lossRatio;
+                        if (divisor <= 0) return;
+                        const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
+
                         const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
                         if (totalRatio === 0) return;
-                        const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+                        const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
 
                         dough.ingredients.forEach((ing) => {
                             const weight = weightPerRatioPoint.mul(ing.ratio).mul(quantity).toNumber();
@@ -808,10 +832,16 @@ export class ProductionTasksService {
         const mainDough = product.recipeVersion.doughs[0];
         if (!mainDough) return 0;
 
+        // [核心修改] 根据损耗率计算投料总重
+        const lossRatio = mainDough.lossRatio || 0;
+        const divisor = 1 - lossRatio;
+        if (divisor <= 0) return 0;
+        const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
+
         const totalRatio = mainDough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
         if (totalRatio === 0) return 0;
 
-        const weightPerRatioPoint = new Prisma.Decimal(product.baseDoughWeight).div(totalRatio);
+        const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
 
         let totalFlourWeight = 0;
         const processedDoughs = new Set<string>();
@@ -831,12 +861,16 @@ export class ProductionTasksService {
                     const activeVersion = ing.linkedPreDough.versions.find((v) => v.isActive);
                     if (activeVersion && activeVersion.doughs[0]) {
                         const preDough = activeVersion.doughs[0] as DoughWithRecursiveIngredients;
+                        // [核心修改] 根据预制面团自身的损耗率计算其投料总重
+                        const preDoughLossRatio = preDough.lossRatio || 0;
+                        const preDoughDivisor = 1 - preDoughLossRatio;
+                        if (preDoughDivisor <= 0) return;
+
                         const preDoughTotalRatio = preDough.ingredients.reduce((sum, i) => sum + i.ratio, 0);
                         if (preDoughTotalRatio > 0) {
                             const preDoughWeight = currentWeightPerRatioPoint.mul(ing.ratio).toNumber();
-                            const preDoughWeightPerRatioPoint = new Prisma.Decimal(preDoughWeight).div(
-                                preDoughTotalRatio,
-                            );
+                            const adjustedPreDoughWeight = new Prisma.Decimal(preDoughWeight).div(preDoughDivisor);
+                            const preDoughWeightPerRatioPoint = adjustedPreDoughWeight.div(preDoughTotalRatio);
                             calculateFlourInDough(preDough, preDoughWeightPerRatioPoint);
                         }
                     }
