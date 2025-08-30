@@ -217,7 +217,7 @@ export class CostingService {
             orderBy: { purchaseDate: 'desc' },
             select: { purchaseDate: true },
             distinct: ['purchaseDate'],
-            take: 30,
+            take: 9, // [修改] 将 take 从 30 改为 9，这样加上当前成本，总共返回 10 个数据点
         });
 
         if (distinctDates.length === 0) {
