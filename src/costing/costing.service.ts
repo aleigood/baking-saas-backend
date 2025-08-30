@@ -23,7 +23,7 @@ export interface CalculatedIngredientInfo {
     name: string;
     ratio: number;
     weightInGrams: number;
-    pricePerKg: string;
+    pricePerKg: number;
     cost: number;
 }
 
@@ -388,7 +388,7 @@ export class CostingService {
                         // [FIX] 移除 .toDP(1)，保留完整精度
                         // (FIX: Remove .toDP(1) to preserve full precision)
                         weightInGrams: weight.toNumber(),
-                        pricePerKg: pricePerKg.toFixed(2),
+                        pricePerKg: pricePerKg, // [核心修复] 直接返回数字，而不是字符串
                         cost: cost.toDP(2).toNumber(),
                     });
                     group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
@@ -420,7 +420,6 @@ export class CostingService {
             const pricePerKg = getPricePerKg(id);
             let finalWeightInGrams = new Prisma.Decimal(0);
             if (ing.type === 'MIX_IN' && ing.ratio) {
-                // [核心修改] 移除 / 100，因为ratio已经是小数
                 finalWeightInGrams = totalFlourWeight.mul(ing.ratio);
             } else if (ing.weightInGrams) {
                 finalWeightInGrams = new Prisma.Decimal(ing.weightInGrams);
@@ -492,7 +491,7 @@ export class CostingService {
         return {
             productId: product.id,
             productName: product.name,
-            totalCost: totalCost.toFixed(4),
+            totalCost: totalCost.toDP(4).toNumber(), // [核心修复] 使用 .toNumber() 返回数字
         };
     }
 
@@ -589,12 +588,9 @@ export class CostingService {
         const flattenedIngredients = new Map<string, number>(); // Map<ingredientId, weightInGrams>
 
         const processDough = (dough: FullRecipeVersion['doughs'][0], doughWeight: number) => {
-            // [核心修正] 根据损耗率计算投料总重
             const lossRatio = dough.lossRatio || 0;
-            // 确保不会除以0或负数
             const divisor = 1 - lossRatio;
             if (divisor <= 0) {
-                // 如果损耗率大于等于100%，则无法生产，直接返回
                 return;
             }
             const adjustedDoughWeight = new Prisma.Decimal(doughWeight).div(divisor);
@@ -609,7 +605,6 @@ export class CostingService {
                 const preDough = ing.linkedPreDough?.versions?.[0];
 
                 if (preDough && preDough.doughs[0]) {
-                    // [核心修改] 使用更安全的类型断言，修复lint错误
                     processDough(preDough.doughs[0] as FullRecipeVersion['doughs'][0], ingredientWeight);
                 } else if (ing.ingredientId) {
                     const currentWeight = flattenedIngredients.get(ing.ingredientId) || 0;
@@ -640,7 +635,6 @@ export class CostingService {
                 if (pIng.weightInGrams) {
                     finalWeightInGrams = pIng.weightInGrams;
                 } else if (pIng.ratio && pIng.type === 'MIX_IN') {
-                    // [核心修改] 移除 / 100，因为ratio已经是小数
                     finalWeightInGrams = totalFlourWeight.mul(pIng.ratio).toNumber();
                 }
 
