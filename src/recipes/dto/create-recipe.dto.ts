@@ -22,6 +22,7 @@ class ProductIngredientDto {
     @IsNotEmpty()
     type: ProductIngredientType; // 'MIX_IN', 'FILLING', 'TOPPING'
 
+    // [核心修改] ratio 现在应为小数形式 (例如: 1% 应传入 0.01)
     @IsNumber()
     @IsOptional()
     ratio?: number; // 搅拌类原料的百分比
@@ -75,6 +76,7 @@ export class DoughIngredientDto {
     @IsNotEmpty()
     name: string; // name 字段用于创建新原料或关联预制/附加配方
 
+    // [核心修改] ratio 现在应为小数形式 (例如: 92% 应传入 0.92)
     @IsNumber()
     @IsNotEmpty()
     ratio: number;
@@ -83,6 +85,7 @@ export class DoughIngredientDto {
     @IsOptional()
     isFlour?: boolean;
 
+    // [核心修改] waterContent 现在应为小数形式 (例如: 75% 应传入 0.75)
     @IsNumber()
     @IsOptional()
     waterContent?: number;
@@ -110,6 +113,7 @@ export class CreateRecipeDto {
     @IsOptional()
     targetTemp?: number;
 
+    // [核心修改] lossRatio 应为小数形式 (例如: 2% 应传入 0.02)
     @IsNumber()
     @IsOptional()
     lossRatio?: number;

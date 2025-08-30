@@ -32,7 +32,7 @@ export class IngredientsService {
         // [核心修改] 如果原料是“水”，则覆盖其默认属性
         if (name === '水') {
             data.type = IngredientType.UNTRACKED; // 设置为非追踪类型
-            data.waterContent = 100; // 设置含水量为100%
+            data.waterContent = 1; // [核心修改] 设置含水量为1 (代表100%)
             data.isFlour = false; // 确保不被错误地标记为面粉
         }
 

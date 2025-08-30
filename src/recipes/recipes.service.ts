@@ -94,8 +94,8 @@ export class RecipesService {
                                 type: isWater ? IngredientType.UNTRACKED : IngredientType.STANDARD,
                                 // 如果是“水”，则不是面粉
                                 isFlour: isWater ? false : 'isFlour' in ing ? (ing.isFlour ?? false) : false,
-                                // 如果是“水”，含水量为100%，否则取DTO中的值或默认为0
-                                waterContent: isWater ? 100 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0,
+                                // [核心修改] waterContent 现在统一使用小数, 1 代表 100%
+                                waterContent: isWater ? 1 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0,
                             },
                         });
                     }
@@ -532,10 +532,12 @@ export class RecipesService {
             }
         }
 
-        // [核心修改] 重新启用验证逻辑
-        if (Math.abs(totalFlourRatio - 100) > 0.01) {
+        // [核心修改] 验证逻辑更新为基于小数(1代表100%)
+        if (Math.abs(totalFlourRatio - 1) > 0.001) {
             throw new BadRequestException(
-                `配方验证失败：所有面粉类原料（包括预制面团中折算的面粉）的百分比总和必须为100%。当前计算总和为: ${totalFlourRatio.toFixed(2)}%`,
+                `配方验证失败：所有面粉类原料（包括预制面团中折算的面粉）的比率总和必须为100%。当前计算总和为: ${(
+                    totalFlourRatio * 100
+                ).toFixed(2)}%`,
             );
         }
     }

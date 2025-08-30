@@ -25,20 +25,20 @@ type RecipeSeedData = {
     procedure?: string[];
 };
 
-// 您提供的配方数据
+// [核心修改] 您提供的配方数据, 已将所有 ratio 值从百分比转换为小数
 const recipesData: RecipeSeedData[] = [
     {
         name: '恰巴塔',
         type: 'MAIN',
         targetTemp: 26,
         ingredients: [
-            { name: '高筋粉', ratio: 92, isFlour: true },
-            { name: '鲁邦种', ratio: 25.76 },
-            { name: '水', ratio: 40, waterContent: 1 },
-            { name: '盐', ratio: 0.84 },
-            { name: '糖', ratio: 18.4 },
-            { name: '半干酵母', ratio: 1.3 },
-            { name: '橄榄油', ratio: 8 },
+            { name: '高筋粉', ratio: 0.92, isFlour: true },
+            { name: '鲁邦种', ratio: 0.2576 },
+            { name: '水', ratio: 0.4, waterContent: 1 },
+            { name: '盐', ratio: 0.0084 },
+            { name: '糖', ratio: 0.184 },
+            { name: '半干酵母', ratio: 0.013 },
+            { name: '橄榄油', ratio: 0.08 },
         ],
         products: [
             {
@@ -58,16 +58,16 @@ const recipesData: RecipeSeedData[] = [
         type: 'MAIN',
         targetTemp: 26,
         ingredients: [
-            { name: '高筋粉', ratio: 92, isFlour: true },
-            { name: '烫种', ratio: 25.76 },
-            { name: '水', ratio: 40, waterContent: 1 },
-            { name: '盐', ratio: 0.84 },
-            { name: '糖', ratio: 18.4 },
-            { name: '半干酵母', ratio: 1.3 },
-            { name: '黄油', ratio: 8 },
-            { name: '奶粉', ratio: 2 },
-            { name: '全蛋', ratio: 20, waterContent: 0.75 },
-            { name: '麦芽精', ratio: 1 },
+            { name: '高筋粉', ratio: 0.92, isFlour: true },
+            { name: '烫种', ratio: 0.2576 },
+            { name: '水', ratio: 0.4, waterContent: 1 },
+            { name: '盐', ratio: 0.0084 },
+            { name: '糖', ratio: 0.184 },
+            { name: '半干酵母', ratio: 0.013 },
+            { name: '黄油', ratio: 0.08 },
+            { name: '奶粉', ratio: 0.02 },
+            { name: '全蛋', ratio: 0.2, waterContent: 0.75 },
+            { name: '麦芽精', ratio: 0.01 },
         ],
         products: [
             {
@@ -102,10 +102,10 @@ const recipesData: RecipeSeedData[] = [
         type: 'PRE_DOUGH',
         lossRatio: 0.1,
         ingredients: [
-            { name: '高筋粉', ratio: 100, isFlour: true },
-            { name: '水', ratio: 200, waterContent: 1 },
-            { name: '糖', ratio: 20 },
-            { name: '盐', ratio: 2 },
+            { name: '高筋粉', ratio: 1, isFlour: true },
+            { name: '水', ratio: 2, waterContent: 1 },
+            { name: '糖', ratio: 0.2 },
+            { name: '盐', ratio: 0.02 },
         ],
         procedure: ['在室温放置冷却后放入冰箱第二天使用'],
     },
@@ -114,11 +114,11 @@ const recipesData: RecipeSeedData[] = [
         type: 'EXTRA',
         lossRatio: 0.05,
         ingredients: [
-            { name: '低筋粉', ratio: 12, isFlour: true },
-            { name: '牛奶', ratio: 100, waterContent: 0.87 },
-            { name: '蛋黄', ratio: 20 },
-            { name: '糖', ratio: 20 },
-            { name: '黄油', ratio: 5 },
+            { name: '低筋粉', ratio: 0.12, isFlour: true },
+            { name: '牛奶', ratio: 1, waterContent: 0.87 },
+            { name: '蛋黄', ratio: 0.2 },
+            { name: '糖', ratio: 0.2 },
+            { name: '黄油', ratio: 0.05 },
         ],
         procedure: ['牛奶温度达到90度后搅拌'],
     },
@@ -127,16 +127,16 @@ const recipesData: RecipeSeedData[] = [
         type: 'MAIN',
         targetTemp: 26,
         ingredients: [
-            { name: '高筋粉', ratio: 92, isFlour: true },
-            { name: '烫种', ratio: 25.76 },
-            { name: '水', ratio: 40, waterContent: 1 },
-            { name: '盐', ratio: 0.84 },
-            { name: '糖', ratio: 18.4 },
-            { name: '半干酵母', ratio: 1.3 },
-            { name: '黄油', ratio: 8 },
-            { name: '奶粉', ratio: 2 },
-            { name: '全蛋', ratio: 20, waterContent: 0.75 },
-            { name: '麦芽精', ratio: 1 },
+            { name: '高筋粉', ratio: 0.92, isFlour: true },
+            { name: '烫种', ratio: 0.2576 },
+            { name: '水', ratio: 0.4, waterContent: 1 },
+            { name: '盐', ratio: 0.0084 },
+            { name: '糖', ratio: 0.184 },
+            { name: '半干酵母', ratio: 0.013 },
+            { name: '黄油', ratio: 0.08 },
+            { name: '奶粉', ratio: 0.02 },
+            { name: '全蛋', ratio: 0.2, waterContent: 0.75 },
+            { name: '麦芽精', ratio: 0.01 },
         ],
         products: [
             {
@@ -146,7 +146,7 @@ const recipesData: RecipeSeedData[] = [
                     { name: '卡仕达酱', type: 'FILLING', weightInGrams: 30 },
                     { name: '杏仁片', type: 'FILLING', weightInGrams: 1 },
                 ],
-                mixIn: [{ name: '香草籽', type: 'MIX_IN', ratio: 1 }],
+                mixIn: [{ name: '香草籽', type: 'MIX_IN', ratio: 0.01 }],
                 procedure: ['烘烤：烤前刷过筛蛋液，一盘10个 上火210 下火180 烤10分钟'],
             },
             {

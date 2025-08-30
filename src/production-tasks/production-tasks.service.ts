@@ -127,7 +127,7 @@ export class ProductionTasksService {
             const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
             for (const dough of recipeVersion.doughs) {
-                // [核心修改] 根据损耗率计算投料总重
+                // [核心修正] 根据损耗率计算投料总重
                 const lossRatio = dough.lossRatio || 0;
                 const divisor = 1 - lossRatio;
                 if (divisor <= 0) continue;
@@ -159,7 +159,8 @@ export class ProductionTasksService {
                     if (pIng.weightInGrams) {
                         weight = pIng.weightInGrams * item.quantity;
                     } else if (pIng.ratio) {
-                        weight = ((totalFlourWeight * pIng.ratio) / 100) * item.quantity;
+                        // [核心修改] 移除 / 100，因为ratio已经是小数
+                        weight = totalFlourWeight * pIng.ratio * item.quantity;
                     }
 
                     const existing = requiredPrepItems.get(pIng.linkedExtraId);
@@ -240,7 +241,7 @@ export class ProductionTasksService {
                 const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
                 for (const dough of recipeVersion.doughs) {
-                    // [核心修改] 根据损耗率计算投料总重
+                    // [核心修正] 根据损耗率计算投料总重
                     const lossRatio = dough.lossRatio || 0;
                     const divisor = 1 - lossRatio;
                     if (divisor <= 0) continue;
@@ -272,7 +273,8 @@ export class ProductionTasksService {
                         if (pIng.weightInGrams) {
                             weight = pIng.weightInGrams * item.quantity;
                         } else if (pIng.ratio) {
-                            weight = ((totalFlourWeight * pIng.ratio) / 100) * item.quantity;
+                            // [核心修改] 移除 / 100，因为ratio已经是小数
+                            weight = totalFlourWeight * pIng.ratio * item.quantity;
                         }
 
                         const existing = requiredPrepItems.get(pIng.linkedExtraId);
@@ -654,7 +656,7 @@ export class ProductionTasksService {
                 const product = item.product;
                 if (!product) return;
                 product.recipeVersion.doughs.forEach((dough) => {
-                    // [核心修改] 根据损耗率计算投料总重
+                    // [核心修正] 根据损耗率计算投料总重
                     const lossRatio = dough.lossRatio || 0;
                     const divisor = 1 - lossRatio;
                     if (divisor <= 0) return;
@@ -698,7 +700,7 @@ export class ProductionTasksService {
                 const { recipeVersion } = product;
                 recipeVersion.doughs.forEach((dough) => {
                     if (dough.id === mainDoughInfo.id) {
-                        // [核心修改] 根据损耗率计算投料总重
+                        // [核心修正] 根据损耗率计算投料总重
                         const lossRatio = dough.lossRatio || 0;
                         const divisor = 1 - lossRatio;
                         if (divisor <= 0) return;
@@ -769,7 +771,8 @@ export class ProductionTasksService {
                 const mixIns = product.ingredients
                     .filter((ing) => ing.type === 'MIX_IN' && ing.ingredient)
                     .map((ing) => {
-                        const weight = ((totalFlourWeight * (ing.ratio || 0)) / 100) * quantity;
+                        // [核心修改] 移除 / 100，因为ratio已经是小数
+                        const weight = totalFlourWeight * (ing.ratio || 0) * quantity;
                         totalMixInWeight += weight;
                         return {
                             id: ing.ingredient!.id,
@@ -832,7 +835,7 @@ export class ProductionTasksService {
         const mainDough = product.recipeVersion.doughs[0];
         if (!mainDough) return 0;
 
-        // [核心修改] 根据损耗率计算投料总重
+        // [核心修正] 根据损耗率计算投料总重
         const lossRatio = mainDough.lossRatio || 0;
         const divisor = 1 - lossRatio;
         if (divisor <= 0) return 0;
@@ -861,7 +864,7 @@ export class ProductionTasksService {
                     const activeVersion = ing.linkedPreDough.versions.find((v) => v.isActive);
                     if (activeVersion && activeVersion.doughs[0]) {
                         const preDough = activeVersion.doughs[0] as DoughWithRecursiveIngredients;
-                        // [核心修改] 根据预制面团自身的损耗率计算其投料总重
+                        // [核心修正] 根据预制面团自身的损耗率计算其投料总重
                         const preDoughLossRatio = preDough.lossRatio || 0;
                         const preDoughDivisor = 1 - preDoughLossRatio;
                         if (preDoughDivisor <= 0) return;

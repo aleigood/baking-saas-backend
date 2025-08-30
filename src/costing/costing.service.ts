@@ -352,7 +352,7 @@ export class CostingService {
                 totalCost: 0,
             };
 
-            // [核心修改] 根据损耗率计算投料总重
+            // [核心修正] 根据损耗率计算投料总重
             const lossRatio = dough.lossRatio || 0;
             // 确保不会除以0或负数
             const divisor = 1 - lossRatio;
@@ -420,7 +420,8 @@ export class CostingService {
             const pricePerKg = getPricePerKg(id);
             let finalWeightInGrams = new Prisma.Decimal(0);
             if (ing.type === 'MIX_IN' && ing.ratio) {
-                finalWeightInGrams = totalFlourWeight.mul(ing.ratio).div(100);
+                // [核心修改] 移除 / 100，因为ratio已经是小数
+                finalWeightInGrams = totalFlourWeight.mul(ing.ratio);
             } else if (ing.weightInGrams) {
                 finalWeightInGrams = new Prisma.Decimal(ing.weightInGrams);
             }
@@ -588,7 +589,7 @@ export class CostingService {
         const flattenedIngredients = new Map<string, number>(); // Map<ingredientId, weightInGrams>
 
         const processDough = (dough: FullRecipeVersion['doughs'][0], doughWeight: number) => {
-            // [核心修改] 根据损耗率计算投料总重
+            // [核心修正] 根据损耗率计算投料总重
             const lossRatio = dough.lossRatio || 0;
             // 确保不会除以0或负数
             const divisor = 1 - lossRatio;
@@ -639,7 +640,8 @@ export class CostingService {
                 if (pIng.weightInGrams) {
                     finalWeightInGrams = pIng.weightInGrams;
                 } else if (pIng.ratio && pIng.type === 'MIX_IN') {
-                    finalWeightInGrams = totalFlourWeight.mul(pIng.ratio).div(100).toNumber();
+                    // [核心修改] 移除 / 100，因为ratio已经是小数
+                    finalWeightInGrams = totalFlourWeight.mul(pIng.ratio).toNumber();
                 }
 
                 if (finalWeightInGrams > 0) {
