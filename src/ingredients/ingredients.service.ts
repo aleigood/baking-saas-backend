@@ -75,10 +75,31 @@ export class IngredientsService {
             },
         });
 
-        const ingredientIds = ingredients.map((i) => i.id);
-        if (ingredientIds.length === 0) {
+        if (ingredients.length === 0) {
             return [];
         }
+
+        // [核心新增] 高效地为所有原料附加最新的采购单价
+        const activeSkuIds = ingredients.map((i) => i.activeSkuId).filter(Boolean) as string[];
+        const priceMap = new Map<string, Prisma.Decimal>();
+
+        if (activeSkuIds.length > 0) {
+            // 使用复杂查询来获取每个skuId最新的那条采购记录
+            const latestProcurements: { skuId: string; pricePerPackage: Prisma.Decimal }[] = await this.prisma
+                .$queryRaw`
+                SELECT p."skuId", p."pricePerPackage"
+                FROM "ProcurementRecord" p
+                INNER JOIN (
+                    SELECT "skuId", MAX("purchaseDate") as max_date
+                    FROM "ProcurementRecord"
+                    WHERE "skuId" IN (${Prisma.join(activeSkuIds)})
+                    GROUP BY "skuId"
+                ) lp ON p."skuId" = lp."skuId" AND p."purchaseDate" = lp.max_date
+            `;
+            latestProcurements.forEach((p) => priceMap.set(p.skuId, p.pricePerPackage));
+        }
+
+        const ingredientIds = ingredients.map((i) => i.id);
 
         const consumptionStats: {
             ingredientId: string;
@@ -119,10 +140,14 @@ export class IngredientsService {
             const stats = statsMap.get(ingredient.id);
             const totalConsumptionInGrams = stats?.total || 0;
 
+            // [核心新增] 从Map中获取价格，如果没有则为0
+            const currentPricePerPackage = ingredient.activeSkuId ? priceMap.get(ingredient.activeSkuId) || 0 : 0;
+
             // [核心修改] 专门处理非追踪原料
             if (ingredient.type === IngredientType.UNTRACKED) {
                 return {
                     ...ingredient,
+                    currentPricePerPackage: 0, // 非追踪原料没有价格
                     daysOfSupply: Infinity,
                     avgDailyConsumption: 0,
                     avgConsumptionPerTask: 0,
@@ -133,6 +158,7 @@ export class IngredientsService {
             if (!stats || stats.total === 0) {
                 return {
                     ...ingredient,
+                    currentPricePerPackage: Number(currentPricePerPackage),
                     daysOfSupply: Infinity,
                     avgDailyConsumption: 0,
                     avgConsumptionPerTask: 0,
@@ -150,6 +176,7 @@ export class IngredientsService {
 
             return {
                 ...ingredient,
+                currentPricePerPackage: Number(currentPricePerPackage),
                 daysOfSupply,
                 avgDailyConsumption,
                 avgConsumptionPerTask,
@@ -186,7 +213,26 @@ export class IngredientsService {
             throw new NotFoundException('原料不存在');
         }
 
-        return ingredient;
+        // [核心新增] 为单个原料查询附加最新的采购单价
+        let currentPricePerPackage = new Prisma.Decimal(0);
+        if (ingredient.activeSkuId) {
+            const latestProcurement = await this.prisma.procurementRecord.findFirst({
+                where: {
+                    skuId: ingredient.activeSkuId,
+                },
+                orderBy: {
+                    purchaseDate: 'desc',
+                },
+            });
+            if (latestProcurement) {
+                currentPricePerPackage = latestProcurement.pricePerPackage;
+            }
+        }
+
+        return {
+            ...ingredient,
+            currentPricePerPackage: currentPricePerPackage.toNumber(),
+        };
     }
 
     async update(tenantId: string, id: string, updateIngredientDto: UpdateIngredientDto) {
