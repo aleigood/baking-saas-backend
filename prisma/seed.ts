@@ -171,6 +171,9 @@ const recipesData: RecipeSeedData[] = [
 async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[]) {
     console.log(`为店铺 ID: ${tenantId} 开始导入配方...`);
 
+    // [核心修复] 创建一个 Set 来存储所有已经被定义为配方的名称
+    const recipeNames = new Set(recipes.map((r) => r.name));
+
     // [核心修改] 创建一个Map来存储原料的完整信息，而不仅仅是名字
     const allIngredients = new Map<string, (typeof recipes)[0]['ingredients'][0]>();
     recipes.forEach((recipe) => {
@@ -192,6 +195,12 @@ async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[])
     });
 
     for (const [name, details] of allIngredients.entries()) {
+        // [核心修复] 在创建原料前，检查这个名字是否已经被用作配方名称
+        if (recipeNames.has(name)) {
+            console.log(`  - 跳过创建原料: "${name}"，因为它已经是一个配方。`);
+            continue; // 如果是配方，则跳过，不创建同名的普通原料
+        }
+
         const existingIngredient = await prisma.ingredient.findFirst({
             where: {
                 tenantId,

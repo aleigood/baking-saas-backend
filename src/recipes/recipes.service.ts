@@ -300,6 +300,7 @@ export class RecipesService {
                                 ingredients: {
                                     include: {
                                         ingredient: true,
+                                        linkedExtra: true, // [核心修复] 确保在查询产品时，能一并返回其关联的“附加配方”（如馅料）
                                     },
                                 },
                             },
