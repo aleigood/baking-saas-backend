@@ -26,139 +26,939 @@ type RecipeSeedData = {
 };
 
 // [核心修改] 您提供的配方数据, 已将所有 ratio 值从百分比转换为小数
+// 从 recipe.json 转换而来的新配方数据
 const recipesData: RecipeSeedData[] = [
     {
-        name: '恰巴塔',
-        type: 'MAIN',
-        targetTemp: 26,
+        name: 'BIGA',
+        type: 'PRE_DOUGH',
         ingredients: [
-            { name: '高筋粉', ratio: 0.92, isFlour: true },
-            { name: '鲁邦种', ratio: 0.2576 },
-            { name: '水', ratio: 0.4, waterContent: 1 },
-            { name: '盐', ratio: 0.0084 },
-            { name: '糖', ratio: 0.184 },
-            { name: '半干酵母', ratio: 0.013 },
-            { name: '橄榄油', ratio: 0.08 },
-        ],
-        products: [
             {
-                name: '恰巴塔',
-                weight: 250,
-                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
-            },
-        ],
-        procedure: [
-            '搅拌：采用后糖法，搅拌至完全扩展，出缸温度26度',
-            '发酵：二发温度35度50分钟',
-            '烘烤：烤前刷过筛蛋液，两个杏仁片 一盘10个 上火210 下火180 烤10分钟',
-        ],
-    },
-    {
-        name: '云朵吐司面团',
-        type: 'MAIN',
-        targetTemp: 26,
-        ingredients: [
-            { name: '高筋粉', ratio: 0.92, isFlour: true },
-            { name: '烫种', ratio: 0.2576 },
-            { name: '水', ratio: 0.4, waterContent: 1 },
-            { name: '盐', ratio: 0.0084 },
-            { name: '糖', ratio: 0.184 },
-            { name: '半干酵母', ratio: 0.013 },
-            { name: '黄油', ratio: 0.08 },
-            { name: '奶粉', ratio: 0.02 },
-            { name: '全蛋', ratio: 0.2, waterContent: 0.75 },
-            { name: '麦芽精', ratio: 0.01 },
-        ],
-        products: [
-            {
-                name: '云朵吐司',
-                weight: 250,
-                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
+                name: '高筋粉',
+                ratio: 1.0,
+                isFlour: true,
             },
             {
-                name: '云朵吐司2',
-                weight: 250,
-                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
-            },
-            {
-                name: '云朵吐司3',
-                weight: 250,
-                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
-            },
-            {
-                name: '云朵吐司4',
-                weight: 250,
-                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
+                name: '水',
+                ratio: 0.5,
+                waterContent: 1.0,
             },
         ],
-        procedure: [
-            '搅拌：采用后糖法，搅拌至完全扩展，出缸温度26度',
-            '发酵：二发温度35度50分钟',
-            '烘烤：烤前刷过筛蛋液，两个杏仁片 一盘10个 上火210 下火180 烤10分钟',
-        ],
+        procedure: [],
     },
     {
         name: '烫种',
         type: 'PRE_DOUGH',
-        lossRatio: 0.1,
         ingredients: [
-            { name: '高筋粉', ratio: 1, isFlour: true },
-            { name: '水', ratio: 2, waterContent: 1 },
-            { name: '糖', ratio: 0.2 },
-            { name: '盐', ratio: 0.02 },
+            {
+                name: '高筋粉',
+                ratio: 1.0,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 2.0,
+                waterContent: 1.0,
+            },
+            {
+                name: '糖',
+                ratio: 0.2,
+            },
+            {
+                name: '盐',
+                ratio: 0.02,
+            },
         ],
-        procedure: ['在室温放置冷却后放入冰箱第二天使用'],
+        procedure: [],
+    },
+    {
+        name: '柠檬奶油奶酪',
+        type: 'EXTRA',
+        ingredients: [
+            {
+                name: '奶油奶酪',
+                ratio: 1.0,
+            },
+            {
+                name: '糖',
+                ratio: 0.07,
+            },
+            {
+                name: '柠檬汁',
+                ratio: 0.025,
+            },
+            {
+                name: '柠檬皮',
+                ratio: 0.01,
+            },
+        ],
+        procedure: [],
+    },
+    {
+        name: '酒渍芒果干',
+        type: 'EXTRA',
+        ingredients: [
+            {
+                name: '芒果干',
+                ratio: 1.0,
+            },
+            {
+                name: '荔枝酒',
+                ratio: 0.25,
+            },
+        ],
+        procedure: [],
+    },
+    {
+        name: '酒渍蔓越莓干',
+        type: 'EXTRA',
+        ingredients: [
+            {
+                name: '蔓越莓干',
+                ratio: 1.0,
+            },
+            {
+                name: '荔枝酒',
+                ratio: 0.25,
+            },
+        ],
+        procedure: [],
+    },
+    {
+        name: '酒渍提子干',
+        type: 'EXTRA',
+        ingredients: [
+            {
+                name: '提子干',
+                ratio: 1.0,
+            },
+            {
+                name: '朗姆酒',
+                ratio: 0.25,
+            },
+        ],
+        procedure: [],
+    },
+    {
+        name: '贝果',
+        type: 'MAIN',
+        targetTemp: 26,
+        ingredients: [
+            {
+                name: 'BIGA',
+                ratio: 0.3,
+            },
+            {
+                name: '烫种',
+                ratio: 0.2576,
+            },
+            {
+                name: '高筋粉',
+                ratio: 0.72,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 0.38,
+                waterContent: 1.0,
+            },
+            {
+                name: '盐',
+                ratio: 0.0134,
+            },
+            {
+                name: '糖',
+                ratio: 0.044,
+            },
+            {
+                name: '半干酵母',
+                ratio: 0.005,
+            },
+            {
+                name: '黄油',
+                ratio: 0.04,
+            },
+        ],
+        products: [
+            {
+                name: '原味贝果',
+                weight: 80,
+                fillings: [],
+                mixIn: [],
+            },
+            {
+                name: '伯爵柠檬乳酪贝果',
+                weight: 90,
+                fillings: [
+                    {
+                        name: '柠檬奶油奶酪',
+                        type: 'FILLING',
+                        weightInGrams: 15,
+                    },
+                ],
+                mixIn: [
+                    {
+                        name: '伯爵红茶',
+                        type: 'MIX_IN',
+                        ratio: 0.012,
+                    },
+                ],
+            },
+            {
+                name: '芒果荔枝酒贝果',
+                weight: 90,
+                fillings: [
+                    {
+                        name: '酒渍芒果干',
+                        type: 'FILLING',
+                        weightInGrams: 10,
+                    },
+                ],
+                mixIn: [
+                    {
+                        name: '酒渍芒果干',
+                        type: 'MIX_IN',
+                        ratio: 0.15,
+                    },
+                ],
+            },
+            {
+                name: '蔓越莓贝果',
+                weight: 90,
+                fillings: [
+                    {
+                        name: '酒渍蔓越莓干',
+                        type: 'FILLING',
+                        weightInGrams: 10,
+                    },
+                ],
+                mixIn: [
+                    {
+                        name: '酒渍蔓越莓干',
+                        type: 'MIX_IN',
+                        ratio: 0.15,
+                    },
+                ],
+            },
+            {
+                name: '肉桂提子贝果',
+                weight: 90,
+                fillings: [
+                    {
+                        name: '酒渍提子干',
+                        type: 'FILLING',
+                        weightInGrams: 10,
+                    },
+                ],
+                mixIn: [
+                    {
+                        name: '肉桂粉',
+                        type: 'MIX_IN',
+                        ratio: 0.02,
+                    },
+                    {
+                        name: '酒渍提子干',
+                        type: 'MIX_IN',
+                        ratio: 0.15,
+                    },
+                ],
+            },
+        ],
+        procedure: [
+            '备料：果干要切小丁，洗掉表面的糖，烘干后用酒浸泡一夜，茶粉用冷水泡开，所有配料都要提前称好后再打面',
+            '搅拌：材料全部加入，搅拌至7分筋，表面有一点光滑，厚膜有锯齿，需要加入搅拌的果干需要提前晾干，伯爵红茶贝果最后搅拌',
+            '发酵：26度，一发30分钟，不需要充分发酵，分割后轻轻滚圆，不要收紧，二发到1.5倍大，不同颜色的面团不要放在一起发酵',
+            '整形：卷起前上下边缘打薄，封口要朝内',
+            '煮水：蜂蜜10%或糖5%煮至微微沸腾，一面烫30秒，煮完要控水',
+            '烘烤：一盘8个 上火230 下火190 烤15分钟 喷3秒蒸汽',
+            '出炉：出炉后表面喷水',
+        ],
+    },
+    {
+        name: '鲁邦种',
+        type: 'PRE_DOUGH',
+        ingredients: [
+            {
+                name: 'T65',
+                ratio: 1.0,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 1.0,
+                waterContent: 1.0,
+            },
+        ],
+        procedure: [],
+    },
+    {
+        name: '有盐黄油',
+        type: 'EXTRA',
+        ingredients: [
+            {
+                name: '发酵黄油',
+                ratio: 1.0,
+            },
+            {
+                name: '海盐',
+                ratio: 0.017,
+            },
+        ],
+        procedure: [],
+    },
+    {
+        name: '海盐卷',
+        type: 'MAIN',
+        targetTemp: 26,
+        ingredients: [
+            {
+                name: '鲁邦种',
+                ratio: 0.4,
+            },
+            {
+                name: 'T65',
+                ratio: 0.6,
+                isFlour: true,
+            },
+            {
+                name: '高筋粉',
+                ratio: 0.2,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 0.45,
+                waterContent: 1.0,
+            },
+            {
+                name: '盐',
+                ratio: 0.018,
+            },
+            {
+                name: '糖',
+                ratio: 0.04,
+            },
+            {
+                name: '半干酵母',
+                ratio: 0.008,
+            },
+            {
+                name: '黄油',
+                ratio: 0.04,
+            },
+            {
+                name: '麦芽精',
+                ratio: 0.003,
+            },
+        ],
+        products: [
+            {
+                name: '原味海盐卷',
+                weight: 65,
+                fillings: [
+                    {
+                        name: '有盐黄油',
+                        type: 'FILLING',
+                        weightInGrams: 6,
+                    },
+                ],
+                mixIn: [],
+            },
+        ],
+        procedure: [
+            '搅拌：材料全部加入搅拌，搅拌至表面光滑，破洞有微微锯齿',
+            '发酵：一发需要充分发酵，分割后轻轻滚圆，不要收紧，中间低温醒发至少30分钟，二发不超过28度且要发酵充分',
+            '整型：中下部的两边可刷黄油，卷起时不要拉长',
+            '烘烤：一盘12个 上火250 下火220 烤12分钟 喷3秒蒸汽',
+        ],
+    },
+    {
+        name: '恰巴塔',
+        type: 'MAIN',
+        targetTemp: 22,
+        ingredients: [
+            {
+                name: '鲁邦种',
+                ratio: 0.4,
+            },
+            {
+                name: 'T65',
+                ratio: 0.3,
+                isFlour: true,
+            },
+            {
+                name: '高筋粉',
+                ratio: 0.5,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 0.6,
+                waterContent: 1.0,
+            },
+            {
+                name: '盐',
+                ratio: 0.018,
+            },
+            {
+                name: '糖',
+                ratio: 0.01,
+            },
+            {
+                name: '半干酵母',
+                ratio: 0.005,
+            },
+            {
+                name: '麦芽精',
+                ratio: 0.003,
+            },
+            {
+                name: '黄油',
+                ratio: 0.05,
+            },
+        ],
+        products: [
+            {
+                name: '得意奶酪恰巴塔',
+                weight: 150,
+                fillings: [],
+                mixIn: [
+                    {
+                        name: '图林根香肠',
+                        type: 'MIX_IN',
+                        ratio: 0.15,
+                    },
+                    {
+                        name: '萨拉米肠',
+                        type: 'MIX_IN',
+                        ratio: 0.15,
+                    },
+                    {
+                        name: '马苏里拉芝士',
+                        type: 'MIX_IN',
+                        ratio: 0.15,
+                    },
+                ],
+            },
+        ],
+        procedure: [
+            '搅拌：搅拌至有延展性和弹性，易搅碎的馅料折叠进去',
+            '发酵：一发充分发酵，半小时小时翻一次面或翻面后放入冰箱发酵12小时，最终发酵时面团不要放太近，容易粘在一起',
+            '烘烤：一盘6个 上火255 下火250 喷3-4秒蒸汽 烤13分钟',
+        ],
+    },
+    {
+        name: '佛卡夏',
+        type: 'MAIN',
+        targetTemp: 22,
+        ingredients: [
+            {
+                name: '鲁邦种',
+                ratio: 0.4,
+            },
+            {
+                name: 'T65',
+                ratio: 0.3,
+                isFlour: true,
+            },
+            {
+                name: '高筋粉',
+                ratio: 0.5,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 0.6,
+                waterContent: 1.0,
+            },
+            {
+                name: '盐',
+                ratio: 0.018,
+            },
+            {
+                name: '糖',
+                ratio: 0.01,
+            },
+            {
+                name: '半干酵母',
+                ratio: 0.005,
+            },
+            {
+                name: '麦芽精',
+                ratio: 0.003,
+            },
+            {
+                name: '黄油',
+                ratio: 0.05,
+            },
+        ],
+        products: [
+            {
+                name: '佛卡夏',
+                weight: 80,
+                fillings: [],
+                mixIn: [],
+            },
+        ],
+        procedure: [
+            '搅拌：搅拌至有延展性和弹性，易搅碎的馅料折叠进去',
+            '发酵：一发充分发酵，半小时小时翻一次面或翻面后放入冰箱发酵12小时，最终发酵时面团不要放太近，容易粘在一起',
+            '烘烤：一盘9个 上火260 下火250 喷3-4秒蒸汽 烤12分钟',
+        ],
+    },
+    {
+        name: '酵香吐司',
+        type: 'MAIN',
+        targetTemp: 26,
+        ingredients: [
+            {
+                name: '鲁邦种',
+                ratio: 0.3,
+            },
+            {
+                name: 'BIGA',
+                ratio: 0.45,
+            },
+            {
+                name: '高筋粉',
+                ratio: 0.55,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 0.35,
+                waterContent: 1.0,
+            },
+            {
+                name: '盐',
+                ratio: 0.016,
+            },
+            {
+                name: '糖',
+                ratio: 0.06,
+            },
+            {
+                name: '半干酵母',
+                ratio: 0.008,
+            },
+            {
+                name: '黄油',
+                ratio: 0.06,
+            },
+        ],
+        products: [
+            {
+                name: '酵香吐司',
+                weight: 240,
+                fillings: [],
+                mixIn: [],
+            },
+        ],
+        procedure: [
+            '搅拌：黄油在出膜时加入，搅拌至完全扩展，薄膜无锯齿',
+            '发酵：一发充分发酵，二发至8分满',
+            '整型：两次擀卷',
+            '烘烤：一盘6个 上火170 下火245 烤20分钟',
+        ],
+    },
+    {
+        name: '云朵吐司',
+        type: 'MAIN',
+        targetTemp: 26,
+        ingredients: [
+            {
+                name: 'BIGA',
+                ratio: 0.3,
+            },
+            {
+                name: '烫种',
+                ratio: 0.2576,
+            },
+            {
+                name: '高筋粉',
+                ratio: 0.72,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 0.54,
+                waterContent: 1.0,
+            },
+            {
+                name: '盐',
+                ratio: 0.0164,
+            },
+            {
+                name: '糖',
+                ratio: 0.044,
+            },
+            {
+                name: '半干酵母',
+                ratio: 0.008,
+            },
+            {
+                name: '奶粉',
+                ratio: 0.02,
+            },
+            {
+                name: '黄油',
+                ratio: 0.08,
+            },
+            {
+                name: '麦芽精',
+                ratio: 0.003,
+            },
+        ],
+        products: [
+            {
+                name: '云朵吐司',
+                weight: 245,
+                fillings: [],
+                mixIn: [],
+            },
+            {
+                name: '玫瑰云朵吐司',
+                weight: 245,
+                fillings: [],
+                mixIn: [
+                    {
+                        name: '玫瑰花酱',
+                        type: 'MIX_IN',
+                        ratio: 0.08,
+                    },
+                    {
+                        name: '玫瑰花瓣',
+                        type: 'MIX_IN',
+                        ratio: 0.003,
+                    },
+                ],
+            },
+            {
+                name: '桂花云朵吐司',
+                weight: 245,
+                fillings: [],
+                mixIn: [
+                    {
+                        name: '桂花酱',
+                        type: 'MIX_IN',
+                        ratio: 0.08,
+                    },
+                    {
+                        name: '桂花瓣',
+                        type: 'MIX_IN',
+                        ratio: 0.003,
+                    },
+                ],
+            },
+            {
+                name: '茉莉云朵吐司',
+                weight: 245,
+                fillings: [],
+                mixIn: [
+                    {
+                        name: '茉莉花酱',
+                        type: 'MIX_IN',
+                        ratio: 0.08,
+                    },
+                    {
+                        name: '茉莉花瓣',
+                        type: 'MIX_IN',
+                        ratio: 0.003,
+                    },
+                ],
+            },
+        ],
+        procedure: [
+            '搅拌：黄油在出膜时加入，搅拌至完全扩展，薄膜无锯齿',
+            '发酵：一发充分发酵，二发至9分满',
+            '整型：两次擀卷',
+            '烘烤：一盘6个吐司盒放薄烤盘上 上火170 下火245 烤20分钟',
+        ],
+    },
+    {
+        name: '咸蛋黄酱',
+        type: 'EXTRA',
+        ingredients: [
+            {
+                name: '咸蛋黄',
+                ratio: 1.0,
+            },
+            {
+                name: '黄油',
+                ratio: 0.15,
+            },
+        ],
+        procedure: [],
+    },
+    {
+        name: 'BR面团',
+        type: 'MAIN',
+        targetTemp: 26,
+        ingredients: [
+            {
+                name: '烫种',
+                ratio: 0.2576,
+            },
+            {
+                name: '高筋粉',
+                ratio: 0.92,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 0.34,
+                waterContent: 1.0,
+            },
+            {
+                name: '盐',
+                ratio: 0.0164,
+            },
+            {
+                name: '糖',
+                ratio: 0.084,
+            },
+            {
+                name: '半干酵母',
+                ratio: 0.008,
+            },
+            {
+                name: '奶粉',
+                ratio: 0.03,
+            },
+            {
+                name: '黄油',
+                ratio: 0.1,
+            },
+            {
+                name: '牛奶',
+                ratio: 0.1,
+                waterContent: 0.87,
+            },
+            {
+                name: '全蛋',
+                ratio: 0.15,
+                waterContent: 0.75,
+            },
+            {
+                name: '麦芽精',
+                ratio: 0.003,
+            },
+        ],
+        products: [
+            {
+                name: '香葱肉松吐司',
+                weight: 240,
+                fillings: [
+                    {
+                        name: '肉松',
+                        type: 'FILLING',
+                        weightInGrams: 20,
+                    },
+                    {
+                        name: '沙拉酱',
+                        type: 'FILLING',
+                        weightInGrams: 10,
+                    },
+                    {
+                        name: '香葱',
+                        type: 'FILLING',
+                        weightInGrams: 10,
+                    },
+                ],
+                mixIn: [],
+            },
+            {
+                name: '蛋黄肉松吐司',
+                weight: 240,
+                fillings: [
+                    {
+                        name: '肉松',
+                        type: 'FILLING',
+                        weightInGrams: 20,
+                    },
+                    {
+                        name: '咸蛋黄酱',
+                        type: 'FILLING',
+                        weightInGrams: 20,
+                    },
+                ],
+                mixIn: [],
+            },
+        ],
+        procedure: [
+            '搅拌：黄油在出膜时加入，糖分两次加入，搅拌至完全扩展，薄膜无锯齿',
+            '发酵：一发充分发酵，二发至9分满',
+            '整型：编辫后要压平再卷起，防止出现空洞',
+            '烘烤：一盘6个 上火165 下火235 烤21分钟',
+        ],
     },
     {
         name: '卡仕达酱',
         type: 'EXTRA',
-        lossRatio: 0.05,
         ingredients: [
-            { name: '低筋粉', ratio: 0.12, isFlour: true },
-            { name: '牛奶', ratio: 1, waterContent: 0.87 },
-            { name: '蛋黄', ratio: 0.2 },
-            { name: '糖', ratio: 0.2 },
-            { name: '黄油', ratio: 0.05 },
+            {
+                name: '牛奶',
+                ratio: 1.0,
+            },
+            {
+                name: '蛋黄',
+                ratio: 0.2,
+            },
+            {
+                name: '糖',
+                ratio: 0.2,
+            },
+            {
+                name: '低筋粉',
+                ratio: 0.12,
+            },
+            {
+                name: '黄油',
+                ratio: 0.05,
+            },
         ],
-        procedure: ['牛奶温度达到90度后搅拌'],
+        procedure: [],
     },
     {
         name: '甜面团',
         type: 'MAIN',
         targetTemp: 26,
         ingredients: [
-            { name: '高筋粉', ratio: 0.92, isFlour: true },
-            { name: '烫种', ratio: 0.2576 },
-            { name: '水', ratio: 0.4, waterContent: 1 },
-            { name: '盐', ratio: 0.0084 },
-            { name: '糖', ratio: 0.184 },
-            { name: '半干酵母', ratio: 0.013 },
-            { name: '黄油', ratio: 0.08 },
-            { name: '奶粉', ratio: 0.02 },
-            { name: '全蛋', ratio: 0.2, waterContent: 0.75 },
-            { name: '麦芽精', ratio: 0.01 },
+            {
+                name: '烫种',
+                ratio: 0.2576,
+            },
+            {
+                name: '高筋粉',
+                ratio: 0.92,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 0.4,
+                waterContent: 1.0,
+            },
+            {
+                name: '盐',
+                ratio: 0.0084,
+            },
+            {
+                name: '糖',
+                ratio: 0.184,
+            },
+            {
+                name: '半干酵母',
+                ratio: 0.013,
+            },
+            {
+                name: '黄油',
+                ratio: 0.08,
+            },
+            {
+                name: '奶粉',
+                ratio: 0.02,
+            },
+            {
+                name: '全蛋',
+                ratio: 0.2,
+                waterContent: 0.75,
+            },
+            {
+                name: '麦芽精',
+                ratio: 0.01,
+            },
         ],
         products: [
             {
                 name: '熊掌卡仕达',
                 weight: 50,
                 fillings: [
-                    { name: '卡仕达酱', type: 'FILLING', weightInGrams: 30 },
-                    { name: '杏仁片', type: 'FILLING', weightInGrams: 1 },
+                    {
+                        name: '卡仕达酱',
+                        type: 'FILLING',
+                        weightInGrams: 30,
+                    },
                 ],
-                mixIn: [{ name: '香草籽', type: 'MIX_IN', ratio: 0.01 }],
-                procedure: ['烘烤：烤前刷过筛蛋液，一盘10个 上火210 下火180 烤10分钟'],
-            },
-            {
-                name: '小吐司',
-                weight: 250,
-                procedure: ['烘烤：一盘6个 上火210 下火180 烤20分钟'],
+                mixIn: [],
             },
         ],
         procedure: [
-            '搅拌：采用后糖法，搅拌至完全扩展，出缸温度26度',
+            '搅拌：采用后糖法，搅拌至完全扩展',
             '发酵：二发温度35度50分钟',
             '烘烤：烤前刷过筛蛋液，两个杏仁片 一盘10个 上火210 下火180 烤10分钟',
+        ],
+    },
+    {
+        name: '黑麦鲁邦种',
+        type: 'PRE_DOUGH',
+        ingredients: [
+            {
+                name: 'T170',
+                ratio: 1.0,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 1.5,
+                waterContent: 1.0,
+            },
+        ],
+        procedure: [],
+    },
+    {
+        name: '黑麦欧包',
+        type: 'MAIN',
+        targetTemp: 22,
+        ingredients: [
+            {
+                name: '黑麦鲁邦种',
+                ratio: 0.5,
+            },
+            {
+                name: '高筋粉',
+                ratio: 0.8,
+                isFlour: true,
+            },
+            {
+                name: '水',
+                ratio: 0.54,
+                waterContent: 1.0,
+            },
+            {
+                name: '半干酵母',
+                ratio: 0.005,
+            },
+            {
+                name: '盐',
+                ratio: 0.018,
+            },
+            {
+                name: '麦芽精',
+                ratio: 0.01,
+            },
+        ],
+        products: [
+            {
+                name: '提子核桃黑麦欧包',
+                weight: 250,
+                fillings: [],
+                mixIn: [
+                    {
+                        name: '核桃干',
+                        type: 'MIX_IN',
+                        ratio: 0.15,
+                    },
+                    {
+                        name: '酒渍提子干',
+                        type: 'MIX_IN',
+                        ratio: 0.2,
+                    },
+                ],
+            },
+        ],
+        procedure: [
+            '搅拌：黑麦酵头在面筋初步形成后加入，不要打到完全扩展状态',
+            '发酵：20分钟折叠一次',
+            '烘烤：一盘6个 上火250 下火230 烤20分钟 喷3秒蒸汽',
         ],
     },
 ];
