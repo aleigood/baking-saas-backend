@@ -359,7 +359,12 @@ export class CostingService {
         let totalCost = new Prisma.Decimal(0);
         let totalFlourWeight = new Prisma.Decimal(0);
 
-        const processDough = (dough: FullRecipeVersion['doughs'][0], doughWeight: number): CalculatedDoughGroup => {
+        // [核心修改] 增加 parentConversionFactor 参数，用于在递归时计算正确的有效比例
+        const processDough = (
+            dough: FullRecipeVersion['doughs'][0],
+            doughWeight: number,
+            parentConversionFactor: Prisma.Decimal,
+        ): CalculatedDoughGroup => {
             const group: CalculatedDoughGroup = {
                 name: dough.name,
                 ingredients: [],
@@ -387,21 +392,35 @@ export class CostingService {
                 const preDough = ingredient.linkedPreDough?.versions?.[0];
 
                 if (preDough && preDough.doughs[0]) {
-                    // [核心修改] 使用更安全的类型断言，修复lint错误
+                    const preDoughRecipe = preDough.doughs[0];
+                    const preDoughTotalRatio = preDoughRecipe.ingredients.reduce((sum, i) => sum + i.ratio, 0);
+
+                    // [核心修改] 计算新的转换系数，用于下一层递归
+                    let newConversionFactor = parentConversionFactor;
+                    if (preDoughTotalRatio > 0) {
+                        // 新系数 = 父级系数 * (当前预制面团在父级中的比例 / 预制面团自身的总比例)
+                        newConversionFactor = parentConversionFactor.mul(
+                            new Prisma.Decimal(ingredient.ratio).div(preDoughTotalRatio),
+                        );
+                    }
+
                     const preDoughGroup = processDough(
-                        preDough.doughs[0] as FullRecipeVersion['doughs'][0],
+                        preDoughRecipe as FullRecipeVersion['doughs'][0],
                         weight.toNumber(),
+                        newConversionFactor, // 传递新的转换系数
                     );
                     preDoughGroup.name = `${ingredient.linkedPreDough?.name} (用量: ${weight.toDP(1).toNumber()}g)`;
                     doughGroups.push(preDoughGroup);
                 } else if (ingredient.ingredient) {
                     const pricePerKg = getPricePerKg(ingredient.ingredient.id);
                     const cost = new Prisma.Decimal(pricePerKg).div(1000).mul(weight);
+
+                    // [核心修改] 使用转换系数计算相对于主面团的有效比例
+                    const effectiveRatio = new Prisma.Decimal(ingredient.ratio).mul(parentConversionFactor);
+
                     group.ingredients.push({
                         name: ingredient.ingredient.name,
-                        ratio: ingredient.ratio,
-                        // [FIX] 移除 .toDP(1)，保留完整精度
-                        // (FIX: Remove .toDP(1) to preserve full precision)
+                        ratio: effectiveRatio.toNumber(), // 使用计算出的有效比例，而不是原始比例
                         weightInGrams: weight.toNumber(),
                         pricePerKg: pricePerKg, // [核心修复] 直接返回数字，而不是字符串
                         cost: cost.toDP(2).toNumber(),
@@ -418,7 +437,8 @@ export class CostingService {
         };
 
         product.recipeVersion.doughs.forEach((dough) => {
-            const mainDoughGroup = processDough(dough, product.baseDoughWeight);
+            // [核心修改] 初始调用时，转换系数为1
+            const mainDoughGroup = processDough(dough, product.baseDoughWeight, new Prisma.Decimal(1));
             if (mainDoughGroup.ingredients.length > 0) {
                 doughGroups.push(mainDoughGroup);
             }
