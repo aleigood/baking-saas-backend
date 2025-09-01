@@ -198,6 +198,10 @@ export class ProductionTasksService {
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
+            // [核心修复] 增加日期有效性验证，防止因无效日期字符串导致查询失败
+            if (isNaN(targetDate.getTime())) {
+                throw new BadRequestException('提供的日期格式无效。');
+            }
         } else {
             targetDate = new Date();
         }
@@ -431,6 +435,10 @@ export class ProductionTasksService {
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
+            // [核心修复] 增加日期有效性验证，防止因无效日期字符串导致查询失败
+            if (isNaN(targetDate.getTime())) {
+                throw new BadRequestException('提供的日期格式无效。');
+            }
         } else {
             targetDate = new Date();
         }
@@ -814,6 +822,11 @@ export class ProductionTasksService {
                     .filter((ing) => ing.type === 'FILLING' && (ing.ingredient || ing.linkedExtra))
                     .map(mapProductIngredient);
 
+                // [核心新增] 计算表面装饰 (toppings)
+                const toppings = product.ingredients
+                    .filter((ing) => ing.type === 'TOPPING' && (ing.ingredient || ing.linkedExtra))
+                    .map(mapProductIngredient);
+
                 // [核心修复] BUG修复：计算分割重量的逻辑
                 const mainDoughInfo = product.recipeVersion.doughs[0];
                 const lossRatio = mainDoughInfo?.lossRatio || 0;
@@ -839,6 +852,7 @@ export class ProductionTasksService {
                     name: product.name,
                     mixIns,
                     fillings,
+                    toppings, // [核心新增] 将 toppings 添加到返回对象中
                     procedure: product.procedure || [],
                 });
             });

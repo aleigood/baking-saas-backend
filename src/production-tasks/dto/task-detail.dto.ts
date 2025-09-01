@@ -29,6 +29,7 @@ export interface ProductDetails {
     name: string;
     mixIns: TaskIngredientDetail[];
     fillings: TaskIngredientDetail[];
+    toppings: TaskIngredientDetail[]; // [核心新增] 增加表面装饰字段
     procedure: string[];
 }
 
