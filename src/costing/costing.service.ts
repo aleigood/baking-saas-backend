@@ -143,8 +143,11 @@ export class CostingService {
         const mainDough = activeVersion.doughs[0];
 
         // [核心修复] 增加对 null 值的处理，使用 '?? 0'
-        const totalRatio = mainDough.ingredients.reduce((sum, ing) => sum + (ing.ratio ?? 0), 0);
-        if (totalRatio === 0) {
+        const totalRatio = mainDough.ingredients.reduce(
+            (sum, ing) => sum.add(new Prisma.Decimal(ing.ratio ?? 0)),
+            new Prisma.Decimal(0),
+        );
+        if (totalRatio.isZero()) {
             return {
                 id: recipeFamily.id,
                 name: recipeFamily.name,
@@ -160,7 +163,7 @@ export class CostingService {
         const calculatedIngredients = mainDough.ingredients
             .map((ing) => {
                 // [核心修复] 增加对 null 值的处理，使用 '?? 0'
-                const weight = weightPerRatioPoint.mul(ing.ratio ?? 0);
+                const weight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
 
                 // 如果成分是另一个配方（例如预制面团）
                 if (ing.linkedPreDough) {
@@ -364,7 +367,7 @@ export class CostingService {
         // [核心修改] 增加 parentConversionFactor 参数，用于在递归时计算正确的有效比例
         const processDough = (
             dough: FullRecipeVersion['doughs'][0],
-            doughWeight: number,
+            doughWeight: Prisma.Decimal, // [核心重构] 改为 Decimal
             parentConversionFactor: Prisma.Decimal,
             isMainDough: boolean, // 新增一个标志来识别是否是主面团
             flourWeightReference: Prisma.Decimal, // [核心新增] 传入主面团的总面粉重量作为计算基准
@@ -378,18 +381,21 @@ export class CostingService {
             };
 
             // [核心修正] 根据损耗率计算投料总重
-            const lossRatio = dough.lossRatio || 0;
+            const lossRatio = new Prisma.Decimal(dough.lossRatio || 0);
             // 确保不会除以0或负数
-            const divisor = 1 - lossRatio;
-            if (divisor <= 0) {
+            const divisor = new Prisma.Decimal(1).sub(lossRatio);
+            if (divisor.isZero() || divisor.isNegative()) {
                 // 如果损耗率大于等于100%，则无法生产，返回空组
                 return group;
             }
-            const adjustedDoughWeight = new Prisma.Decimal(doughWeight).div(divisor);
+            const adjustedDoughWeight = doughWeight.div(divisor);
 
-            // [核心修复] 增加对 null 值的处理，使用 '?? 0'
-            const totalRatio = dough.ingredients.reduce((sum, i) => sum + (i.ratio ?? 0), 0);
-            if (totalRatio === 0 && !isMainDough) return group;
+            const totalRatio = dough.ingredients.reduce(
+                (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
+                new Prisma.Decimal(0),
+            );
+
+            if (totalRatio.isZero() && !isMainDough) return group;
 
             const currentFlourWeight = isMainDough ? flourWeightReference : adjustedDoughWeight.div(totalRatio);
 
@@ -400,11 +406,14 @@ export class CostingService {
                 let weight: Prisma.Decimal;
                 if (preDough && ingredient.flourRatio) {
                     const preDoughRecipe = preDough.doughs[0];
-                    const preDoughTotalRatio = preDoughRecipe.ingredients.reduce((sum, i) => sum + (i.ratio ?? 0), 0);
-                    const flourForPreDough = flourWeightReference.mul(ingredient.flourRatio);
+                    const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
+                        (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
+                        new Prisma.Decimal(0),
+                    );
+                    const flourForPreDough = flourWeightReference.mul(new Prisma.Decimal(ingredient.flourRatio));
                     weight = flourForPreDough.mul(preDoughTotalRatio);
                 } else {
-                    weight = currentFlourWeight.mul(ingredient.ratio ?? 0);
+                    weight = currentFlourWeight.mul(new Prisma.Decimal(ingredient.ratio ?? 0));
                 }
 
                 if (preDough && preDough.doughs[0]) {
@@ -414,20 +423,19 @@ export class CostingService {
                         newConversionFactor = parentConversionFactor.mul(new Prisma.Decimal(ingredient.flourRatio));
                     } else {
                         const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
-                            (sum, i) => sum + (i.ratio ?? 0),
-                            0,
+                            (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
+                            new Prisma.Decimal(0),
                         );
-                        newConversionFactor =
-                            preDoughTotalRatio > 0
-                                ? parentConversionFactor.mul(
-                                      new Prisma.Decimal(ingredient.ratio ?? 0).div(preDoughTotalRatio),
-                                  )
-                                : parentConversionFactor;
+                        newConversionFactor = !preDoughTotalRatio.isZero()
+                            ? parentConversionFactor.mul(
+                                  new Prisma.Decimal(ingredient.ratio ?? 0).div(preDoughTotalRatio),
+                              )
+                            : parentConversionFactor;
                     }
 
                     const preDoughGroup = processDough(
                         preDoughRecipe as FullRecipeVersion['doughs'][0],
-                        weight.toNumber(),
+                        weight,
                         newConversionFactor,
                         false,
                         flourWeightReference,
@@ -459,34 +467,41 @@ export class CostingService {
         };
 
         const mainDough = product.recipeVersion.doughs[0];
-        const mainDoughTotalRatio = mainDough.ingredients.reduce((sum, i) => {
-            if (i.flourRatio) {
-                const preDough = i.linkedPreDough?.versions?.[0]?.doughs?.[0];
-                if (preDough) {
-                    const preDoughTotalRatio = preDough.ingredients.reduce((s, pi) => s + (pi.ratio ?? 0), 0);
-                    return sum + i.flourRatio * preDoughTotalRatio;
+        const calculateTotalRatioForMain = (dough: FullRecipeVersion['doughs'][0]): Prisma.Decimal => {
+            return dough.ingredients.reduce((sum, i) => {
+                if (i.flourRatio && i.linkedPreDough) {
+                    const preDough = i.linkedPreDough.versions?.[0]?.doughs?.[0];
+                    if (preDough) {
+                        const preDoughTotalRatio = preDough.ingredients.reduce(
+                            (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
+                            new Prisma.Decimal(0),
+                        );
+                        return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio));
+                    }
                 }
-            }
-            return sum + (i.ratio ?? 0);
-        }, 0);
+                return sum.add(new Prisma.Decimal(i.ratio ?? 0));
+            }, new Prisma.Decimal(0));
+        };
 
-        const mainDoughLossRatio = mainDough.lossRatio || 0;
-        const mainDoughDivisor = 1 - mainDoughLossRatio;
-        const adjustedMainDoughWeight =
-            mainDoughDivisor > 0
-                ? new Prisma.Decimal(product.baseDoughWeight).div(mainDoughDivisor)
-                : new Prisma.Decimal(0);
+        const mainDoughTotalRatio = calculateTotalRatioForMain(mainDough);
+        const mainDoughLossRatio = new Prisma.Decimal(mainDough.lossRatio || 0);
+        const mainDoughDivisor = new Prisma.Decimal(1).sub(mainDoughLossRatio);
+        const adjustedMainDoughWeight = !mainDoughDivisor.isZero()
+            ? new Prisma.Decimal(product.baseDoughWeight).div(mainDoughDivisor)
+            : new Prisma.Decimal(0);
 
-        const flourWeightReference =
-            mainDoughTotalRatio > 0 ? adjustedMainDoughWeight.div(mainDoughTotalRatio) : new Prisma.Decimal(0);
+        const flourWeightReference = !mainDoughTotalRatio.isZero()
+            ? adjustedMainDoughWeight.div(mainDoughTotalRatio)
+            : new Prisma.Decimal(0);
 
         const mainDoughGroup = processDough(
             mainDough,
-            product.baseDoughWeight,
+            new Prisma.Decimal(product.baseDoughWeight),
             new Prisma.Decimal(1),
             true,
             flourWeightReference,
         );
+
         if (mainDoughGroup.ingredients.length > 0) {
             doughGroups.push(mainDoughGroup);
         }
@@ -502,7 +517,7 @@ export class CostingService {
             const pricePerKg = getPricePerKg(id);
             let finalWeightInGrams = new Prisma.Decimal(0);
             if (ing.type === 'MIX_IN' && ing.ratio) {
-                finalWeightInGrams = totalFlourWeight.mul(ing.ratio);
+                finalWeightInGrams = totalFlourWeight.mul(new Prisma.Decimal(ing.ratio));
             } else if (ing.weightInGrams) {
                 finalWeightInGrams = new Prisma.Decimal(ing.weightInGrams);
             }
@@ -664,51 +679,51 @@ export class CostingService {
         }) as Promise<FullProduct | null>;
     }
 
-    private async _getFlattenedIngredients(product: FullProduct): Promise<Map<string, number>> {
-        const flattenedIngredients = new Map<string, number>();
+    private async _getFlattenedIngredients(product: FullProduct): Promise<Map<string, Prisma.Decimal>> {
+        const flattenedIngredients = new Map<string, Prisma.Decimal>(); // [核心重构] 改为 Decimal
 
         const mainDough = product.recipeVersion.doughs[0];
         if (!mainDough) return flattenedIngredients;
 
-        const mainDoughLossRatio = mainDough.lossRatio || 0;
-        const mainDoughDivisor = 1 - mainDoughLossRatio;
-        const adjustedMainDoughWeight =
-            mainDoughDivisor > 0
-                ? new Prisma.Decimal(product.baseDoughWeight).div(mainDoughDivisor)
-                : new Prisma.Decimal(0);
+        const mainDoughLossRatio = new Prisma.Decimal(mainDough.lossRatio || 0);
+        const mainDoughDivisor = new Prisma.Decimal(1).sub(mainDoughLossRatio);
+        const adjustedMainDoughWeight = !mainDoughDivisor.isZero()
+            ? new Prisma.Decimal(product.baseDoughWeight).div(mainDoughDivisor)
+            : new Prisma.Decimal(0);
 
-        const calculateTotalRatio = (dough: FullRecipeVersion['doughs'][0]): number => {
+        const calculateTotalRatio = (dough: FullRecipeVersion['doughs'][0]): Prisma.Decimal => {
             return dough.ingredients.reduce((sum, i) => {
                 if (i.flourRatio && i.linkedPreDough) {
                     const preDough = i.linkedPreDough.versions?.[0]?.doughs?.[0];
                     if (preDough) {
-                        const preDoughTotalRatio = calculateTotalRatio(preDough as FullRecipeVersion['doughs'][0]);
-                        return sum + i.flourRatio * preDoughTotalRatio;
+                        const preDoughTotalRatio = preDough.ingredients.reduce(
+                            (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
+                            new Prisma.Decimal(0),
+                        );
+                        return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio));
                     }
                 }
-                return sum + (i.ratio ?? 0);
-            }, 0);
+                return sum.add(new Prisma.Decimal(i.ratio ?? 0));
+            }, new Prisma.Decimal(0));
         };
 
         const mainDoughTotalRatio = calculateTotalRatio(mainDough);
-        const flourWeightReference =
-            mainDoughTotalRatio > 0 ? adjustedMainDoughWeight.div(mainDoughTotalRatio) : new Prisma.Decimal(0);
+        const flourWeightReference = !mainDoughTotalRatio.isZero()
+            ? adjustedMainDoughWeight.div(mainDoughTotalRatio)
+            : new Prisma.Decimal(0);
 
         const processDough = (dough: FullRecipeVersion['doughs'][0], flourRef: Prisma.Decimal) => {
             for (const ing of dough.ingredients) {
                 if (ing.linkedPreDough && ing.flourRatio) {
                     const preDough = ing.linkedPreDough.versions?.[0]?.doughs?.[0];
                     if (preDough) {
-                        const flourForPreDough = flourRef.mul(ing.flourRatio);
-                        const preDoughTotalRatio = preDough.ingredients.reduce((s, pi) => s + (pi.ratio ?? 0), 0);
-                        if (preDoughTotalRatio > 0) {
-                            processDough(preDough as FullRecipeVersion['doughs'][0], flourForPreDough);
-                        }
+                        const flourForPreDough = flourRef.mul(new Prisma.Decimal(ing.flourRatio));
+                        processDough(preDough as FullRecipeVersion['doughs'][0], flourForPreDough);
                     }
                 } else if (ing.ingredientId && ing.ratio) {
-                    const ingredientWeight = flourRef.mul(ing.ratio).toNumber();
-                    const currentWeight = flattenedIngredients.get(ing.ingredientId) || 0;
-                    flattenedIngredients.set(ing.ingredientId, currentWeight + ingredientWeight);
+                    const ingredientWeight = flourRef.mul(new Prisma.Decimal(ing.ratio));
+                    const currentWeight = flattenedIngredients.get(ing.ingredientId) || new Prisma.Decimal(0);
+                    flattenedIngredients.set(ing.ingredientId, currentWeight.add(ingredientWeight));
                 }
             }
         };
@@ -729,16 +744,16 @@ export class CostingService {
 
         product.ingredients?.forEach((pIng) => {
             if (pIng.ingredientId) {
-                let finalWeightInGrams = 0;
+                let finalWeightInGrams = new Prisma.Decimal(0);
                 if (pIng.weightInGrams) {
-                    finalWeightInGrams = pIng.weightInGrams;
+                    finalWeightInGrams = new Prisma.Decimal(pIng.weightInGrams);
                 } else if (pIng.ratio && pIng.type === 'MIX_IN') {
-                    finalWeightInGrams = totalFlourWeight.mul(pIng.ratio).toNumber();
+                    finalWeightInGrams = totalFlourWeight.mul(new Prisma.Decimal(pIng.ratio));
                 }
 
-                if (finalWeightInGrams > 0) {
-                    const currentWeight = flattenedIngredients.get(pIng.ingredientId) || 0;
-                    flattenedIngredients.set(pIng.ingredientId, currentWeight + finalWeightInGrams);
+                if (finalWeightInGrams.gt(0)) {
+                    const currentWeight = flattenedIngredients.get(pIng.ingredientId) || new Prisma.Decimal(0);
+                    flattenedIngredients.set(pIng.ingredientId, currentWeight.add(finalWeightInGrams));
                 }
             }
         });
@@ -774,13 +789,13 @@ export class CostingService {
 
         const result: ConsumptionDetail[] = [];
         for (const ingredient of ingredients) {
-            const totalConsumed = (flatIngredients.get(ingredient.id) || 0) * quantity;
-            if (totalConsumed > 0) {
+            const totalConsumed = (flatIngredients.get(ingredient.id) || new Prisma.Decimal(0)).mul(quantity);
+            if (totalConsumed.gt(0)) {
                 result.push({
                     ingredientId: ingredient.id,
                     ingredientName: ingredient.name,
                     activeSkuId: ingredient.activeSkuId,
-                    totalConsumed,
+                    totalConsumed: totalConsumed.toNumber(),
                 });
             }
         }
@@ -807,10 +822,11 @@ export class CostingService {
         const priceMap = new Map<string, Prisma.Decimal>();
 
         for (const ingredient of ingredients) {
-            if (ingredient.currentStockInGrams > 0 && ingredient.currentStockValue.gt(0)) {
-                const pricePerGram = new Prisma.Decimal(ingredient.currentStockValue).div(
-                    ingredient.currentStockInGrams,
-                );
+            const stockInGrams = new Prisma.Decimal(ingredient.currentStockInGrams);
+            const stockValue = new Prisma.Decimal(ingredient.currentStockValue);
+
+            if (stockInGrams.gt(0) && stockValue.gt(0)) {
+                const pricePerGram = stockValue.div(stockInGrams);
                 priceMap.set(ingredient.id, pricePerGram);
             } else {
                 priceMap.set(ingredient.id, new Prisma.Decimal(0));

@@ -456,6 +456,7 @@ export class RecipesService {
                     .map((ing) => ({
                         id: ing.ingredient!.id,
                         name: ing.ingredient!.name,
+                        // [核心重构] 全面采用Prisma.Decimal保证精度
                         ratio: new Prisma.Decimal(ing.ratio!).mul(100).toNumber(),
                     })),
                 procedure: doughSource.procedure || [],
@@ -477,16 +478,18 @@ export class RecipesService {
                 const preDoughRecipe = preDoughActiveVersion?.doughs?.[0];
 
                 if (preDoughRecipe) {
-                    // [核心修改] 使用 flourRatio 来反向计算，更贴近用户意图
+                    // [核心重构] 直接使用flourRatio，这是用户的原始意图，避免任何不准确的转换
                     const flourRatioInMainDough = ing.flourRatio
                         ? new Prisma.Decimal(ing.flourRatio)
                         : new Prisma.Decimal(0);
 
+                    // 这里的计算仅用于在UI上展示预估的百分比，不影响核心逻辑
                     const ingredientsForTemplate = preDoughRecipe.ingredients
                         .filter((i) => i.ingredient !== null && i.ratio !== null)
                         .map((i) => ({
                             id: i.ingredient!.id,
                             name: i.ingredient!.name,
+                            // [核心重构] 全面采用Prisma.Decimal保证精度
                             ratio: flourRatioInMainDough.mul(i.ratio!).mul(100).toNumber(),
                         }));
 
@@ -494,6 +497,7 @@ export class RecipesService {
                         id: preDoughFamily.id,
                         name: preDoughFamily.name,
                         type: 'PRE_DOUGH',
+                        // [核心重构] 直接返回存储的flourRatio
                         flourRatioInMainDough: flourRatioInMainDough.mul(100).toNumber(),
                         ingredients: ingredientsForTemplate,
                         procedure: preDoughRecipe.procedure,
@@ -503,6 +507,7 @@ export class RecipesService {
                 mainDoughIngredientsForForm.push({
                     id: ing.ingredient.id,
                     name: ing.ingredient.name,
+                    // [核心重构] 全面采用Prisma.Decimal保证精度
                     ratio: new Prisma.Decimal(ing.ratio).mul(100).toNumber(),
                 });
             }
@@ -530,6 +535,7 @@ export class RecipesService {
                         .filter((ing) => ing.type === type && (ing.ingredient || ing.linkedExtra))
                         .map((ing) => ({
                             id: ing.ingredient?.id || ing.linkedExtra?.id || null,
+                            // [核心重构] 全面采用Prisma.Decimal保证精度
                             ratio: ing.ratio ? new Prisma.Decimal(ing.ratio).mul(100).toNumber() : null,
                             weightInGrams: ing.weightInGrams,
                         }));
