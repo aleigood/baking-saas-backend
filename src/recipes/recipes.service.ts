@@ -194,6 +194,7 @@ export class RecipesService {
         );
     }
 
+    // [核心重构] 修改 findAll 方法，使其返回分类、排序和聚合后的数据
     async findAll(tenantId: string) {
         const recipeFamilies = await this.prisma.recipeFamily.findMany({
             where: {
@@ -219,24 +220,16 @@ export class RecipesService {
         const familiesWithCounts = await Promise.all(
             recipeFamilies.map(async (family) => {
                 const activeVersion = family.versions.find((v) => v.isActive);
+                const productCount = activeVersion?.products?.length || 0;
+                const ingredientCount =
+                    activeVersion?.doughs.reduce((sum, dough) => sum + (dough._count?.ingredients || 0), 0) || 0;
+
+                // 制作次数的计算逻辑保持不变
                 if (!activeVersion || activeVersion.products.length === 0) {
-                    return { ...family, productionCount: 0, productionTaskCount: 0 };
+                    return { ...family, productCount, ingredientCount, productionTaskCount: 0 };
                 }
 
                 const productIds = activeVersion.products.map((p) => p.id);
-
-                const aggregateResult = await this.prisma.productionTaskItem.aggregate({
-                    _sum: {
-                        quantity: true,
-                    },
-                    where: {
-                        productId: { in: productIds },
-                        task: {
-                            status: 'COMPLETED',
-                            deletedAt: null,
-                        },
-                    },
-                });
 
                 const distinctTasks = await this.prisma.productionTaskItem.groupBy({
                     by: ['taskId'],
@@ -251,13 +244,26 @@ export class RecipesService {
 
                 return {
                     ...family,
-                    productionCount: aggregateResult._sum.quantity || 0,
+                    productCount,
+                    ingredientCount,
                     productionTaskCount: distinctTasks.length,
                 };
             }),
         );
 
-        return familiesWithCounts;
+        // 在服务端进行分类和排序
+        const mainRecipes = familiesWithCounts
+            .filter((family) => family.type === 'MAIN')
+            .sort((a, b) => (b.productionTaskCount || 0) - (a.productionTaskCount || 0));
+
+        const otherRecipes = familiesWithCounts
+            .filter((family) => family.type === 'PRE_DOUGH' || family.type === 'EXTRA')
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+        return {
+            mainRecipes,
+            otherRecipes,
+        };
     }
 
     async findOne(familyId: string) {
