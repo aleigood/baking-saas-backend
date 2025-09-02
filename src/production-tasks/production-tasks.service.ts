@@ -409,7 +409,6 @@ export class ProductionTasksService {
     }
 
     async findActive(tenantId: string, date?: string) {
-        // [核心修改] 并行执行两个查询：一个是获取当天任务，另一个是获取今日待完成统计
         const [tasksForDate, todayStats] = await Promise.all([
             this.findTasksForDate(tenantId, date),
             this.getTodaysPendingStats(tenantId),
@@ -417,11 +416,30 @@ export class ProductionTasksService {
 
         const prepTask = await this._getPrepTask(tenantId, date);
 
-        // [核心修改] 将统计数据和任务列表合并到同一个响应中返回
+        // [核心重构] 在后端对常规任务进行排序
+        const inProgressTasks = tasksForDate.filter((task) => task.status === 'IN_PROGRESS');
+        const pendingTasks = tasksForDate.filter((task) => task.status === 'PENDING');
+
+        // 进行中任务按开始日期降序
+        inProgressTasks.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
+        // 待开始任务按开始日期升序
+        pendingTasks.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+        const sortedRegularTasks = [...inProgressTasks, ...pendingTasks];
+
+        // [核心重构] 在后端合并任务列表
+        const combinedTasks: (ProductionTask | (PrepTask & { status: 'PREP' }))[] = [...sortedRegularTasks];
+        if (prepTask) {
+            // 将 prepTask 转换为与 ProductionTaskDto 兼容的结构并插入到列表开头
+            combinedTasks.unshift({ ...prepTask, status: 'PREP' });
+        }
+
         return {
             stats: todayStats,
-            tasks: tasksForDate,
-            prepTask,
+            // [核心修改] tasks 字段现在是包含 prepTask (如果存在) 并已排序的完整列表
+            tasks: combinedTasks,
+            // [核心修改] prepTask 字段不再单独返回，将其设为 null 以保持 API 结构一致性
+            prepTask: null,
         };
     }
 
