@@ -73,6 +73,15 @@ export class RecipesController {
     }
 
     /**
+     * [核心新增] 获取用于创建生产任务的产品列表，按配方分组
+     */
+    @Get('products-for-tasks')
+    findProductsForTasks(@GetUser() user: UserPayload) {
+        const tenantId = user.tenantId;
+        return this.recipesService.findProductsForTasks(tenantId);
+    }
+
+    /**
      * [核心修复] 修正 findOne 方法的调用
      * 根据配方族ID获取配方的详细信息，包含所有版本。
      * @param id 配方族ID

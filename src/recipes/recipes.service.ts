@@ -266,6 +266,55 @@ export class RecipesService {
         };
     }
 
+    // [核心新增] 新增一个专门为创建生产任务页面提供产品列表的方法
+    async findProductsForTasks(tenantId: string) {
+        // 查找所有未停用的主面团配方
+        const recipeFamilies = await this.prisma.recipeFamily.findMany({
+            where: {
+                tenantId,
+                type: 'MAIN',
+                deletedAt: null,
+            },
+            include: {
+                // 只加载激活的配方版本
+                versions: {
+                    where: { isActive: true },
+                    // 加载版本下的所有产品
+                    include: {
+                        products: {
+                            orderBy: {
+                                name: 'asc', // 按产品名称排序
+                            },
+                        },
+                    },
+                },
+            },
+            orderBy: {
+                name: 'asc', // 按配方名称排序
+            },
+        });
+
+        // 将扁平的产品列表按配方名称（类型）进行分组
+        const groupedProducts: Record<string, { id: string; name: string }[]> = {};
+        recipeFamilies.forEach((family) => {
+            const activeVersion = family.versions[0];
+            if (activeVersion && activeVersion.products.length > 0) {
+                // 使用配方名称作为分组的 key
+                if (!groupedProducts[family.name]) {
+                    groupedProducts[family.name] = [];
+                }
+                activeVersion.products.forEach((product) => {
+                    groupedProducts[family.name].push({
+                        id: product.id,
+                        name: product.name,
+                    });
+                });
+            }
+        });
+
+        return groupedProducts;
+    }
+
     async findOne(familyId: string) {
         const family = await this.prisma.recipeFamily.findFirst({
             where: {
