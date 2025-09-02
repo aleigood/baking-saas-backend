@@ -367,6 +367,7 @@ export class CostingService {
             doughWeight: number,
             parentConversionFactor: Prisma.Decimal,
             isMainDough: boolean, // 新增一个标志来识别是否是主面团
+            flourWeightReference: Prisma.Decimal, // [核心新增] 传入主面团的总面粉重量作为计算基准
         ): CalculatedDoughGroup => {
             const group: CalculatedDoughGroup = {
                 // [核心修改] 如果是主面团，则使用产品名称，否则使用面团（配方）名称
@@ -388,35 +389,48 @@ export class CostingService {
 
             // [核心修复] 增加对 null 值的处理，使用 '?? 0'
             const totalRatio = dough.ingredients.reduce((sum, i) => sum + (i.ratio ?? 0), 0);
-            if (totalRatio === 0) return group;
+            if (totalRatio === 0 && !isMainDough) return group;
 
-            const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
+            const currentFlourWeight = isMainDough ? flourWeightReference : adjustedDoughWeight.div(totalRatio);
 
             for (const ingredient of dough.ingredients) {
-                // [核心修复] 增加对 null 值的处理，使用 '?? 0'
-                const weight = weightPerRatioPoint.mul(ingredient.ratio ?? 0);
                 const preDough = ingredient.linkedPreDough?.versions?.[0];
+
+                // [核心重构] 完全基于意图(flourRatio)进行动态计算
+                let weight: Prisma.Decimal;
+                if (preDough && ingredient.flourRatio) {
+                    const preDoughRecipe = preDough.doughs[0];
+                    const preDoughTotalRatio = preDoughRecipe.ingredients.reduce((sum, i) => sum + (i.ratio ?? 0), 0);
+                    const flourForPreDough = flourWeightReference.mul(ingredient.flourRatio);
+                    weight = flourForPreDough.mul(preDoughTotalRatio);
+                } else {
+                    weight = currentFlourWeight.mul(ingredient.ratio ?? 0);
+                }
 
                 if (preDough && preDough.doughs[0]) {
                     const preDoughRecipe = preDough.doughs[0];
-                    // [核心修复] 增加对 null 值的处理，使用 '?? 0'
-                    const preDoughTotalRatio = preDoughRecipe.ingredients.reduce((sum, i) => sum + (i.ratio ?? 0), 0);
-
-                    // [核心修改] 计算新的转换系数，用于下一层递归
-                    let newConversionFactor = parentConversionFactor;
-                    if (preDoughTotalRatio > 0) {
-                        // 新系数 = 父级系数 * (当前预制面团在父级中的比例 / 预制面团自身的总比例)
-                        newConversionFactor = parentConversionFactor.mul(
-                            // [核心修复] 增加对 null 值的处理，使用 '?? 0'
-                            new Prisma.Decimal(ingredient.ratio ?? 0).div(preDoughTotalRatio),
+                    let newConversionFactor: Prisma.Decimal;
+                    if (ingredient.flourRatio && ingredient.flourRatio > 0) {
+                        newConversionFactor = parentConversionFactor.mul(new Prisma.Decimal(ingredient.flourRatio));
+                    } else {
+                        const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
+                            (sum, i) => sum + (i.ratio ?? 0),
+                            0,
                         );
+                        newConversionFactor =
+                            preDoughTotalRatio > 0
+                                ? parentConversionFactor.mul(
+                                      new Prisma.Decimal(ingredient.ratio ?? 0).div(preDoughTotalRatio),
+                                  )
+                                : parentConversionFactor;
                     }
 
                     const preDoughGroup = processDough(
                         preDoughRecipe as FullRecipeVersion['doughs'][0],
                         weight.toNumber(),
-                        newConversionFactor, // 传递新的转换系数
-                        false, // 预制面团不是主面团
+                        newConversionFactor,
+                        false,
+                        flourWeightReference,
                     );
                     preDoughGroup.name = `${ingredient.linkedPreDough?.name} (用量: ${weight.toDP(1).toNumber()}g)`;
                     doughGroups.push(preDoughGroup);
@@ -424,20 +438,18 @@ export class CostingService {
                     const pricePerKg = getPricePerKg(ingredient.ingredient.id);
                     const cost = new Prisma.Decimal(pricePerKg).div(1000).mul(weight);
 
-                    // [核心修改] 使用转换系数计算相对于主面团的有效比例
-                    // [核心修复] 增加对 null 值的处理，使用 '?? 0'
                     const effectiveRatio = new Prisma.Decimal(ingredient.ratio ?? 0).mul(parentConversionFactor);
 
                     group.ingredients.push({
                         name: ingredient.ingredient.name,
-                        ratio: effectiveRatio.toNumber(), // 使用计算出的有效比例，而不是原始比例
+                        ratio: effectiveRatio.toNumber(),
                         weightInGrams: weight.toNumber(),
-                        pricePerKg: pricePerKg, // [核心修复] 直接返回数字，而不是字符串
+                        pricePerKg: pricePerKg,
                         cost: cost.toDP(2).toNumber(),
                     });
                     group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
 
-                    if (ingredient.ingredient.isFlour) {
+                    if (ingredient.ingredient.isFlour && isMainDough) {
                         totalFlourWeight = totalFlourWeight.add(weight);
                     }
                 }
@@ -446,13 +458,38 @@ export class CostingService {
             return group;
         };
 
-        product.recipeVersion.doughs.forEach((dough, index) => {
-            // [核心修改] 初始调用时，转换系数为1，并标记第一个 dough 为主面团
-            const mainDoughGroup = processDough(dough, product.baseDoughWeight, new Prisma.Decimal(1), index === 0);
-            if (mainDoughGroup.ingredients.length > 0) {
-                doughGroups.push(mainDoughGroup);
+        const mainDough = product.recipeVersion.doughs[0];
+        const mainDoughTotalRatio = mainDough.ingredients.reduce((sum, i) => {
+            if (i.flourRatio) {
+                const preDough = i.linkedPreDough?.versions?.[0]?.doughs?.[0];
+                if (preDough) {
+                    const preDoughTotalRatio = preDough.ingredients.reduce((s, pi) => s + (pi.ratio ?? 0), 0);
+                    return sum + i.flourRatio * preDoughTotalRatio;
+                }
             }
-        });
+            return sum + (i.ratio ?? 0);
+        }, 0);
+
+        const mainDoughLossRatio = mainDough.lossRatio || 0;
+        const mainDoughDivisor = 1 - mainDoughLossRatio;
+        const adjustedMainDoughWeight =
+            mainDoughDivisor > 0
+                ? new Prisma.Decimal(product.baseDoughWeight).div(mainDoughDivisor)
+                : new Prisma.Decimal(0);
+
+        const flourWeightReference =
+            mainDoughTotalRatio > 0 ? adjustedMainDoughWeight.div(mainDoughTotalRatio) : new Prisma.Decimal(0);
+
+        const mainDoughGroup = processDough(
+            mainDough,
+            product.baseDoughWeight,
+            new Prisma.Decimal(1),
+            true,
+            flourWeightReference,
+        );
+        if (mainDoughGroup.ingredients.length > 0) {
+            doughGroups.push(mainDoughGroup);
+        }
 
         const getProductIngredientTypeName = (type: ProductIngredientType) => {
             const map = { MIX_IN: '搅拌原料', FILLING: '馅料', TOPPING: '表面装饰' };
@@ -477,8 +514,6 @@ export class CostingService {
                 name: name,
                 type: getProductIngredientTypeName(ing.type),
                 cost: cost.toDP(2).toNumber(),
-                // [FIX] 移除 .toDP(1)，保留完整精度
-                // (FIX: Remove .toDP(1) to preserve full precision)
                 weightInGrams: finalWeightInGrams.toNumber(),
                 ratio: ing.ratio ?? undefined,
             };
@@ -630,39 +665,55 @@ export class CostingService {
     }
 
     private async _getFlattenedIngredients(product: FullProduct): Promise<Map<string, number>> {
-        const flattenedIngredients = new Map<string, number>(); // Map<ingredientId, weightInGrams>
+        const flattenedIngredients = new Map<string, number>();
 
-        const processDough = (dough: FullRecipeVersion['doughs'][0], doughWeight: number) => {
-            const lossRatio = dough.lossRatio || 0;
-            const divisor = 1 - lossRatio;
-            if (divisor <= 0) {
-                return;
-            }
-            const adjustedDoughWeight = new Prisma.Decimal(doughWeight).div(divisor);
+        const mainDough = product.recipeVersion.doughs[0];
+        if (!mainDough) return flattenedIngredients;
 
-            // [核心修复] 增加对 null 值的处理，使用 '?? 0'
-            const totalRatio = dough.ingredients.reduce((sum, ing) => sum + (ing.ratio ?? 0), 0);
-            if (totalRatio === 0) return;
+        const mainDoughLossRatio = mainDough.lossRatio || 0;
+        const mainDoughDivisor = 1 - mainDoughLossRatio;
+        const adjustedMainDoughWeight =
+            mainDoughDivisor > 0
+                ? new Prisma.Decimal(product.baseDoughWeight).div(mainDoughDivisor)
+                : new Prisma.Decimal(0);
 
-            const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
+        const calculateTotalRatio = (dough: FullRecipeVersion['doughs'][0]): number => {
+            return dough.ingredients.reduce((sum, i) => {
+                if (i.flourRatio && i.linkedPreDough) {
+                    const preDough = i.linkedPreDough.versions?.[0]?.doughs?.[0];
+                    if (preDough) {
+                        const preDoughTotalRatio = calculateTotalRatio(preDough as FullRecipeVersion['doughs'][0]);
+                        return sum + i.flourRatio * preDoughTotalRatio;
+                    }
+                }
+                return sum + (i.ratio ?? 0);
+            }, 0);
+        };
 
+        const mainDoughTotalRatio = calculateTotalRatio(mainDough);
+        const flourWeightReference =
+            mainDoughTotalRatio > 0 ? adjustedMainDoughWeight.div(mainDoughTotalRatio) : new Prisma.Decimal(0);
+
+        const processDough = (dough: FullRecipeVersion['doughs'][0], flourRef: Prisma.Decimal) => {
             for (const ing of dough.ingredients) {
-                // [核心修复] 增加对 null 值的处理，使用 '?? 0'
-                const ingredientWeight = weightPerRatioPoint.mul(ing.ratio ?? 0).toNumber();
-                const preDough = ing.linkedPreDough?.versions?.[0];
-
-                if (preDough && preDough.doughs[0]) {
-                    processDough(preDough.doughs[0] as FullRecipeVersion['doughs'][0], ingredientWeight);
-                } else if (ing.ingredientId) {
+                if (ing.linkedPreDough && ing.flourRatio) {
+                    const preDough = ing.linkedPreDough.versions?.[0]?.doughs?.[0];
+                    if (preDough) {
+                        const flourForPreDough = flourRef.mul(ing.flourRatio);
+                        const preDoughTotalRatio = preDough.ingredients.reduce((s, pi) => s + (pi.ratio ?? 0), 0);
+                        if (preDoughTotalRatio > 0) {
+                            processDough(preDough as FullRecipeVersion['doughs'][0], flourForPreDough);
+                        }
+                    }
+                } else if (ing.ingredientId && ing.ratio) {
+                    const ingredientWeight = flourRef.mul(ing.ratio).toNumber();
                     const currentWeight = flattenedIngredients.get(ing.ingredientId) || 0;
                     flattenedIngredients.set(ing.ingredientId, currentWeight + ingredientWeight);
                 }
             }
         };
 
-        product.recipeVersion.doughs.forEach((dough) => {
-            processDough(dough, product.baseDoughWeight);
-        });
+        processDough(mainDough, flourWeightReference);
 
         let totalFlourWeight = new Prisma.Decimal(0);
         const ingredientIds = Array.from(flattenedIngredients.keys());

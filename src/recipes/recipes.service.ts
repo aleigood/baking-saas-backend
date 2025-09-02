@@ -153,8 +153,9 @@ export class RecipesService {
                     await tx.doughIngredient.create({
                         data: {
                             doughId: dough.id,
-                            // [核心修改] ratio 现在存储的是计算后的总重比例，或普通原料的比例
-                            ratio: ingredientDto.ratio,
+                            // [核心修改] 对于预制面团，ratio 显式存为 null，因为它将动态计算。
+                            // 普通原料则正常存储其 ratio。
+                            ratio: linkedPreDough ? null : ingredientDto.ratio,
                             // [核心修改] flourRatio 存储的是用户的原始意图比例
                             flourRatio: ingredientDto.flourRatio,
                             ingredientId: linkedPreDough ? null : ingredientDto.ingredientId,
@@ -732,12 +733,14 @@ export class RecipesService {
         return new Map(families.map((f) => [f.name, f as PreloadedRecipeFamily]));
     }
 
-    // [核心新增] 辅助函数：计算预制面团的总重比例
+    // [核心修改] 此函数现在仅用于为普通原料计算ratio，预制面团的ratio将不再预先计算和存储。
     private calculatePreDoughTotalRatio(
         ingredients: DoughIngredientDto[],
         preDoughFamilies: Map<string, PreloadedRecipeFamily>,
     ) {
         for (const ing of ingredients) {
+            // 这个`if`块的逻辑现在只在创建时临时计算总重比，用于烘焙师百分比的验证，
+            // 但计算出的`ratio`将不再保存到数据库中（如`createVersionInternal`中的修改所示）。
             if (ing.flourRatio !== undefined && ing.flourRatio !== null) {
                 const preDoughFamily = preDoughFamilies.get(ing.name);
                 const preDoughRecipe = preDoughFamily?.versions[0]?.doughs[0];
@@ -749,7 +752,7 @@ export class RecipesService {
                 const preDoughTotalRatioSum = preDoughRecipe.ingredients.reduce((sum, i) => sum + (i.ratio ?? 0), 0);
 
                 if (preDoughTotalRatioSum > 0) {
-                    // 总重比例 = 面粉比例 * 预制面团自身总比例
+                    // 临时计算总重比例，仅用于验证，不用于存储
                     ing.ratio = ing.flourRatio * preDoughTotalRatioSum;
                 } else {
                     ing.ratio = 0;

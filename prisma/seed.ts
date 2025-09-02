@@ -1068,27 +1068,12 @@ async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[])
                         where: { tenantId, name: ing.name, type: 'PRE_DOUGH', deletedAt: null },
                     });
 
-                    // [核心修改] 新增逻辑，如果提供了 flourRatio，则动态计算 ratio
-                    let finalRatio = ing.ratio;
-                    if (ing.flourRatio && linkedPreDough) {
-                        const preDoughActiveVersion = await tx.recipeVersion.findFirst({
-                            where: { familyId: linkedPreDough.id, isActive: true },
-                            include: { doughs: { include: { ingredients: true } } },
-                        });
-                        const preDoughRecipe = preDoughActiveVersion?.doughs[0];
-                        if (preDoughRecipe) {
-                            const preDoughTotalRatioSum = preDoughRecipe.ingredients.reduce(
-                                (sum, i) => sum + (i.ratio ?? 0),
-                                0,
-                            );
-                            finalRatio = ing.flourRatio * preDoughTotalRatioSum;
-                        }
-                    }
-
+                    // [核心修改] 不再为预制面团预计算和存储 ratio
                     await tx.doughIngredient.create({
                         data: {
                             doughId: dough.id,
-                            ratio: finalRatio,
+                            // 如果是预制面团，ratio为null；否则使用配方数据中的ratio
+                            ratio: linkedPreDough ? null : ing.ratio,
                             flourRatio: ing.flourRatio,
                             ingredientId: linkedIngredient ? linkedIngredient.id : null,
                             linkedPreDoughId: linkedPreDough ? linkedPreDough.id : null,
