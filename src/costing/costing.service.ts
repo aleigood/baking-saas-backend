@@ -142,7 +142,8 @@ export class CostingService {
         const activeVersion = recipeFamily.versions[0];
         const mainDough = activeVersion.doughs[0];
 
-        const totalRatio = mainDough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+        // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+        const totalRatio = mainDough.ingredients.reduce((sum, ing) => sum + (ing.ratio ?? 0), 0);
         if (totalRatio === 0) {
             return {
                 id: recipeFamily.id,
@@ -158,7 +159,8 @@ export class CostingService {
         // [核心修改] 更新原料计算逻辑以区分普通原料和自制配方原料
         const calculatedIngredients = mainDough.ingredients
             .map((ing) => {
-                const weight = weightPerRatioPoint.mul(ing.ratio);
+                // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                const weight = weightPerRatioPoint.mul(ing.ratio ?? 0);
 
                 // 如果成分是另一个配方（例如预制面团）
                 if (ing.linkedPreDough) {
@@ -384,25 +386,29 @@ export class CostingService {
             }
             const adjustedDoughWeight = new Prisma.Decimal(doughWeight).div(divisor);
 
-            const totalRatio = dough.ingredients.reduce((sum, i) => sum + i.ratio, 0);
+            // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+            const totalRatio = dough.ingredients.reduce((sum, i) => sum + (i.ratio ?? 0), 0);
             if (totalRatio === 0) return group;
 
             const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
 
             for (const ingredient of dough.ingredients) {
-                const weight = weightPerRatioPoint.mul(ingredient.ratio);
+                // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                const weight = weightPerRatioPoint.mul(ingredient.ratio ?? 0);
                 const preDough = ingredient.linkedPreDough?.versions?.[0];
 
                 if (preDough && preDough.doughs[0]) {
                     const preDoughRecipe = preDough.doughs[0];
-                    const preDoughTotalRatio = preDoughRecipe.ingredients.reduce((sum, i) => sum + i.ratio, 0);
+                    // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                    const preDoughTotalRatio = preDoughRecipe.ingredients.reduce((sum, i) => sum + (i.ratio ?? 0), 0);
 
                     // [核心修改] 计算新的转换系数，用于下一层递归
                     let newConversionFactor = parentConversionFactor;
                     if (preDoughTotalRatio > 0) {
                         // 新系数 = 父级系数 * (当前预制面团在父级中的比例 / 预制面团自身的总比例)
                         newConversionFactor = parentConversionFactor.mul(
-                            new Prisma.Decimal(ingredient.ratio).div(preDoughTotalRatio),
+                            // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                            new Prisma.Decimal(ingredient.ratio ?? 0).div(preDoughTotalRatio),
                         );
                     }
 
@@ -419,7 +425,8 @@ export class CostingService {
                     const cost = new Prisma.Decimal(pricePerKg).div(1000).mul(weight);
 
                     // [核心修改] 使用转换系数计算相对于主面团的有效比例
-                    const effectiveRatio = new Prisma.Decimal(ingredient.ratio).mul(parentConversionFactor);
+                    // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                    const effectiveRatio = new Prisma.Decimal(ingredient.ratio ?? 0).mul(parentConversionFactor);
 
                     group.ingredients.push({
                         name: ingredient.ingredient.name,
@@ -633,13 +640,15 @@ export class CostingService {
             }
             const adjustedDoughWeight = new Prisma.Decimal(doughWeight).div(divisor);
 
-            const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+            // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+            const totalRatio = dough.ingredients.reduce((sum, ing) => sum + (ing.ratio ?? 0), 0);
             if (totalRatio === 0) return;
 
             const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
 
             for (const ing of dough.ingredients) {
-                const ingredientWeight = weightPerRatioPoint.mul(ing.ratio).toNumber();
+                // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                const ingredientWeight = weightPerRatioPoint.mul(ing.ratio ?? 0).toNumber();
                 const preDough = ing.linkedPreDough?.versions?.[0];
 
                 if (preDough && preDough.doughs[0]) {

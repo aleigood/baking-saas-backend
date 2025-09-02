@@ -1,11 +1,30 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRecipeDto, DoughIngredientDto } from './dto/create-recipe.dto';
-import { Prisma, RecipeFamily, RecipeVersion, ProductIngredientType, RecipeType, IngredientType } from '@prisma/client';
+// [核心修复] 在导入语句中加入 Dough 和 DoughIngredient 类型
+import {
+    Prisma,
+    RecipeFamily,
+    RecipeVersion,
+    ProductIngredientType,
+    RecipeType,
+    IngredientType,
+    Dough,
+    DoughIngredient,
+} from '@prisma/client';
 import { RecipeFormTemplateDto } from './dto/recipe-form-template.dto';
 import type { DoughTemplate } from './dto/recipe-form-template.dto';
 
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
+
+// [核心新增] 为预加载的配方家族定义更精确的类型
+type PreloadedRecipeFamily = RecipeFamily & {
+    versions: (RecipeVersion & {
+        doughs: (Dough & {
+            ingredients: DoughIngredient[];
+        })[];
+    })[];
+};
 
 @Injectable()
 export class RecipesService {
@@ -46,7 +65,13 @@ export class RecipesService {
 
         return this.prisma.$transaction(
             async (tx) => {
-                await this._validateBakerPercentage(type, ingredients, tenantId, tx);
+                // [核心修改] 在事务开始时就预加载所有需要的预制面团信息
+                const preDoughFamilies = await this.preloadPreDoughFamilies(tenantId, ingredients, tx);
+
+                // [核心修改] 在创建之前，根据前端传入的意图（flourRatio）计算出预制面团的总重比例（ratio）
+                this.calculatePreDoughTotalRatio(ingredients, preDoughFamilies);
+
+                this._validateBakerPercentage(type, ingredients);
 
                 let recipeFamily: RecipeFamilyWithVersions;
 
@@ -124,13 +149,14 @@ export class RecipesService {
                 });
 
                 for (const ingredientDto of ingredients) {
-                    const linkedPreDough = await tx.recipeFamily.findFirst({
-                        where: { name: ingredientDto.name, tenantId: tenantId, type: 'PRE_DOUGH', deletedAt: null },
-                    });
+                    const linkedPreDough = preDoughFamilies.get(ingredientDto.name);
                     await tx.doughIngredient.create({
                         data: {
                             doughId: dough.id,
+                            // [核心修改] ratio 现在存储的是计算后的总重比例，或普通原料的比例
                             ratio: ingredientDto.ratio,
+                            // [核心修改] flourRatio 存储的是用户的原始意图比例
+                            flourRatio: ingredientDto.flourRatio,
                             ingredientId: linkedPreDough ? null : ingredientDto.ingredientId,
                             linkedPreDoughId: linkedPreDough?.id,
                         },
@@ -425,11 +451,11 @@ export class RecipesService {
                 type: version.family.type,
                 notes: '',
                 ingredients: doughSource.ingredients
-                    .filter((ing) => ing.ingredient)
+                    .filter((ing) => ing.ingredient && ing.ratio !== null)
                     .map((ing) => ({
                         id: ing.ingredient!.id,
                         name: ing.ingredient!.name,
-                        ratio: new Prisma.Decimal(ing.ratio).mul(100).toNumber(),
+                        ratio: new Prisma.Decimal(ing.ratio!).mul(100).toNumber(),
                     })),
                 procedure: doughSource.procedure || [],
             };
@@ -450,35 +476,29 @@ export class RecipesService {
                 const preDoughRecipe = preDoughActiveVersion?.doughs?.[0];
 
                 if (preDoughRecipe) {
-                    const preDoughTotalRatio = preDoughRecipe.ingredients.reduce((sum, i) => sum + i.ratio, 0);
-                    const preDoughFlourRatioInPreDough = preDoughRecipe.ingredients
-                        .filter((i) => i.ingredient?.isFlour)
-                        .reduce((sum, i) => sum + i.ratio, 0);
-
-                    const conversionFactor =
-                        preDoughTotalRatio > 0
-                            ? new Prisma.Decimal(ing.ratio).div(preDoughTotalRatio)
-                            : new Prisma.Decimal(0);
-                    const effectiveFlourRatio = new Prisma.Decimal(preDoughFlourRatioInPreDough).mul(conversionFactor);
+                    // [核心修改] 使用 flourRatio 来反向计算，更贴近用户意图
+                    const flourRatioInMainDough = ing.flourRatio
+                        ? new Prisma.Decimal(ing.flourRatio)
+                        : new Prisma.Decimal(0);
 
                     const ingredientsForTemplate = preDoughRecipe.ingredients
-                        .filter((i) => i.ingredient !== null)
+                        .filter((i) => i.ingredient !== null && i.ratio !== null)
                         .map((i) => ({
                             id: i.ingredient!.id,
                             name: i.ingredient!.name,
-                            ratio: new Prisma.Decimal(i.ratio).mul(conversionFactor).mul(100).toNumber(),
+                            ratio: flourRatioInMainDough.mul(i.ratio!).mul(100).toNumber(),
                         }));
 
                     preDoughObjectsForForm.push({
                         id: preDoughFamily.id,
                         name: preDoughFamily.name,
                         type: 'PRE_DOUGH',
-                        flourRatioInMainDough: effectiveFlourRatio.mul(100).toNumber(),
+                        flourRatioInMainDough: flourRatioInMainDough.mul(100).toNumber(),
                         ingredients: ingredientsForTemplate,
                         procedure: preDoughRecipe.procedure,
                     });
                 }
-            } else if (ing.ingredient) {
+            } else if (ing.ingredient && ing.ratio) {
                 mainDoughIngredientsForForm.push({
                     id: ing.ingredient.id,
                     name: ing.ingredient.name,
@@ -680,12 +700,66 @@ export class RecipesService {
         });
     }
 
-    private async _validateBakerPercentage(
-        type: RecipeType,
-        ingredients: DoughIngredientDto[],
+    // [核心新增] 辅助函数：预加载所有需要的预制面团信息
+    private async preloadPreDoughFamilies(
         tenantId: string,
+        ingredients: DoughIngredientDto[],
         tx: Prisma.TransactionClient,
+    ): Promise<Map<string, PreloadedRecipeFamily>> {
+        const preDoughNames = ingredients
+            .filter((ing) => ing.flourRatio !== undefined && ing.flourRatio !== null)
+            .map((ing) => ing.name);
+
+        if (preDoughNames.length === 0) {
+            return new Map();
+        }
+
+        const families = await tx.recipeFamily.findMany({
+            where: {
+                name: { in: preDoughNames },
+                tenantId,
+                type: 'PRE_DOUGH',
+                deletedAt: null,
+            },
+            include: {
+                versions: {
+                    where: { isActive: true },
+                    include: { doughs: { include: { ingredients: true } } },
+                },
+            },
+        });
+
+        return new Map(families.map((f) => [f.name, f as PreloadedRecipeFamily]));
+    }
+
+    // [核心新增] 辅助函数：计算预制面团的总重比例
+    private calculatePreDoughTotalRatio(
+        ingredients: DoughIngredientDto[],
+        preDoughFamilies: Map<string, PreloadedRecipeFamily>,
     ) {
+        for (const ing of ingredients) {
+            if (ing.flourRatio !== undefined && ing.flourRatio !== null) {
+                const preDoughFamily = preDoughFamilies.get(ing.name);
+                const preDoughRecipe = preDoughFamily?.versions[0]?.doughs[0];
+
+                if (!preDoughRecipe) {
+                    throw new BadRequestException(`名为 "${ing.name}" 的预制面团配方不存在或未激活。`);
+                }
+
+                const preDoughTotalRatioSum = preDoughRecipe.ingredients.reduce((sum, i) => sum + (i.ratio ?? 0), 0);
+
+                if (preDoughTotalRatioSum > 0) {
+                    // 总重比例 = 面粉比例 * 预制面团自身总比例
+                    ing.ratio = ing.flourRatio * preDoughTotalRatioSum;
+                } else {
+                    ing.ratio = 0;
+                }
+            }
+        }
+    }
+
+    // [核心修复] 移除了 async 和未使用的参数
+    private _validateBakerPercentage(type: RecipeType, ingredients: DoughIngredientDto[]) {
         if (type === 'EXTRA') {
             return;
         }
@@ -693,57 +767,20 @@ export class RecipesService {
         let totalFlourRatio = 0;
 
         for (const ingredientDto of ingredients) {
-            if (ingredientDto.isFlour) {
-                totalFlourRatio += ingredientDto.ratio;
-            } else {
-                const preDoughFamily = await tx.recipeFamily.findFirst({
-                    where: {
-                        name: ingredientDto.name,
-                        tenantId,
-                        type: 'PRE_DOUGH',
-                        deletedAt: null,
-                    },
-                    include: {
-                        versions: {
-                            where: { isActive: true },
-                            include: {
-                                doughs: {
-                                    include: {
-                                        ingredients: {
-                                            include: {
-                                                ingredient: true,
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                });
-
-                if (preDoughFamily && preDoughFamily.versions.length > 0) {
-                    const preDoughVersion = preDoughFamily.versions[0];
-                    const preDough = preDoughVersion.doughs[0];
-
-                    if (preDough) {
-                        const preDoughTotalRatio = preDough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
-
-                        const preDoughFlourRatio = preDough.ingredients
-                            .filter((ing) => ing.ingredient?.isFlour)
-                            .reduce((sum, ing) => sum + ing.ratio, 0);
-
-                        if (preDoughTotalRatio > 0) {
-                            const effectiveFlourRatio = (ingredientDto.ratio / preDoughTotalRatio) * preDoughFlourRatio;
-                            totalFlourRatio += effectiveFlourRatio;
-                        }
-                    }
-                }
+            // [核心修改] 如果是预制面团，直接使用 flourRatio
+            if (ingredientDto.flourRatio !== undefined && ingredientDto.flourRatio !== null) {
+                totalFlourRatio += ingredientDto.flourRatio;
+            }
+            // [核心修改] 如果是普通面粉原料，使用 ratio
+            else if (ingredientDto.isFlour) {
+                totalFlourRatio += ingredientDto.ratio ?? 0;
             }
         }
 
+        // [核心修改] 校验总和是否接近 1 (100%)
         if (Math.abs(totalFlourRatio - 1) > 0.001) {
             throw new BadRequestException(
-                `配方验证失败：所有面粉类原料（包括预制面团中折算的面粉）的比率总和必须为100%。当前计算总和为: ${(
+                `配方验证失败：所有面粉类原料（包括用于制作预制面团的面粉）的比例总和必须为100%。当前计算总和为: ${(
                     totalFlourRatio * 100
                 ).toFixed(2)}%`,
             );

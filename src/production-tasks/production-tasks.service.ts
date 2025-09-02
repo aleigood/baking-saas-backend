@@ -133,12 +133,14 @@ export class ProductionTasksService {
                 if (divisor <= 0) continue;
                 const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
 
-                const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+                // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                const totalRatio = dough.ingredients.reduce((sum, ing) => sum + (ing.ratio ?? 0), 0);
                 if (totalRatio > 0) {
                     const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
                     for (const ing of dough.ingredients) {
                         if (ing.linkedPreDoughId && ing.linkedPreDough?.type === RecipeType.PRE_DOUGH) {
-                            const weight = weightPerRatioPoint.mul(ing.ratio).toNumber() * item.quantity;
+                            // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                            const weight = weightPerRatioPoint.mul(ing.ratio ?? 0).toNumber() * item.quantity;
                             const existing = requiredPrepItems.get(ing.linkedPreDoughId);
                             if (existing) {
                                 existing.totalWeight += weight;
@@ -251,12 +253,14 @@ export class ProductionTasksService {
                     if (divisor <= 0) continue;
                     const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
 
-                    const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+                    // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                    const totalRatio = dough.ingredients.reduce((sum, ing) => sum + (ing.ratio ?? 0), 0);
                     if (totalRatio > 0) {
                         const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
                         for (const ing of dough.ingredients) {
                             if (ing.linkedPreDoughId && ing.linkedPreDough?.type === RecipeType.PRE_DOUGH) {
-                                const weight = weightPerRatioPoint.mul(ing.ratio).toNumber() * item.quantity;
+                                // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                                const weight = weightPerRatioPoint.mul(ing.ratio ?? 0).toNumber() * item.quantity;
                                 const existing = requiredPrepItems.get(ing.linkedPreDoughId);
                                 if (existing) {
                                     existing.totalWeight += weight;
@@ -709,12 +713,17 @@ export class ProductionTasksService {
                     if (divisor <= 0) return;
                     const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
 
-                    const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+                    // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                    const totalRatio = dough.ingredients.reduce((sum, ing) => sum + (ing.ratio ?? 0), 0);
                     if (totalRatio === 0) return;
                     const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
                     dough.ingredients.forEach((ing) => {
                         if (ing.ingredient?.name === '水') {
-                            const waterWeight = weightPerRatioPoint.mul(ing.ratio).mul(item.quantity).toNumber();
+                            // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                            const waterWeight = weightPerRatioPoint
+                                .mul(ing.ratio ?? 0)
+                                .mul(item.quantity)
+                                .toNumber();
                             const currentTotal = doughTotalWaterMap.get(dough.id) || 0;
                             doughTotalWaterMap.set(dough.id, currentTotal + waterWeight);
                         }
@@ -753,12 +762,17 @@ export class ProductionTasksService {
                         if (divisor <= 0) return;
                         const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
 
-                        const totalRatio = dough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+                        // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                        const totalRatio = dough.ingredients.reduce((sum, ing) => sum + (ing.ratio ?? 0), 0);
                         if (totalRatio === 0) return;
                         const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
 
                         dough.ingredients.forEach((ing) => {
-                            const weight = weightPerRatioPoint.mul(ing.ratio).mul(quantity).toNumber();
+                            // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                            const weight = weightPerRatioPoint
+                                .mul(ing.ratio ?? 0)
+                                .mul(quantity)
+                                .toNumber();
                             totalDoughWeight += weight;
                             // [核心修改] 优先使用 linkedPreDough 的 ID 作为 key
                             const ingId = ing.linkedPreDough?.id || ing.ingredient?.id;
@@ -906,7 +920,8 @@ export class ProductionTasksService {
         if (divisor <= 0) return 0;
         const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
 
-        const totalRatio = mainDough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
+        // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+        const totalRatio = mainDough.ingredients.reduce((sum, ing) => sum + (ing.ratio ?? 0), 0);
         if (totalRatio === 0) return 0;
 
         const weightPerRatioPoint = adjustedDoughWeight.div(totalRatio);
@@ -924,7 +939,8 @@ export class ProductionTasksService {
 
             dough.ingredients.forEach((ing) => {
                 if (ing.ingredient?.isFlour) {
-                    totalFlourWeight += currentWeightPerRatioPoint.mul(ing.ratio).toNumber();
+                    // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                    totalFlourWeight += currentWeightPerRatioPoint.mul(ing.ratio ?? 0).toNumber();
                 } else if (ing.linkedPreDough) {
                     const activeVersion = ing.linkedPreDough.versions.find((v) => v.isActive);
                     if (activeVersion && activeVersion.doughs[0]) {
@@ -934,9 +950,11 @@ export class ProductionTasksService {
                         const preDoughDivisor = 1 - preDoughLossRatio;
                         if (preDoughDivisor <= 0) return;
 
-                        const preDoughTotalRatio = preDough.ingredients.reduce((sum, i) => sum + i.ratio, 0);
+                        // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                        const preDoughTotalRatio = preDough.ingredients.reduce((sum, i) => sum + (i.ratio ?? 0), 0);
                         if (preDoughTotalRatio > 0) {
-                            const preDoughWeight = currentWeightPerRatioPoint.mul(ing.ratio).toNumber();
+                            // [核心修复] 增加对 null 值的处理，使用 '?? 0'
+                            const preDoughWeight = currentWeightPerRatioPoint.mul(ing.ratio ?? 0).toNumber();
                             const adjustedPreDoughWeight = new Prisma.Decimal(preDoughWeight).div(preDoughDivisor);
                             const preDoughWeightPerRatioPoint = adjustedPreDoughWeight.div(preDoughTotalRatio);
                             calculateFlourInDough(preDough, preDoughWeightPerRatioPoint);

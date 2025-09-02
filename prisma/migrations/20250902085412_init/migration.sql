@@ -116,7 +116,8 @@ CREATE TABLE "Dough" (
 CREATE TABLE "DoughIngredient" (
     "id" TEXT NOT NULL,
     "doughId" TEXT NOT NULL,
-    "ratio" DOUBLE PRECISION NOT NULL,
+    "ratio" DOUBLE PRECISION,
+    "flourRatio" DOUBLE PRECISION,
     "ingredientId" TEXT,
     "linkedPreDoughId" TEXT,
 

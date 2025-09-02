@@ -4,17 +4,21 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 // 定义配方数据的类型，以便在代码中使用
+// [核心修改] 增加 flourRatio 字段以支持新的配方意图
+type RecipeSeedIngredient = {
+    name: string;
+    ratio?: number; // 对于预制面团，此字段将由后端计算，因此在种子数据中为可选
+    flourRatio?: number; // 用于预制面团的意图字段
+    isFlour?: boolean;
+    waterContent?: number;
+};
+
 type RecipeSeedData = {
     name: string;
     type: RecipeType;
     targetTemp?: number;
     lossRatio?: number;
-    ingredients: {
-        name: string;
-        ratio: number;
-        isFlour?: boolean;
-        waterContent?: number;
-    }[];
+    ingredients: RecipeSeedIngredient[];
     products?: {
         name: string;
         weight: number;
@@ -25,8 +29,7 @@ type RecipeSeedData = {
     procedure?: string[];
 };
 
-// [核心修改] 您提供的配方数据, 已将所有 ratio 值从百分比转换为小数
-// 从 recipe.json 转换而来的新配方数据
+// [核心修改] 更新了所有主配方，使用 flourRatio 表达预制面团的用量意图
 const recipesData: RecipeSeedData[] = [
     {
         name: 'BIGA',
@@ -145,15 +148,15 @@ const recipesData: RecipeSeedData[] = [
         ingredients: [
             {
                 name: 'BIGA',
-                ratio: 0.3,
+                flourRatio: 0.2, // 意图：使用主面团20%的面粉制作BIGA
             },
             {
                 name: '烫种',
-                ratio: 0.2576,
+                flourRatio: 0.08, // 意图：使用主面团8%的面粉制作烫种
             },
             {
                 name: '高筋粉',
-                ratio: 0.72,
+                ratio: 0.72, // 1 - 0.2 - 0.08 = 0.72
                 isFlour: true,
             },
             {
@@ -312,7 +315,7 @@ const recipesData: RecipeSeedData[] = [
         ingredients: [
             {
                 name: '鲁邦种',
-                ratio: 0.4,
+                flourRatio: 0.2, // 意图：使用主面团20%的面粉制作鲁邦种
             },
             {
                 name: 'T65',
@@ -378,7 +381,7 @@ const recipesData: RecipeSeedData[] = [
         ingredients: [
             {
                 name: '鲁邦种',
-                ratio: 0.4,
+                flourRatio: 0.2, // 意图：使用主面团20%的面粉制作鲁邦种
             },
             {
                 name: 'T65',
@@ -453,7 +456,7 @@ const recipesData: RecipeSeedData[] = [
         ingredients: [
             {
                 name: '鲁邦种',
-                ratio: 0.4,
+                flourRatio: 0.2, // 意图：使用主面团20%的面粉制作鲁邦种
             },
             {
                 name: 'T65',
@@ -512,15 +515,15 @@ const recipesData: RecipeSeedData[] = [
         ingredients: [
             {
                 name: '鲁邦种',
-                ratio: 0.3,
+                flourRatio: 0.15, // 意图：使用主面团15%的面粉制作鲁邦种
             },
             {
                 name: 'BIGA',
-                ratio: 0.45,
+                flourRatio: 0.3, // 意图：使用主面团30%的面粉制作BIGA
             },
             {
                 name: '高筋粉',
-                ratio: 0.55,
+                ratio: 0.55, // 1 - 0.15 - 0.3 = 0.55
                 isFlour: true,
             },
             {
@@ -567,15 +570,15 @@ const recipesData: RecipeSeedData[] = [
         ingredients: [
             {
                 name: 'BIGA',
-                ratio: 0.3,
+                flourRatio: 0.2, // 意图：使用主面团20%的面粉制作BIGA
             },
             {
                 name: '烫种',
-                ratio: 0.2576,
+                flourRatio: 0.08, // 意图：使用主面团8%的面粉制作烫种
             },
             {
                 name: '高筋粉',
-                ratio: 0.72,
+                ratio: 0.72, // 1 - 0.2 - 0.08 = 0.72
                 isFlour: true,
             },
             {
@@ -696,11 +699,11 @@ const recipesData: RecipeSeedData[] = [
         ingredients: [
             {
                 name: '烫种',
-                ratio: 0.2576,
+                flourRatio: 0.08, // 意图：使用主面团8%的面粉制作烫种
             },
             {
                 name: '高筋粉',
-                ratio: 0.92,
+                ratio: 0.92, // 1 - 0.08 = 0.92
                 isFlour: true,
             },
             {
@@ -825,11 +828,11 @@ const recipesData: RecipeSeedData[] = [
         ingredients: [
             {
                 name: '烫种',
-                ratio: 0.2576,
+                flourRatio: 0.08, // 意图：使用主面团8%的面粉制作烫种
             },
             {
                 name: '高筋粉',
-                ratio: 0.92,
+                ratio: 0.92, // 1 - 0.08 = 0.92
                 isFlour: true,
             },
             {
@@ -911,11 +914,11 @@ const recipesData: RecipeSeedData[] = [
         ingredients: [
             {
                 name: '黑麦鲁邦种',
-                ratio: 0.5,
+                flourRatio: 0.2, // 意图：使用主面团20%的面粉制作黑麦鲁邦种
             },
             {
                 name: '高筋粉',
-                ratio: 0.8,
+                ratio: 0.8, // 1 - 0.2 = 0.8
                 isFlour: true,
             },
             {
@@ -975,7 +978,7 @@ async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[])
     const recipeNames = new Set(recipes.map((r) => r.name));
 
     // [核心修改] 创建一个Map来存储原料的完整信息，而不仅仅是名字
-    const allIngredients = new Map<string, (typeof recipes)[0]['ingredients'][0]>();
+    const allIngredients = new Map<string, RecipeSeedIngredient>();
     recipes.forEach((recipe) => {
         recipe.ingredients.forEach((ing) => {
             // 只有当原料信息更完整时才更新Map
@@ -1065,10 +1068,28 @@ async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[])
                         where: { tenantId, name: ing.name, type: 'PRE_DOUGH', deletedAt: null },
                     });
 
+                    // [核心修改] 新增逻辑，如果提供了 flourRatio，则动态计算 ratio
+                    let finalRatio = ing.ratio;
+                    if (ing.flourRatio && linkedPreDough) {
+                        const preDoughActiveVersion = await tx.recipeVersion.findFirst({
+                            where: { familyId: linkedPreDough.id, isActive: true },
+                            include: { doughs: { include: { ingredients: true } } },
+                        });
+                        const preDoughRecipe = preDoughActiveVersion?.doughs[0];
+                        if (preDoughRecipe) {
+                            const preDoughTotalRatioSum = preDoughRecipe.ingredients.reduce(
+                                (sum, i) => sum + (i.ratio ?? 0),
+                                0,
+                            );
+                            finalRatio = ing.flourRatio * preDoughTotalRatioSum;
+                        }
+                    }
+
                     await tx.doughIngredient.create({
                         data: {
                             doughId: dough.id,
-                            ratio: ing.ratio,
+                            ratio: finalRatio,
+                            flourRatio: ing.flourRatio,
                             ingredientId: linkedIngredient ? linkedIngredient.id : null,
                             linkedPreDoughId: linkedPreDough ? linkedPreDough.id : null,
                         },

@@ -77,9 +77,15 @@ export class DoughIngredientDto {
     name: string; // name 字段用于创建新原料或关联预制/附加配方
 
     // [核心修改] ratio 现在应为小数形式 (例如: 92% 应传入 0.92)
+    // 对于预制面团，此字段将由后端计算，前端无需提供。
     @IsNumber()
-    @IsNotEmpty()
-    ratio: number;
+    @IsOptional()
+    ratio?: number;
+
+    // [核心新增] 用于预制面团的意图字段，例如传入 0.08 代表使用主面团8%的面粉制作该预制面团。
+    @IsNumber()
+    @IsOptional()
+    flourRatio?: number;
 
     @IsBoolean()
     @IsOptional()

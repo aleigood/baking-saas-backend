@@ -203,7 +203,14 @@ model Dough {
 model DoughIngredient {
   id               String        @id @default(uuid())
   doughId          String // 所属面团ID
-  ratio            Float // 基于总面粉的百分比
+  // [核心修改] ratio 现在明确表示原料占其所属面团总面粉量的比例。
+  // 对于在主面团中引用的预制面团，此字段将为 null，因为其用量由 flourRatio 决定。
+  ratio            Float?
+  // [核心新增] 新增字段，用于存储用户的“意图”。
+  // 仅当此原料是预制面团（linkedPreDoughId存在）时使用。
+  // 表示用于制作此预制面团的面粉量，占其上级面团（如主面团）总面粉量的比例。
+  // 例如，值为 0.08 表示使用主面团总面粉量的 8% 来制作这个预制面团。
+  flourRatio       Float?
   ingredientId     String? // [核心修改] 用于关联Ingredient模型
   ingredient       Ingredient?   @relation(fields: [ingredientId], references: [id], onUpdate: Cascade, onDelete: SetNull)
   linkedPreDoughId String?
