@@ -33,6 +33,18 @@ export class RecipesController {
     }
 
     /**
+     * [核心新增] 获取用于创建新版本的表单模板数据
+     */
+    @Get(':familyId/versions/:versionId/form-template')
+    getRecipeVersionFormTemplate(
+        @GetUser() user: UserPayload,
+        @Param('familyId') familyId: string,
+        @Param('versionId') versionId: string,
+    ) {
+        return this.recipesService.getRecipeVersionFormTemplate(user.tenantId, familyId, versionId);
+    }
+
+    /**
      * [核心新增] 激活一个指定的配方版本
      * @param user
      * @param familyId

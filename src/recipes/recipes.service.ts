@@ -2,6 +2,11 @@ import { Injectable, NotFoundException, ConflictException, BadRequestException }
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRecipeDto, DoughIngredientDto } from './dto/create-recipe.dto';
 import { Prisma, RecipeFamily, RecipeVersion, ProductIngredientType, RecipeType, IngredientType } from '@prisma/client'; // [修改] 导入IngredientType
+// [核心新增] 导入新的 DTO
+import { RecipeFormTemplateDto } from './dto/recipe-form-template.dto';
+
+// [核心修复] 从 DTO 中导入 DoughTemplate 类型以供内部使用
+import type { DoughTemplate } from './dto/recipe-form-template.dto';
 
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
 
@@ -194,7 +199,6 @@ export class RecipesService {
         );
     }
 
-    // [核心重构] 修改 findAll 方法，使其返回分类、排序和聚合后的数据
     async findAll(tenantId: string) {
         const recipeFamilies = await this.prisma.recipeFamily.findMany({
             where: {
@@ -266,7 +270,6 @@ export class RecipesService {
         };
     }
 
-    // [核心新增] 新增一个专门为创建生产任务页面提供产品列表的方法
     async findProductsForTasks(tenantId: string) {
         // 查找所有未停用的主面团配方
         const recipeFamilies = await this.prisma.recipeFamily.findMany({
@@ -370,6 +373,154 @@ export class RecipesService {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
         return family;
+    }
+
+    // [核心新增] 新增方法，用于从现有版本生成表单模板
+    async getRecipeVersionFormTemplate(
+        tenantId: string,
+        familyId: string,
+        versionId: string,
+    ): Promise<RecipeFormTemplateDto> {
+        const version = await this.prisma.recipeVersion.findFirst({
+            where: {
+                id: versionId,
+                familyId: familyId,
+                family: { tenantId },
+            },
+            include: {
+                family: true,
+                doughs: {
+                    include: {
+                        ingredients: {
+                            include: {
+                                ingredient: true,
+                                linkedPreDough: {
+                                    include: {
+                                        versions: {
+                                            where: { isActive: true },
+                                            include: {
+                                                doughs: {
+                                                    include: {
+                                                        ingredients: { include: { ingredient: true } },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                products: {
+                    include: {
+                        ingredients: {
+                            include: {
+                                ingredient: true,
+                                linkedExtra: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!version) {
+            throw new NotFoundException('指定的配方版本不存在');
+        }
+
+        const mainDoughSource = version.doughs.find((d) => d.name === version.family.name);
+        if (!mainDoughSource) {
+            throw new NotFoundException('源配方数据不完整: 缺少主面团');
+        }
+
+        // [核心修复] 明确数组类型，解决 'never[]' 错误
+        const mainDoughIngredientsForForm: { id: string | null; name: string; ratio: number | null }[] = [];
+        // [核心修复] 明确数组类型，解决 'any[]' 和不安全分配的错误
+        const preDoughObjectsForForm: DoughTemplate[] = [];
+
+        for (const ing of mainDoughSource.ingredients) {
+            if (ing.linkedPreDough) {
+                const preDoughFamily = ing.linkedPreDough;
+                const preDoughActiveVersion = preDoughFamily.versions.find((v) => v.isActive);
+                const preDoughRecipe = preDoughActiveVersion?.doughs?.[0];
+
+                if (preDoughRecipe) {
+                    const preDoughTotalRatio = preDoughRecipe.ingredients.reduce((sum, i) => sum + i.ratio, 0);
+                    const preDoughFlourRatioInPreDough = preDoughRecipe.ingredients
+                        .filter((i) => i.ingredient?.isFlour)
+                        .reduce((sum, i) => sum + i.ratio, 0);
+
+                    const conversionFactor =
+                        preDoughTotalRatio > 0
+                            ? new Prisma.Decimal(ing.ratio).div(preDoughTotalRatio)
+                            : new Prisma.Decimal(0);
+                    const effectiveFlourRatio = new Prisma.Decimal(preDoughFlourRatioInPreDough).mul(conversionFactor);
+
+                    const ingredientsForTemplate = preDoughRecipe.ingredients
+                        .filter((i) => i.ingredient !== null)
+                        .map((i) => ({
+                            id: i.ingredient!.id,
+                            name: i.ingredient!.name,
+                            ratio: new Prisma.Decimal(i.ratio).mul(conversionFactor).mul(100).toNumber(),
+                        }));
+
+                    preDoughObjectsForForm.push({
+                        id: preDoughFamily.id,
+                        name: preDoughFamily.name,
+                        type: 'PRE_DOUGH',
+                        flourRatioInMainDough: effectiveFlourRatio.mul(100).toNumber(),
+                        ingredients: ingredientsForTemplate,
+                        procedure: preDoughRecipe.procedure,
+                    });
+                }
+            } else if (ing.ingredient) {
+                mainDoughIngredientsForForm.push({
+                    id: ing.ingredient.id,
+                    name: ing.ingredient.name,
+                    ratio: new Prisma.Decimal(ing.ratio).mul(100).toNumber(),
+                });
+            }
+        }
+
+        const mainDoughObjectForForm: DoughTemplate = {
+            id: `main_${Date.now()}`,
+            name: '主面团',
+            type: 'MAIN_DOUGH' as const,
+            lossRatio: mainDoughSource.lossRatio
+                ? new Prisma.Decimal(mainDoughSource.lossRatio).mul(100).toNumber()
+                : 0,
+            ingredients: mainDoughIngredientsForForm,
+            procedure: mainDoughSource.procedure || [],
+        };
+
+        const formTemplate: RecipeFormTemplateDto = {
+            name: version.family.name,
+            type: 'MAIN',
+            notes: '', // 新版本备注为空
+            doughs: [mainDoughObjectForForm, ...preDoughObjectsForForm],
+            products: version.products.map((p) => {
+                const processIngredients = (type: ProductIngredientType) => {
+                    return p.ingredients
+                        .filter((ing) => ing.type === type && (ing.ingredient || ing.linkedExtra))
+                        .map((ing) => ({
+                            id: ing.ingredient?.id || ing.linkedExtra?.id || null,
+                            ratio: ing.ratio ? new Prisma.Decimal(ing.ratio).mul(100).toNumber() : null,
+                            weightInGrams: ing.weightInGrams,
+                        }));
+                };
+                return {
+                    name: p.name,
+                    baseDoughWeight: p.baseDoughWeight,
+                    mixIns: processIngredients(ProductIngredientType.MIX_IN),
+                    fillings: processIngredients(ProductIngredientType.FILLING),
+                    toppings: processIngredients(ProductIngredientType.TOPPING),
+                    procedure: p.procedure || [],
+                };
+            }),
+        };
+
+        return formTemplate;
     }
 
     async activateVersion(tenantId: string, familyId: string, versionId: string) {
