@@ -1,18 +1,16 @@
 /**
  * 文件路径: src/recipes/dto/recipe-form-template.dto.ts
- * 文件描述: [新增] 定义用于“创建新版本”时，由后端生成的配方表单模板的数据结构。
+ * 文件描述: [核心修改] 更新 DTO 以支持所有配方类型
  */
 
-// [核心修复] 导出接口以供其他模块使用
-// 定义子原料（如辅料、馅料、表面装饰）的类型
+import { RecipeType } from '@prisma/client';
+
 export interface SubIngredientTemplate {
     id: string | null;
     ratio: number | null;
     weightInGrams?: number | null;
 }
 
-// [核心修复] 导出接口以供其他模块使用
-// 定义产品模板的类型
 export interface ProductTemplate {
     name: string;
     baseDoughWeight: number;
@@ -22,31 +20,29 @@ export interface ProductTemplate {
     procedure: string[];
 }
 
-// [核心修复] 导出接口以供其他模块使用
-// 定义面团中原料的模板类型
 export interface DoughIngredientTemplate {
     id: string | null;
     name: string;
     ratio: number | null;
 }
 
-// [核心修复] 导出接口以供其他模块使用
-// 定义面团模板的类型
 export interface DoughTemplate {
     id: string;
     name: string;
     type: 'MAIN_DOUGH' | 'PRE_DOUGH';
     lossRatio?: number;
-    flourRatioInMainDough?: number; // 仅 PRE_DOUGH 类型需要
+    flourRatioInMainDough?: number;
     ingredients: DoughIngredientTemplate[];
     procedure: string[];
 }
 
-// 顶层配方表单模板的 DTO
+// [核心修改] 更新顶层 DTO 以支持所有类型，并使 ingredients 和 procedure 可选
 export class RecipeFormTemplateDto {
     name: string;
-    type: 'MAIN';
-    notes: string; // 新版本的备注，默认为空
-    doughs: DoughTemplate[];
-    products: ProductTemplate[];
+    type: RecipeType; // 使用枚举，更灵活
+    notes: string;
+    doughs?: DoughTemplate[]; // 主配方使用
+    products?: ProductTemplate[]; // 主配方使用
+    ingredients?: DoughIngredientTemplate[]; // 其他配方使用
+    procedure?: string[]; // 其他配方使用
 }

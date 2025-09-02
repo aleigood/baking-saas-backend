@@ -1,11 +1,8 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRecipeDto, DoughIngredientDto } from './dto/create-recipe.dto';
-import { Prisma, RecipeFamily, RecipeVersion, ProductIngredientType, RecipeType, IngredientType } from '@prisma/client'; // [修改] 导入IngredientType
-// [核心新增] 导入新的 DTO
+import { Prisma, RecipeFamily, RecipeVersion, ProductIngredientType, RecipeType, IngredientType } from '@prisma/client';
 import { RecipeFormTemplateDto } from './dto/recipe-form-template.dto';
-
-// [核心修复] 从 DTO 中导入 DoughTemplate 类型以供内部使用
 import type { DoughTemplate } from './dto/recipe-form-template.dto';
 
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
@@ -89,17 +86,13 @@ export class RecipesService {
                     });
 
                     if (!existingIngredient) {
-                        // [核心修改] 新增对"水"的特殊处理逻辑
                         const isWater = ing.name === '水';
                         existingIngredient = await tx.ingredient.create({
                             data: {
                                 tenantId,
                                 name: ing.name,
-                                // 如果是“水”，则类型为UNTRACKED，否则为STANDARD
                                 type: isWater ? IngredientType.UNTRACKED : IngredientType.STANDARD,
-                                // 如果是“水”，则不是面粉
                                 isFlour: isWater ? false : 'isFlour' in ing ? (ing.isFlour ?? false) : false,
-                                // [核心修改] waterContent 现在统一使用小数, 1 代表 100%
                                 waterContent: isWater ? 1 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0,
                             },
                         });
@@ -228,7 +221,6 @@ export class RecipesService {
                 const ingredientCount =
                     activeVersion?.doughs.reduce((sum, dough) => sum + (dough._count?.ingredients || 0), 0) || 0;
 
-                // 制作次数的计算逻辑保持不变
                 if (!activeVersion || activeVersion.products.length === 0) {
                     return { ...family, productCount, ingredientCount, productionTaskCount: 0 };
                 }
@@ -255,7 +247,6 @@ export class RecipesService {
             }),
         );
 
-        // 在服务端进行分类和排序
         const mainRecipes = familiesWithCounts
             .filter((family) => family.type === 'MAIN')
             .sort((a, b) => (b.productionTaskCount || 0) - (a.productionTaskCount || 0));
@@ -271,7 +262,6 @@ export class RecipesService {
     }
 
     async findProductsForTasks(tenantId: string) {
-        // 查找所有未停用的主面团配方
         const recipeFamilies = await this.prisma.recipeFamily.findMany({
             where: {
                 tenantId,
@@ -279,30 +269,26 @@ export class RecipesService {
                 deletedAt: null,
             },
             include: {
-                // 只加载激活的配方版本
                 versions: {
                     where: { isActive: true },
-                    // 加载版本下的所有产品
                     include: {
                         products: {
                             orderBy: {
-                                name: 'asc', // 按产品名称排序
+                                name: 'asc',
                             },
                         },
                     },
                 },
             },
             orderBy: {
-                name: 'asc', // 按配方名称排序
+                name: 'asc',
             },
         });
 
-        // 将扁平的产品列表按配方名称（类型）进行分组
         const groupedProducts: Record<string, { id: string; name: string }[]> = {};
         recipeFamilies.forEach((family) => {
             const activeVersion = family.versions[0];
             if (activeVersion && activeVersion.products.length > 0) {
-                // 使用配方名称作为分组的 key
                 if (!groupedProducts[family.name]) {
                     groupedProducts[family.name] = [];
                 }
@@ -358,7 +344,7 @@ export class RecipesService {
                                 ingredients: {
                                     include: {
                                         ingredient: true,
-                                        linkedExtra: true, // [核心修复] 确保在查询产品时，能一并返回其关联的“附加配方”（如馅料）
+                                        linkedExtra: true,
                                     },
                                 },
                             },
@@ -375,7 +361,6 @@ export class RecipesService {
         return family;
     }
 
-    // [核心新增] 新增方法，用于从现有版本生成表单模板
     async getRecipeVersionFormTemplate(
         tenantId: string,
         familyId: string,
@@ -429,14 +414,33 @@ export class RecipesService {
             throw new NotFoundException('指定的配方版本不存在');
         }
 
+        if (version.family.type === 'PRE_DOUGH' || version.family.type === 'EXTRA') {
+            const doughSource = version.doughs[0];
+            if (!doughSource) {
+                throw new NotFoundException('源配方数据不完整: 缺少面团');
+            }
+
+            return {
+                name: version.family.name,
+                type: version.family.type,
+                notes: '',
+                ingredients: doughSource.ingredients
+                    .filter((ing) => ing.ingredient)
+                    .map((ing) => ({
+                        id: ing.ingredient!.id,
+                        name: ing.ingredient!.name,
+                        ratio: new Prisma.Decimal(ing.ratio).mul(100).toNumber(),
+                    })),
+                procedure: doughSource.procedure || [],
+            };
+        }
+
         const mainDoughSource = version.doughs.find((d) => d.name === version.family.name);
         if (!mainDoughSource) {
             throw new NotFoundException('源配方数据不完整: 缺少主面团');
         }
 
-        // [核心修复] 明确数组类型，解决 'never[]' 错误
         const mainDoughIngredientsForForm: { id: string | null; name: string; ratio: number | null }[] = [];
-        // [核心修复] 明确数组类型，解决 'any[]' 和不安全分配的错误
         const preDoughObjectsForForm: DoughTemplate[] = [];
 
         for (const ing of mainDoughSource.ingredients) {
@@ -497,7 +501,7 @@ export class RecipesService {
         const formTemplate: RecipeFormTemplateDto = {
             name: version.family.name,
             type: 'MAIN',
-            notes: '', // 新版本备注为空
+            notes: '',
             doughs: [mainDoughObjectForForm, ...preDoughObjectsForForm],
             products: version.products.map((p) => {
                 const processIngredients = (type: ProductIngredientType) => {
@@ -692,10 +696,9 @@ export class RecipesService {
             if (ingredientDto.isFlour) {
                 totalFlourRatio += ingredientDto.ratio;
             } else {
-                // [核心修改] 检查是否为预制面团
                 const preDoughFamily = await tx.recipeFamily.findFirst({
                     where: {
-                        name: ingredientDto.name, // 预制面团仍然通过名称关联
+                        name: ingredientDto.name,
                         tenantId,
                         type: 'PRE_DOUGH',
                         deletedAt: null,
@@ -708,7 +711,7 @@ export class RecipesService {
                                     include: {
                                         ingredients: {
                                             include: {
-                                                ingredient: true, // 深度查询以获取isFlour属性
+                                                ingredient: true,
                                             },
                                         },
                                     },
@@ -725,7 +728,6 @@ export class RecipesService {
                     if (preDough) {
                         const preDoughTotalRatio = preDough.ingredients.reduce((sum, ing) => sum + ing.ratio, 0);
 
-                        // [核心修改] 直接从查询结果中计算面粉总量
                         const preDoughFlourRatio = preDough.ingredients
                             .filter((ing) => ing.ingredient?.isFlour)
                             .reduce((sum, ing) => sum + ing.ratio, 0);
@@ -739,7 +741,6 @@ export class RecipesService {
             }
         }
 
-        // [核心修改] 验证逻辑更新为基于小数(1代表100%)
         if (Math.abs(totalFlourRatio - 1) > 0.001) {
             throw new BadRequestException(
                 `配方验证失败：所有面粉类原料（包括预制面团中折算的面粉）的比率总和必须为100%。当前计算总和为: ${(
