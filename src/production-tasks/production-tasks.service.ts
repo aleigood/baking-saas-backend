@@ -602,16 +602,18 @@ export class ProductionTasksService {
                     },
                 },
             },
+            // [核心修改] 确保任务按开始日期的降序获取
             orderBy: {
-                startDate: 'desc', // [修改] 按开始日期排序
+                startDate: 'desc',
             },
             skip: (pageNum - 1) * limitNum,
             take: limitNum,
         });
 
-        // [核心修复] 为 reduce 的累加器提供显式类型，修复 ESLint 错误
+        // [核心重构] 在服务端完成分组逻辑
         const groupedTasks = tasks.reduce(
             (acc: Record<string, ProductionTask[]>, task) => {
+                // 使用任务的 startDate 进行分组，并格式化为 "月日 星期"
                 const date = new Date(task.startDate).toLocaleDateString('zh-CN', {
                     month: 'long',
                     day: 'numeric',
@@ -623,7 +625,7 @@ export class ProductionTasksService {
                 acc[date].push(task);
                 return acc;
             },
-            {} as Record<string, any[]>,
+            {}, // 初始值为空对象
         );
 
         const totalTasks = await this.prisma.productionTask.count({ where });
