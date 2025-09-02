@@ -204,12 +204,48 @@ export class RecipesService {
                     }
                 }
 
+                // [核心重构] 在创建成功后，返回一个与 findOne 方法结构一致的、包含所有嵌套信息的完整对象
                 return tx.recipeVersion.findUnique({
                     where: { id: recipeVersion.id },
                     include: {
                         family: true,
-                        doughs: { include: { ingredients: true } },
-                        products: { include: { ingredients: true } },
+                        doughs: {
+                            include: {
+                                ingredients: {
+                                    include: {
+                                        ingredient: true,
+                                        linkedPreDough: {
+                                            include: {
+                                                versions: {
+                                                    where: { isActive: true },
+                                                    include: {
+                                                        doughs: {
+                                                            include: {
+                                                                ingredients: {
+                                                                    include: {
+                                                                        ingredient: true,
+                                                                    },
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        products: {
+                            include: {
+                                ingredients: {
+                                    include: {
+                                        ingredient: true,
+                                        linkedExtra: true,
+                                    },
+                                },
+                            },
+                        },
                     },
                 });
             },

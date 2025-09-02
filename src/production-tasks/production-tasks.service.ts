@@ -149,32 +149,49 @@ export class ProductionTasksService {
 
             const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
-            const allIngredients = this._flattenIngredientsForProduct(product);
-            for (const [ingredientId, data] of allIngredients.entries()) {
-                if (data.isRecipe && data.recipeType === 'PRE_DOUGH' && data.recipeFamily) {
-                    const weight = data.weight.mul(item.quantity).toNumber();
-                    const existing = requiredPrepItems.get(ingredientId);
-                    if (existing) {
-                        existing.totalWeight += weight;
-                    } else {
-                        requiredPrepItems.set(ingredientId, {
-                            family: data.recipeFamily,
-                            totalWeight: weight,
-                        });
+            for (const dough of product.recipeVersion.doughs) {
+                for (const ing of dough.ingredients) {
+                    if (ing.linkedPreDough && ing.flourRatio) {
+                        const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.doughs[0];
+                        if (preDoughRecipe) {
+                            const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
+                                (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
+                                new Prisma.Decimal(0),
+                            );
+                            const weight = totalFlourWeight
+                                .mul(ing.flourRatio)
+                                .mul(preDoughTotalRatio)
+                                .mul(item.quantity)
+                                .toNumber();
+
+                            const existing = requiredPrepItems.get(ing.linkedPreDough.id);
+                            if (existing) {
+                                existing.totalWeight += weight;
+                            } else {
+                                requiredPrepItems.set(ing.linkedPreDough.id, {
+                                    family: ing.linkedPreDough,
+                                    totalWeight: weight,
+                                });
+                            }
+                        }
                     }
-                } else if (data.isRecipe && data.recipeType === 'EXTRA' && data.recipeFamily) {
+                }
+            }
+
+            for (const pIng of product.ingredients) {
+                if (pIng.linkedExtra) {
                     let weight = 0;
-                    if (data.weightInGrams) {
-                        weight = data.weightInGrams * item.quantity;
-                    } else if (data.ratio) {
-                        weight = totalFlourWeight.mul(data.ratio).mul(item.quantity).toNumber();
+                    if (pIng.weightInGrams) {
+                        weight = pIng.weightInGrams * item.quantity;
+                    } else if (pIng.ratio) {
+                        weight = totalFlourWeight.mul(pIng.ratio).mul(item.quantity).toNumber();
                     }
-                    const existing = requiredPrepItems.get(ingredientId);
+                    const existing = requiredPrepItems.get(pIng.linkedExtra.id);
                     if (existing) {
                         existing.totalWeight += weight;
                     } else {
-                        requiredPrepItems.set(ingredientId, {
-                            family: data.recipeFamily,
+                        requiredPrepItems.set(pIng.linkedExtra.id, {
+                            family: pIng.linkedExtra,
                             totalWeight: weight,
                         });
                     }
@@ -204,7 +221,6 @@ export class ProductionTasksService {
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
-            // [核心修复] 增加日期有效性验证，防止因无效日期字符串导致查询失败
             if (isNaN(targetDate.getTime())) {
                 throw new BadRequestException('提供的日期格式无效。');
             }
@@ -219,21 +235,9 @@ export class ProductionTasksService {
                 tenantId,
                 deletedAt: null,
                 status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
-                startDate: {
-                    lte: endOfDay,
-                },
-                OR: [
-                    {
-                        endDate: {
-                            gte: startOfDay,
-                        },
-                    },
-                    {
-                        endDate: null,
-                    },
-                ],
+                startDate: { lte: endOfDay },
+                OR: [{ endDate: { gte: startOfDay } }, { endDate: null }],
             },
-            // [核心修复] 复用 taskWithDetailsInclude 以确保查询出的数据结构完整，从而修复 TypeScript 类型错误
             include: taskWithDetailsInclude,
         });
 
@@ -248,32 +252,49 @@ export class ProductionTasksService {
                 const product = item.product;
                 const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
-                const allIngredients = this._flattenIngredientsForProduct(product);
-                for (const [ingredientId, data] of allIngredients.entries()) {
-                    if (data.isRecipe && data.recipeType === 'PRE_DOUGH' && data.recipeFamily) {
-                        const weight = data.weight.mul(item.quantity).toNumber();
-                        const existing = requiredPrepItems.get(ingredientId);
-                        if (existing) {
-                            existing.totalWeight += weight;
-                        } else {
-                            requiredPrepItems.set(ingredientId, {
-                                family: data.recipeFamily,
-                                totalWeight: weight,
-                            });
+                for (const dough of product.recipeVersion.doughs) {
+                    for (const ing of dough.ingredients) {
+                        if (ing.linkedPreDough && ing.flourRatio) {
+                            const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.doughs[0];
+                            if (preDoughRecipe) {
+                                const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
+                                    (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
+                                    new Prisma.Decimal(0),
+                                );
+                                const weight = totalFlourWeight
+                                    .mul(ing.flourRatio)
+                                    .mul(preDoughTotalRatio)
+                                    .mul(item.quantity)
+                                    .toNumber();
+
+                                const existing = requiredPrepItems.get(ing.linkedPreDough.id);
+                                if (existing) {
+                                    existing.totalWeight += weight;
+                                } else {
+                                    requiredPrepItems.set(ing.linkedPreDough.id, {
+                                        family: ing.linkedPreDough,
+                                        totalWeight: weight,
+                                    });
+                                }
+                            }
                         }
-                    } else if (data.isRecipe && data.recipeType === 'EXTRA' && data.recipeFamily) {
+                    }
+                }
+
+                for (const pIng of product.ingredients) {
+                    if (pIng.linkedExtra) {
                         let weight = 0;
-                        if (data.weightInGrams) {
-                            weight = data.weightInGrams * item.quantity;
-                        } else if (data.ratio) {
-                            weight = totalFlourWeight.mul(data.ratio).mul(item.quantity).toNumber();
+                        if (pIng.weightInGrams) {
+                            weight = pIng.weightInGrams * item.quantity;
+                        } else if (pIng.ratio) {
+                            weight = totalFlourWeight.mul(pIng.ratio).mul(item.quantity).toNumber();
                         }
-                        const existing = requiredPrepItems.get(ingredientId);
+                        const existing = requiredPrepItems.get(pIng.linkedExtra.id);
                         if (existing) {
                             existing.totalWeight += weight;
                         } else {
-                            requiredPrepItems.set(ingredientId, {
-                                family: data.recipeFamily,
+                            requiredPrepItems.set(pIng.linkedExtra.id, {
+                                family: pIng.linkedExtra,
                                 totalWeight: weight,
                             });
                         }
@@ -677,7 +698,7 @@ export class ProductionTasksService {
     }
 
     /**
-     * @description [核心重构] 新增的私有方法，用于计算所有面团分组的详细信息
+     * @description [核心重构] 恢复并优化了递归逻辑，以正确展示面种及其原料
      */
     private _calculateDoughGroups(task: TaskWithDetails, query: QueryTaskDetailDto): DoughGroup[] {
         const { mixerType, envTemp, flourTemp, waterTemp } = query;
@@ -703,23 +724,51 @@ export class ProductionTasksService {
             const mainDoughIngredientsMap = new Map<string, TaskIngredientDetail>();
             let totalDoughWeight = new Prisma.Decimal(0);
 
+            // [核心恢复] 为用冰量计算准确的总水量
             let totalWaterForFamily = new Prisma.Decimal(0);
-            const allIngredientsFirstProduct = this._flattenIngredientsForProduct(firstItem.product);
-            for (const [, ingData] of allIngredientsFirstProduct.entries()) {
-                if (ingData.name === '水') {
-                    totalWaterForFamily = totalWaterForFamily.add(ingData.weight);
+            for (const item of data.items) {
+                const flattened = this._flattenIngredientsForProduct(item.product);
+                for (const [, ingData] of flattened.entries()) {
+                    if (ingData.name === '水') {
+                        totalWaterForFamily = totalWaterForFamily.add(ingData.weight.mul(item.quantity));
+                    }
                 }
             }
-            totalWaterForFamily = totalWaterForFamily.mul(data.items.reduce((sum, item) => sum + item.quantity, 0));
 
-            data.items.forEach((item) => {
-                const { product, quantity } = item;
-                const flattenedIngredients = this._flattenIngredientsForProduct(product);
-                for (const [ingId, ingData] of flattenedIngredients.entries()) {
-                    const weight = ingData.weight.mul(quantity);
+            // [核心恢复] 遍历原始配方结构以建立包含面种的原料列表
+            for (const item of data.items) {
+                const totalFlour = this._calculateTotalFlourWeightForProduct(item.product);
+                for (const ing of mainDoughInfo.ingredients) {
+                    let weight: Prisma.Decimal;
+                    let id: string;
+                    let name: string;
+                    let brand: string | null = null;
+                    let isRecipe = false;
+
+                    if (ing.linkedPreDough && ing.flourRatio) {
+                        const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.doughs[0];
+                        if (!preDoughRecipe) continue;
+
+                        const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
+                            (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
+                            new Prisma.Decimal(0),
+                        );
+                        weight = totalFlour.mul(ing.flourRatio).mul(preDoughTotalRatio);
+                        id = ing.linkedPreDough.id;
+                        name = ing.linkedPreDough.name;
+                        isRecipe = true;
+                    } else if (ing.ingredient && ing.ratio) {
+                        weight = totalFlour.mul(ing.ratio);
+                        id = ing.ingredient.id;
+                        name = ing.ingredient.name;
+                        brand = ing.ingredient.activeSku?.brand || null;
+                    } else {
+                        continue;
+                    }
+
+                    weight = weight.mul(item.quantity);
                     totalDoughWeight = totalDoughWeight.add(weight);
 
-                    let name = ingData.name;
                     if (canCalculateIce && name === '水' && mainDoughInfo.targetTemp) {
                         const targetWaterTemp = this._calculateWaterTemp(
                             mainDoughInfo.targetTemp,
@@ -732,32 +781,25 @@ export class ProductionTasksService {
                             totalWaterForFamily.toNumber(),
                             waterTemp,
                         );
-
                         if (iceWeight > 0) {
-                            const icePerProduct = new Prisma.Decimal(iceWeight).div(
-                                data.items.reduce((sum, i) => sum + i.quantity, 0),
-                            );
-                            const iceForThisItem = icePerProduct.mul(quantity);
-                            if (iceForThisItem.gt(0)) {
-                                name = `水 (含 ${iceForThisItem.toDP(1).toNumber()}g 冰)`;
-                            }
+                            name = `水 (含 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰)`;
                         }
                     }
 
-                    const existing = mainDoughIngredientsMap.get(ingId);
+                    const existing = mainDoughIngredientsMap.get(id);
                     if (existing) {
                         existing.weightInGrams += weight.toNumber();
                     } else {
-                        mainDoughIngredientsMap.set(ingId, {
-                            id: ingId,
+                        mainDoughIngredientsMap.set(id, {
+                            id,
                             name,
-                            brand: ingData.brand,
+                            brand,
                             weightInGrams: weight.toNumber(),
-                            isRecipe: ingData.isRecipe,
+                            isRecipe,
                         });
                     }
                 }
-            });
+            }
 
             const products: DoughProductSummary[] = [];
             const productDetails: ProductDetails[] = [];
@@ -766,7 +808,6 @@ export class ProductionTasksService {
                 const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
                 const flattenedProductIngredients = this._flattenIngredientsForProduct(product, false);
 
-                // [核心修复] 修正类型，确保返回对象符合 TaskIngredientDetail 接口
                 const mixIns: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
                     .filter((ing) => ing.type === 'MIX_IN')
                     .map((ing) => ({
@@ -838,12 +879,6 @@ export class ProductionTasksService {
         return doughGroups;
     }
 
-    /**
-     * @description [核心重构] 新增一个私有辅助函数，用于将一个产品的所有原料（包括嵌套的预制面团）扁平化为一个列表
-     * @param product 包含完整配方信息的产品对象
-     * @param includeDough 是否包含面团中的原料，默认为true
-     * @returns 返回一个Map，键为原料ID，值为原料的详细信息和重量
-     */
     private _flattenIngredientsForProduct(
         product: ProductWithDetails,
         includeDough = true,
@@ -906,11 +941,6 @@ export class ProductionTasksService {
         return flattened;
     }
 
-    /**
-     * @description [核心重构] 此方法现在完全基于flourRatio实时计算总面粉量
-     * @param product 包含完整配方信息的产品对象
-     * @returns {Prisma.Decimal} 以克为单位的总面粉重量
-     */
     private _calculateTotalFlourWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
         const mainDough = product.recipeVersion.doughs[0];
         if (!mainDough) return new Prisma.Decimal(0);
