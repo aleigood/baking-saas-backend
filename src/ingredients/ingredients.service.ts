@@ -41,6 +41,7 @@ export class IngredientsService {
         });
     }
 
+    // [核心重构] 修改 findAll 方法，使其返回分类和排序后的数据
     async findAll(tenantId: string) {
         const intermediateRecipes = await this.prisma.recipeFamily.findMany({
             where: {
@@ -76,15 +77,16 @@ export class IngredientsService {
         });
 
         if (ingredients.length === 0) {
-            return [];
+            return {
+                allIngredients: [],
+                lowStockIngredients: [],
+            };
         }
 
-        // [核心新增] 高效地为所有原料附加最新的采购单价
         const activeSkuIds = ingredients.map((i) => i.activeSkuId).filter(Boolean) as string[];
         const priceMap = new Map<string, Prisma.Decimal>();
 
         if (activeSkuIds.length > 0) {
-            // 使用复杂查询来获取每个skuId最新的那条采购记录
             const latestProcurements: { skuId: string; pricePerPackage: Prisma.Decimal }[] = await this.prisma
                 .$queryRaw`
                 SELECT p."skuId", p."pricePerPackage"
@@ -136,22 +138,19 @@ export class IngredientsService {
             ]),
         );
 
-        return ingredients.map((ingredient) => {
+        const processedIngredients = ingredients.map((ingredient) => {
             const stats = statsMap.get(ingredient.id);
             const totalConsumptionInGrams = stats?.total || 0;
-
-            // [核心新增] 从Map中获取价格，如果没有则为0
             const currentPricePerPackage = ingredient.activeSkuId ? priceMap.get(ingredient.activeSkuId) || 0 : 0;
 
-            // [核心修改] 专门处理非追踪原料
             if (ingredient.type === IngredientType.UNTRACKED) {
                 return {
                     ...ingredient,
-                    currentPricePerPackage: 0, // 非追踪原料没有价格
+                    currentPricePerPackage: 0,
                     daysOfSupply: Infinity,
                     avgDailyConsumption: 0,
                     avgConsumptionPerTask: 0,
-                    totalConsumptionInGrams, // 仍然显示总消耗量
+                    totalConsumptionInGrams,
                 };
             }
 
@@ -168,7 +167,6 @@ export class IngredientsService {
 
             const timeDiff = stats.lastDate.getTime() - stats.firstDate.getTime();
             const dayDiff = Math.max(1, Math.ceil(timeDiff / (1000 * 3600 * 24)));
-
             const avgDailyConsumption = stats.total / dayDiff;
             const daysOfSupply =
                 avgDailyConsumption > 0 ? ingredient.currentStockInGrams / avgDailyConsumption : Infinity;
@@ -183,6 +181,20 @@ export class IngredientsService {
                 totalConsumptionInGrams,
             };
         });
+
+        // 在服务端进行分类和排序
+        const allIngredients = [...processedIngredients].sort(
+            (a, b) => b.totalConsumptionInGrams - a.totalConsumptionInGrams,
+        );
+        const lowStockIngredients = [...processedIngredients]
+            // [核心修复] 增加对库存为0或负数的判断
+            .filter((ing) => ing.type === 'STANDARD' && (ing.daysOfSupply < 7 || ing.currentStockInGrams <= 0))
+            .sort((a, b) => a.daysOfSupply - b.daysOfSupply);
+
+        return {
+            allIngredients,
+            lowStockIngredients,
+        };
     }
 
     async findOne(tenantId: string, id: string) {
