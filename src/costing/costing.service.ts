@@ -364,9 +364,11 @@ export class CostingService {
             dough: FullRecipeVersion['doughs'][0],
             doughWeight: number,
             parentConversionFactor: Prisma.Decimal,
+            isMainDough: boolean, // 新增一个标志来识别是否是主面团
         ): CalculatedDoughGroup => {
             const group: CalculatedDoughGroup = {
-                name: dough.name,
+                // [核心修改] 如果是主面团，则使用产品名称，否则使用面团（配方）名称
+                name: isMainDough ? product.name : dough.name,
                 ingredients: [],
                 procedure: dough.procedure,
                 totalCost: 0,
@@ -408,6 +410,7 @@ export class CostingService {
                         preDoughRecipe as FullRecipeVersion['doughs'][0],
                         weight.toNumber(),
                         newConversionFactor, // 传递新的转换系数
+                        false, // 预制面团不是主面团
                     );
                     preDoughGroup.name = `${ingredient.linkedPreDough?.name} (用量: ${weight.toDP(1).toNumber()}g)`;
                     doughGroups.push(preDoughGroup);
@@ -436,9 +439,9 @@ export class CostingService {
             return group;
         };
 
-        product.recipeVersion.doughs.forEach((dough) => {
-            // [核心修改] 初始调用时，转换系数为1
-            const mainDoughGroup = processDough(dough, product.baseDoughWeight, new Prisma.Decimal(1));
+        product.recipeVersion.doughs.forEach((dough, index) => {
+            // [核心修改] 初始调用时，转换系数为1，并标记第一个 dough 为主面团
+            const mainDoughGroup = processDough(dough, product.baseDoughWeight, new Prisma.Decimal(1), index === 0);
             if (mainDoughGroup.ingredients.length > 0) {
                 doughGroups.push(mainDoughGroup);
             }
