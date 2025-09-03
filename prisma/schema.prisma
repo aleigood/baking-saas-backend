@@ -234,6 +234,8 @@ model Product {
   productionTasks ProductionTaskItem[]
   // [核心新增] 新增与损耗日志的关联
   spoilageLogs    ProductionTaskSpoilageLog[]
+  // [核心新增] 新增与超产日志的关联
+  overproductionLogs ProductionTaskOverproductionLog[]
 
   @@index([recipeVersionId])
 }
@@ -384,6 +386,8 @@ model ProductionLog {
   consumptionLogs IngredientConsumptionLog[]
   // [核心新增] 新增与损耗日志的关联
   spoilageLogs    ProductionTaskSpoilageLog[]
+  // [核心新增] 新增与超产日志的关联
+  overproductionLogs ProductionTaskOverproductionLog[]
 
   @@index([taskId])
 }
@@ -395,6 +399,22 @@ model ProductionTaskSpoilageLog {
   productId       String
   stage           String // e.g., 'kneading', 'fermentation', 'baking'
   quantity        Int
+  // [核心新增] 新增可选的备注字段
+  notes           String?
+  createdAt       DateTime      @default(now())
+  productionLog   ProductionLog @relation(fields: [productionLogId], references: [id], onDelete: Cascade)
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productionLogId])
+  @@index([productId])
+}
+
+// [核心新增] 新增超量生产日志模型
+model ProductionTaskOverproductionLog {
+  id              String        @id @default(uuid())
+  productionLogId String
+  productId       String
+  quantity        Int // 超产数量
   createdAt       DateTime      @default(now())
   productionLog   ProductionLog @relation(fields: [productionLogId], references: [id], onDelete: Cascade)
   product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)

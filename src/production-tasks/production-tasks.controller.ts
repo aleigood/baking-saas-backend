@@ -49,6 +49,14 @@ export class ProductionTasksController {
     }
 
     /**
+     * [核心新增] 获取预设的损耗阶段列表
+     */
+    @Get('spoilage-stages')
+    getSpoilageStages() {
+        return this.productionTasksService.getSpoilageStages();
+    }
+
+    /**
      * [核心改造] 新增：专门用于获取历史任务（已完成、已取消），支持分页
      */
     @Get('history')

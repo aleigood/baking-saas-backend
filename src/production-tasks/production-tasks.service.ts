@@ -24,14 +24,14 @@ import {
     TaskIngredientDetail,
 } from './dto/task-detail.dto';
 
-// [核心新增] 定义损耗阶段的中英文映射
-const stageToChineseMap: Record<string, string> = {
-    kneading: '揉面失败',
-    fermentation: '发酵失败',
-    shaping: '整形失败',
-    baking: '烘烤失败',
-    other: '其他原因',
-};
+// [核心修改] 将损耗阶段定义移至服务顶部，方便管理
+const spoilageStages = [
+    { key: 'kneading', label: '揉面失败' },
+    { key: 'fermentation', label: '发酵失败' },
+    { key: 'shaping', label: '整形失败' },
+    { key: 'baking', label: '烘烤失败' },
+    { key: 'other', label: '其他原因' },
+];
 
 export interface PrepTask {
     id: string;
@@ -600,6 +600,11 @@ export class ProductionTasksService {
         return Array.from(dates);
     }
 
+    // [核心新增] 获取损耗阶段列表
+    getSpoilageStages() {
+        return spoilageStages;
+    }
+
     async findHistory(tenantId: string, query: QueryProductionTaskDto) {
         const { page, limit = '10' } = query;
         const pageNum = parseInt(page || '1', 10);
@@ -1042,41 +1047,20 @@ export class ProductionTasksService {
         });
     }
 
-    // [核心修改] 函数签名增加 userId 参数
-    async complete(tenantId: string, userId: string, id: string, completeProductionTaskDto: CompleteProductionTaskDto) {
+    // [核心重构] complete 方法的整体逻辑
+    async complete(tenantId: string, userId: string, id: string, completeDto: CompleteProductionTaskDto) {
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
-            include: {
-                // [核心修改] 关联查询产品名称，用于生成损耗原因
-                items: {
-                    include: {
-                        product: {
-                            select: { name: true },
-                        },
-                    },
-                },
-            },
+            include: { items: { include: { product: true } } },
         });
 
-        if (!task) {
-            throw new NotFoundException('生产任务不存在');
-        }
-
-        if (task.status !== ProductionTaskStatus.PENDING && task.status !== ProductionTaskStatus.IN_PROGRESS) {
+        if (!task) throw new NotFoundException('生产任务不存在');
+        if (task.status !== 'PENDING' && task.status !== 'IN_PROGRESS') {
             throw new BadRequestException('只有“待开始”或“进行中”的任务才能被完成');
         }
 
-        const { notes, losses = [] } = completeProductionTaskDto;
-
-        const successfulQuantities = new Map<string, number>();
-        task.items.forEach((item) => {
-            successfulQuantities.set(item.productId, item.quantity);
-        });
-
-        losses.forEach((loss) => {
-            const currentQuantity = successfulQuantities.get(loss.productId) || 0;
-            successfulQuantities.set(loss.productId, Math.max(0, currentQuantity - loss.quantity));
-        });
+        const { notes, completedItems } = completeDto;
+        const plannedQuantities = new Map(task.items.map((item) => [item.productId, item.quantity]));
 
         return this.prisma.$transaction(async (tx) => {
             await tx.productionTask.update({
@@ -1085,110 +1069,135 @@ export class ProductionTasksService {
             });
 
             const productionLog = await tx.productionLog.create({
-                data: {
-                    taskId: id,
-                    notes,
-                },
+                data: { taskId: id, notes },
             });
 
-            for (const loss of losses) {
-                await tx.productionTaskSpoilageLog.create({
-                    data: {
-                        productionLogId: productionLog.id,
-                        productId: loss.productId,
-                        stage: loss.stage,
-                        quantity: loss.quantity,
-                    },
-                });
+            const totalSuccessfulConsumption = new Map<string, { totalConsumed: number; activeSkuId: string | null }>();
 
-                const spoiledConsumptions = await this.costingService.calculateProductConsumptions(
-                    tenantId,
-                    loss.productId,
-                    loss.quantity,
-                );
+            for (const completedItem of completedItems) {
+                const { productId, completedQuantity, spoilageDetails } = completedItem;
+                const plannedQuantity = plannedQuantities.get(productId);
 
-                for (const consumption of spoiledConsumptions) {
-                    const productName =
-                        task.items.find((i) => i.productId === loss.productId)?.product.name || '未知产品';
-
-                    // [核心修改] 使用映射表将英文阶段转换为中文
-                    const translatedStage = stageToChineseMap[loss.stage] || loss.stage;
-
-                    await tx.ingredientStockAdjustment.create({
-                        data: {
-                            ingredientId: consumption.ingredientId,
-                            userId: userId, // [核心修复] 使用传入的 userId
-                            changeInGrams: -consumption.totalConsumed,
-                            // [核心修改] 使用中文原因
-                            reason: `生产损耗: ${productName} - ${translatedStage}`,
-                        },
-                    });
+                if (plannedQuantity === undefined) {
+                    throw new BadRequestException(`产品ID ${productId} 不在任务中。`);
                 }
-            }
 
-            const successfulConsumptions = new Map<string, { totalConsumed: number; activeSkuId: string | null }>();
-
-            for (const [productId, quantity] of successfulQuantities.entries()) {
-                if (quantity > 0) {
+                // 1. 处理成功生产的部分
+                if (completedQuantity > 0) {
                     const consumptions = await this.costingService.calculateProductConsumptions(
                         tenantId,
                         productId,
-                        quantity,
+                        completedQuantity,
                     );
-                    for (const consumption of consumptions) {
-                        const existing = successfulConsumptions.get(consumption.ingredientId);
+                    for (const cons of consumptions) {
+                        const existing = totalSuccessfulConsumption.get(cons.ingredientId);
                         if (existing) {
-                            existing.totalConsumed += consumption.totalConsumed;
+                            existing.totalConsumed += cons.totalConsumed;
                         } else {
-                            successfulConsumptions.set(consumption.ingredientId, {
-                                totalConsumed: consumption.totalConsumed,
-                                activeSkuId: consumption.activeSkuId,
+                            totalSuccessfulConsumption.set(cons.ingredientId, {
+                                totalConsumed: cons.totalConsumed,
+                                activeSkuId: cons.activeSkuId,
                             });
                         }
                     }
                 }
-            }
 
-            const ingredientIds = Array.from(successfulConsumptions.keys());
-            const ingredients = await tx.ingredient.findMany({
-                where: { id: { in: ingredientIds } },
-                select: { id: true, currentStockInGrams: true, currentStockValue: true },
-            });
-            const ingredientDataMap = new Map(ingredients.map((i) => [i.id, i]));
+                const calculatedSpoilage = spoilageDetails?.reduce((sum, s) => sum + s.quantity, 0) || 0;
+                const calculatedOverproduction = Math.max(0, completedQuantity - plannedQuantity);
+                const actualSpoilage = Math.max(0, plannedQuantity - completedQuantity);
 
-            for (const [ingredientId, consumption] of successfulConsumptions.entries()) {
-                await tx.ingredientConsumptionLog.create({
-                    data: {
-                        productionLogId: productionLog.id,
-                        ingredientId: ingredientId,
-                        skuId: consumption.activeSkuId,
-                        quantityInGrams: consumption.totalConsumed,
-                    },
-                });
+                if (calculatedSpoilage !== actualSpoilage) {
+                    throw new BadRequestException(
+                        `产品 ${productId} 的损耗数量计算不一致。计划: ${plannedQuantity}, 完成: ${completedQuantity}, 上报损耗: ${calculatedSpoilage}`,
+                    );
+                }
 
-                const ingredient = ingredientDataMap.get(ingredientId);
-                if (ingredient) {
-                    const decrementAmount = Math.min(ingredient.currentStockInGrams, consumption.totalConsumed);
-                    const currentStockValue = new Prisma.Decimal(ingredient.currentStockValue.toString());
-                    let valueToDecrement = new Prisma.Decimal(0);
-                    if (ingredient.currentStockInGrams > 0) {
-                        const avgPricePerGram = currentStockValue.div(ingredient.currentStockInGrams);
-                        valueToDecrement = avgPricePerGram.mul(decrementAmount);
+                // 2. 处理损耗
+                if (actualSpoilage > 0 && spoilageDetails) {
+                    const spoiledConsumptions = await this.costingService.calculateProductConsumptions(
+                        tenantId,
+                        productId,
+                        actualSpoilage,
+                    );
+
+                    for (const spoilage of spoilageDetails) {
+                        await tx.productionTaskSpoilageLog.create({
+                            data: {
+                                productionLogId: productionLog.id,
+                                productId,
+                                stage: spoilage.stage,
+                                quantity: spoilage.quantity,
+                                notes: spoilage.notes,
+                            },
+                        });
                     }
 
-                    await tx.ingredient.update({
-                        where: { id: ingredientId },
+                    for (const cons of spoiledConsumptions) {
+                        const productName =
+                            task.items.find((i) => i.productId === productId)?.product.name || '未知产品';
+                        await tx.ingredientStockAdjustment.create({
+                            data: {
+                                ingredientId: cons.ingredientId,
+                                userId: userId,
+                                changeInGrams: -cons.totalConsumed,
+                                reason: `生产损耗: ${productName}`,
+                            },
+                        });
+                    }
+                }
+
+                // 3. 处理超产
+                if (calculatedOverproduction > 0) {
+                    await tx.productionTaskOverproductionLog.create({
                         data: {
-                            currentStockInGrams: {
-                                decrement: decrementAmount,
-                            },
-                            currentStockValue: {
-                                decrement: valueToDecrement,
-                            },
+                            productionLogId: productionLog.id,
+                            productId,
+                            quantity: calculatedOverproduction,
                         },
                     });
                 }
             }
+
+            // 4. 统一处理所有成功生产的原料消耗
+            const ingredientIds = Array.from(totalSuccessfulConsumption.keys());
+            if (ingredientIds.length > 0) {
+                const ingredients = await tx.ingredient.findMany({
+                    where: { id: { in: ingredientIds } },
+                    select: { id: true, currentStockInGrams: true, currentStockValue: true },
+                });
+                const ingredientDataMap = new Map(ingredients.map((i) => [i.id, i]));
+
+                for (const [ingId, cons] of totalSuccessfulConsumption.entries()) {
+                    await tx.ingredientConsumptionLog.create({
+                        data: {
+                            productionLogId: productionLog.id,
+                            ingredientId: ingId,
+                            skuId: cons.activeSkuId,
+                            quantityInGrams: cons.totalConsumed,
+                        },
+                    });
+
+                    const ingredient = ingredientDataMap.get(ingId);
+                    if (ingredient) {
+                        const decrementAmount = Math.min(ingredient.currentStockInGrams, cons.totalConsumed);
+                        const currentStockValue = new Prisma.Decimal(ingredient.currentStockValue.toString());
+                        let valueToDecrement = new Prisma.Decimal(0);
+                        if (ingredient.currentStockInGrams > 0) {
+                            const avgPricePerGram = currentStockValue.div(ingredient.currentStockInGrams);
+                            valueToDecrement = avgPricePerGram.mul(decrementAmount);
+                        }
+
+                        await tx.ingredient.update({
+                            where: { id: ingId },
+                            data: {
+                                currentStockInGrams: { decrement: decrementAmount },
+                                currentStockValue: { decrement: valueToDecrement },
+                            },
+                        });
+                    }
+                }
+            }
+
             return this.findOne(tenantId, id, {});
         });
     }
