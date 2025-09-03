@@ -63,6 +63,15 @@ export class RecipesService {
     private async createVersionInternal(tenantId: string, familyId: string | null, createRecipeDto: CreateRecipeDto) {
         const { name, type = 'MAIN', ingredients, products, notes, targetTemp, lossRatio, procedure } = createRecipeDto;
 
+        // [核心新增] 新增校验，防止配方中出现重复的原料或面种
+        const ingredientNames = new Set<string>();
+        for (const ing of ingredients) {
+            if (ingredientNames.has(ing.name)) {
+                throw new BadRequestException(`配方中包含重复的原料或面种: "${ing.name}"`);
+            }
+            ingredientNames.add(ing.name);
+        }
+
         return this.prisma.$transaction(
             async (tx) => {
                 // [核心修改] 在事务开始时就预加载所有需要的预制面团信息
@@ -142,7 +151,8 @@ export class RecipesService {
                     data: {
                         recipeVersionId: recipeVersion.id,
                         name: name,
-                        targetTemp: targetTemp,
+                        // [核心修改] 只有主配方(MAIN)才记录目标温度，其他类型配方忽略此字段
+                        targetTemp: type === 'MAIN' ? targetTemp : undefined,
                         lossRatio: lossRatio,
                         procedure: procedure,
                     },
