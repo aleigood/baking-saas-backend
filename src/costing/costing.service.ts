@@ -9,6 +9,7 @@ import {
     ProductIngredient,
     ProductIngredientType,
     RecipeFamily,
+    RecipeType,
     RecipeVersion,
 } from '@prisma/client';
 
@@ -58,10 +59,11 @@ export interface CalculatedRecipeIngredient {
     isRecipe: boolean; // 新增字段，用于标识该原料是否为另一个配方
 }
 
-// [新增] 为前置准备任务定义新的类型接口
+// [核心修改] 为 CalculatedRecipeDetails 接口增加 type 字段
 export interface CalculatedRecipeDetails {
     id: string;
     name: string;
+    type: RecipeType; // 新增字段，用于标识配方类型 (PRE_DOUGH 或 EXTRA)
     totalWeight: number;
     procedure: string[];
     ingredients: CalculatedRecipeIngredient[];
@@ -151,6 +153,7 @@ export class CostingService {
             return {
                 id: recipeFamily.id,
                 name: recipeFamily.name,
+                type: recipeFamily.type, // [核心修改] 增加 type 字段
                 totalWeight,
                 procedure: mainDough.procedure,
                 ingredients: [],
@@ -190,6 +193,7 @@ export class CostingService {
         return {
             id: recipeFamily.id,
             name: recipeFamily.name,
+            type: recipeFamily.type, // [核心修改] 增加 type 字段
             totalWeight,
             procedure: mainDough.procedure,
             ingredients: calculatedIngredients,
@@ -440,7 +444,7 @@ export class CostingService {
                         false,
                         flourWeightReference,
                     );
-                    preDoughGroup.name = `${ingredient.linkedPreDough?.name} (用量: ${weight.toDP(1).toNumber()}g)`;
+                    preDoughGroup.name = `${ingredient.linkedPreDough?.name}`;
                     doughGroups.push(preDoughGroup);
                 } else if (ingredient.ingredient) {
                     const pricePerKg = getPricePerKg(ingredient.ingredient.id);
