@@ -114,6 +114,7 @@ type FlattenedIngredient = {
     type?: ProductIngredientType;
     ratio?: number;
     weightInGrams?: number;
+    waterContent?: number; // [核心修改] 新增含水量字段，用于精确计算总水量
 };
 
 @Injectable()
@@ -742,13 +743,24 @@ export class ProductionTasksService {
             const mainDoughIngredientsMap = new Map<string, TaskIngredientDetail>();
             let totalDoughWeight = new Prisma.Decimal(0);
 
-            // [核心恢复] 为用冰量计算准确的总水量
+            // [核心新增] 为后加水逻辑计算面团家族的总面粉量
+            let totalFlourForFamily = new Prisma.Decimal(0);
+            for (const item of data.items) {
+                const flourPerUnit = this._calculateTotalFlourWeightForProduct(item.product);
+                totalFlourForFamily = totalFlourForFamily.add(flourPerUnit.mul(item.quantity));
+            }
+
+            // [核心修改] 采用与 cal.js 一致的精确总水量计算逻辑
             let totalWaterForFamily = new Prisma.Decimal(0);
             for (const item of data.items) {
                 const flattened = this._flattenIngredientsForProduct(item.product);
                 for (const [, ingData] of flattened.entries()) {
-                    if (ingData.name === '水') {
-                        totalWaterForFamily = totalWaterForFamily.add(ingData.weight.mul(item.quantity));
+                    // 检查原料是否定义了含水量，并且大于0
+                    if (ingData.waterContent && ingData.waterContent > 0) {
+                        // 计算该原料的实际水重（原料总重 * 含水比例）
+                        const waterWeight = ingData.weight.mul(new Prisma.Decimal(ingData.waterContent));
+                        // 累加到家族总水量中，并乘以产品数量
+                        totalWaterForFamily = totalWaterForFamily.add(waterWeight.mul(item.quantity));
                     }
                 }
             }
@@ -762,7 +774,6 @@ export class ProductionTasksService {
                     let name: string;
                     let brand: string | null = null;
                     let isRecipe = false;
-                    // [核心新增] 新增 extraInfo 字段，用于存储附加信息
                     let extraInfo: string | null = null;
 
                     if (ing.linkedPreDough && ing.flourRatio) {
@@ -789,8 +800,12 @@ export class ProductionTasksService {
                     weight = weight.mul(item.quantity);
                     totalDoughWeight = totalDoughWeight.add(weight);
 
-                    // [核心修改] 将用冰量信息存入 extraInfo 字段，而不是修改名称
+                    // [核心修改] 将用冰量和后加水信息存入 extraInfo 字段
                     if (canCalculateIce && name === '水' && mainDoughInfo.targetTemp) {
+                        // 使用一个数组来收集所有附加信息，最后统一拼接
+                        const extraInfoParts: string[] = [];
+
+                        // 1. 计算冰量 (现有逻辑)
                         const targetWaterTemp = this._calculateWaterTemp(
                             mainDoughInfo.targetTemp,
                             mixerType,
@@ -802,8 +817,25 @@ export class ProductionTasksService {
                             totalWaterForFamily.toNumber(),
                             waterTemp,
                         );
+
+                        // 只有当冰量大于0时才添加信息 (需求1)
                         if (iceWeight > 0) {
-                            extraInfo = `含 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰`;
+                            extraInfoParts.push(`需要替换 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰`);
+                        }
+
+                        // 2. 计算后加水量 (新需求2)
+                        if (!totalFlourForFamily.isZero()) {
+                            const trueHydrationRatio = totalWaterForFamily.div(totalFlourForFamily);
+                            if (trueHydrationRatio.gt(0.65)) {
+                                // 后加水量 = 总水量 - (总粉量 * 65%)
+                                const holdBackWater = totalWaterForFamily.sub(totalFlourForFamily.mul(0.65));
+                                extraInfoParts.push(`需要保留 ${holdBackWater.toDP(1).toNumber()}g 水在搅拌过程中加入`);
+                            }
+                        }
+
+                        // 3. 合并所有附加信息
+                        if (extraInfoParts.length > 0) {
+                            extraInfo = extraInfoParts.join('\n');
                         }
                     }
 
@@ -817,7 +849,7 @@ export class ProductionTasksService {
                             brand,
                             weightInGrams: weight.toNumber(),
                             isRecipe,
-                            extraInfo, // [核心修改] 将 extraInfo 添加到对象中
+                            extraInfo,
                         });
                     }
                 }
@@ -919,13 +951,23 @@ export class ProductionTasksService {
                         }
                     } else if (ing.ingredient && ing.ratio) {
                         const weight = flourWeightRef.mul(new Prisma.Decimal(ing.ratio));
-                        flattened.set(ing.ingredient.id, {
-                            id: ing.ingredient.id,
-                            name: ing.ingredient.name,
-                            weight: weight,
-                            brand: ing.ingredient.activeSku?.brand || null,
-                            isRecipe: false,
-                        });
+
+                        // [核心修复] 从“覆盖”逻辑改为“累加”逻辑
+                        const existing = flattened.get(ing.ingredient.id);
+                        if (existing) {
+                            // 如果原料已存在于列表中（例如，在主面团和面种中都存在），则累加其重量
+                            existing.weight = existing.weight.add(weight);
+                        } else {
+                            // 如果是第一次遇到该原料，则将其添加到列表
+                            flattened.set(ing.ingredient.id, {
+                                id: ing.ingredient.id,
+                                name: ing.ingredient.name,
+                                weight: weight,
+                                brand: ing.ingredient.activeSku?.brand || null,
+                                isRecipe: false,
+                                waterContent: ing.ingredient.waterContent,
+                            });
+                        }
                     }
                 }
             };
@@ -943,6 +985,7 @@ export class ProductionTasksService {
                     type: pIng.type,
                     ratio: pIng.ratio ?? undefined,
                     weightInGrams: pIng.weightInGrams ?? undefined,
+                    waterContent: pIng.ingredient.waterContent,
                 });
             } else if (pIng.linkedExtra) {
                 flattened.set(pIng.linkedExtra.id, {
@@ -1089,6 +1132,7 @@ export class ProductionTasksService {
 
             for (const completedItem of completedItems) {
                 const { productId, completedQuantity, spoilageDetails } = completedItem;
+                // [核心修复] 修复了变量名冲突 (plannedQuantities -> plannedQuantity) 并修正后续所有引用
                 const plannedQuantity = plannedQuantities.get(productId);
 
                 if (plannedQuantity === undefined) {
