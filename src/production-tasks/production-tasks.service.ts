@@ -465,8 +465,6 @@ export class ProductionTasksService {
      * @returns 返回任务列表
      */
     private async findTasksForDate(tenantId: string, date?: string) {
-        this.logger.log(`[findTasksForDate] Received date parameter: ${date}, type: ${typeof date}`);
-
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
