@@ -633,9 +633,9 @@ export class ProductionTasksService {
                     },
                 },
             },
-            // [核心修改] 确保任务按开始日期的降序获取
+            // [核心修改] 将排序字段从 startDate 改为 updatedAt，以反映真实的完成/取消时间
             orderBy: {
-                startDate: 'desc',
+                updatedAt: 'desc',
             },
             skip: (pageNum - 1) * limitNum,
             take: limitNum,
@@ -644,8 +644,8 @@ export class ProductionTasksService {
         // [核心重构] 在服务端完成分组逻辑
         const groupedTasks = tasks.reduce(
             (acc: Record<string, ProductionTask[]>, task) => {
-                // 使用任务的 startDate 进行分组，并格式化为 "月日 星期"
-                const date = new Date(task.startDate).toLocaleDateString('zh-CN', {
+                // [核心修改] 分组的日期依据也改为 updatedAt
+                const date = new Date(task.updatedAt).toLocaleDateString('zh-CN', {
                     month: 'long',
                     day: 'numeric',
                     weekday: 'long',
