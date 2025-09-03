@@ -744,6 +744,8 @@ export class ProductionTasksService {
                     let name: string;
                     let brand: string | null = null;
                     let isRecipe = false;
+                    // [核心新增] 新增 extraInfo 字段，用于存储附加信息
+                    let extraInfo: string | null = null;
 
                     if (ing.linkedPreDough && ing.flourRatio) {
                         const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.doughs[0];
@@ -769,6 +771,7 @@ export class ProductionTasksService {
                     weight = weight.mul(item.quantity);
                     totalDoughWeight = totalDoughWeight.add(weight);
 
+                    // [核心修改] 将用冰量信息存入 extraInfo 字段，而不是修改名称
                     if (canCalculateIce && name === '水' && mainDoughInfo.targetTemp) {
                         const targetWaterTemp = this._calculateWaterTemp(
                             mainDoughInfo.targetTemp,
@@ -782,7 +785,7 @@ export class ProductionTasksService {
                             waterTemp,
                         );
                         if (iceWeight > 0) {
-                            name = `水 (含 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰)`;
+                            extraInfo = `含 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰`;
                         }
                     }
 
@@ -796,6 +799,7 @@ export class ProductionTasksService {
                             brand,
                             weightInGrams: weight.toNumber(),
                             isRecipe,
+                            extraInfo, // [核心修改] 将 extraInfo 添加到对象中
                         });
                     }
                 }
