@@ -221,14 +221,21 @@ export class ProductionTasksService {
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
+            // [核心修复] 调整了日期验证逻辑，以兼容小程序可能传来的无效日期字符串
+            // 如果解析出的日期无效（例如，当 date 是 ''、'undefined' 或 'null' 时），
+            // 则静默地回退到使用当前日期，而不是抛出错误，从而提高接口的容错性。
             if (isNaN(targetDate.getTime())) {
-                throw new BadRequestException('提供的日期格式无效。');
+                targetDate = new Date();
             }
         } else {
             targetDate = new Date();
         }
-        const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
-        const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+
+        // [核心修复] 创建新的Date对象，避免对 targetDate 的重复修改
+        const startOfDay = new Date(targetDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(targetDate);
+        endOfDay.setHours(23, 59, 59, 999);
 
         const activeTasks = await this.prisma.productionTask.findMany({
             where: {
@@ -458,18 +465,26 @@ export class ProductionTasksService {
      * @returns 返回任务列表
      */
     private async findTasksForDate(tenantId: string, date?: string) {
+        this.logger.log(`[findTasksForDate] Received date parameter: ${date}, type: ${typeof date}`);
+
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
-            // [核心修复] 增加日期有效性验证，防止因无效日期字符串导致查询失败
+            // [核心修复] 调整了日期验证逻辑，以兼容小程序可能传来的无效日期字符串
+            // 如果解析出的日期无效（例如，当 date 是 ''、'undefined' 或 'null' 时），
+            // 则静默地回退到使用当前日期，而不是抛出错误，从而提高接口的容错性。
             if (isNaN(targetDate.getTime())) {
-                throw new BadRequestException('提供的日期格式无效。');
+                targetDate = new Date();
             }
         } else {
             targetDate = new Date();
         }
-        const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
-        const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+
+        // [核心修复] 创建新的Date对象副本进行修改，避免污染原始的targetDate对象
+        const startOfDay = new Date(targetDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(targetDate);
+        endOfDay.setHours(23, 59, 59, 999);
 
         const where: Prisma.ProductionTaskWhereInput = {
             tenantId,
