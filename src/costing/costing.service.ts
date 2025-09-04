@@ -550,7 +550,7 @@ export class CostingService {
                     // [核心新增] 如果是主面团中的水，则附加真实含水率信息
                     let extraInfo: string | undefined = undefined;
                     if (isMainDough && ingredient.ingredient.name === '水') {
-                        extraInfo = `真实含水率: ${trueHydration.mul(100).toDP(1).toNumber()}%`;
+                        extraInfo = `总水量: ${trueHydration.mul(100).toDP(1).toNumber()}%`;
                     }
 
                     group.ingredients.push({
