@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { Prisma } from '@prisma/client';
 import {
+    Prisma,
     Dough,
     DoughIngredient,
     Ingredient,
@@ -26,6 +26,7 @@ export interface CalculatedIngredientInfo {
     weightInGrams: number;
     pricePerKg: number;
     cost: number;
+    extraInfo?: string; // [核心新增] 增加一个可选的附加信息字段
 }
 
 export interface CalculatedDoughGroup {
@@ -349,11 +350,105 @@ export class CostingService {
         return consumptionLogs.map((log) => ({ cost: log.quantityInGrams })).reverse();
     }
 
+    /**
+     * [核心新增] 新增一个私有辅助方法，用于计算产品的真实总含水量
+     * @param product 包含完整配方信息的对象
+     * @returns 返回计算出的真实含水率 (Decimal 类型)
+     */
+    private _calculateTrueHydration(product: FullProduct): Prisma.Decimal {
+        const flattenedIngredients = new Map<string, { weight: Prisma.Decimal; ingredient: Ingredient }>();
+
+        // 递归函数，用于处理面团及其嵌套的预制面团
+        const processDough = (dough: FullRecipeVersion['doughs'][0], flourWeightRef: Prisma.Decimal) => {
+            for (const ing of dough.ingredients) {
+                // 如果是预制面团，则递归处理
+                if (ing.linkedPreDough && ing.flourRatio) {
+                    const preDough = ing.linkedPreDough.versions?.[0]?.doughs?.[0];
+                    if (preDough) {
+                        const flourForPreDough = flourWeightRef.mul(new Prisma.Decimal(ing.flourRatio));
+                        processDough(preDough as FullRecipeVersion['doughs'][0], flourForPreDough);
+                    }
+                }
+                // 如果是普通原料，则累加其重量
+                else if (ing.ingredient && ing.ratio) {
+                    const ingredientWeight = flourWeightRef.mul(new Prisma.Decimal(ing.ratio));
+                    const current = flattenedIngredients.get(ing.ingredient.id);
+                    if (current) {
+                        current.weight = current.weight.add(ingredientWeight);
+                    } else {
+                        flattenedIngredients.set(ing.ingredient.id, {
+                            weight: ingredientWeight,
+                            ingredient: ing.ingredient,
+                        });
+                    }
+                }
+            }
+        };
+
+        const mainDough = product.recipeVersion.doughs[0];
+        if (!mainDough) return new Prisma.Decimal(0);
+
+        // 与 _getFlattenedIngredients 类似，计算出作为基准的总面粉重量
+        const mainDoughLossRatio = new Prisma.Decimal(mainDough.lossRatio || 0);
+        const mainDoughDivisor = new Prisma.Decimal(1).sub(mainDoughLossRatio);
+        const adjustedMainDoughWeight = !mainDoughDivisor.isZero()
+            ? new Prisma.Decimal(product.baseDoughWeight).div(mainDoughDivisor)
+            : new Prisma.Decimal(0);
+
+        const calculateTotalRatio = (dough: FullRecipeVersion['doughs'][0]): Prisma.Decimal => {
+            return dough.ingredients.reduce((sum, i) => {
+                if (i.flourRatio && i.linkedPreDough) {
+                    const preDough = i.linkedPreDough.versions?.[0]?.doughs?.[0];
+                    if (preDough) {
+                        const preDoughTotalRatio = preDough.ingredients.reduce(
+                            (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
+                            new Prisma.Decimal(0),
+                        );
+                        return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio));
+                    }
+                }
+                return sum.add(new Prisma.Decimal(i.ratio ?? 0));
+            }, new Prisma.Decimal(0));
+        };
+
+        const mainDoughTotalRatio = calculateTotalRatio(mainDough);
+        const flourWeightReference = !mainDoughTotalRatio.isZero()
+            ? adjustedMainDoughWeight.div(mainDoughTotalRatio)
+            : new Prisma.Decimal(0);
+
+        // 开始递归处理主面团
+        processDough(mainDough, flourWeightReference);
+
+        let totalFlourWeight = new Prisma.Decimal(0);
+        let totalWaterWeight = new Prisma.Decimal(0);
+
+        // 遍历扁平化后的原料列表，计算总面粉和总水量
+        for (const data of flattenedIngredients.values()) {
+            if (data.ingredient.isFlour) {
+                totalFlourWeight = totalFlourWeight.add(data.weight);
+            }
+            if (data.ingredient.waterContent > 0) {
+                const waterInIngredient = data.weight.mul(new Prisma.Decimal(data.ingredient.waterContent));
+                totalWaterWeight = totalWaterWeight.add(waterInIngredient);
+            }
+        }
+
+        // 避免除以零
+        if (totalFlourWeight.isZero()) {
+            return new Prisma.Decimal(0);
+        }
+
+        return totalWaterWeight.div(totalFlourWeight);
+    }
+
     async getCalculatedProductDetails(tenantId: string, productId: string): Promise<CalculatedProductCostDetails> {
         const product = await this.getFullProduct(tenantId, productId);
         if (!product) {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
+
+        // [核心新增] 调用新方法计算真实含水率
+        const trueHydration = this._calculateTrueHydration(product);
 
         const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientIds = Array.from(flatIngredients.keys());
@@ -452,12 +547,19 @@ export class CostingService {
 
                     const effectiveRatio = new Prisma.Decimal(ingredient.ratio ?? 0).mul(parentConversionFactor);
 
+                    // [核心新增] 如果是主面团中的水，则附加真实含水率信息
+                    let extraInfo: string | undefined = undefined;
+                    if (isMainDough && ingredient.ingredient.name === '水') {
+                        extraInfo = `真实含水率: ${trueHydration.mul(100).toDP(1).toNumber()}%`;
+                    }
+
                     group.ingredients.push({
                         name: ingredient.ingredient.name,
                         ratio: effectiveRatio.toNumber(),
                         weightInGrams: weight.toNumber(),
                         pricePerKg: pricePerKg,
                         cost: cost.toDP(2).toNumber(),
+                        extraInfo, // [核心新增] 传入附加信息
                     });
                     group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
 
