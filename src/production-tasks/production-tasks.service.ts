@@ -843,14 +843,20 @@ export class ProductionTasksService {
                     if (existing) {
                         existing.weightInGrams += weight.toNumber();
                     } else {
-                        mainDoughIngredientsMap.set(id, {
+                        // [核心修改] 仅当 extraInfo 有内容时才将其添加到对象中
+                        const newIngredient: TaskIngredientDetail = {
                             id,
                             name,
                             brand,
                             weightInGrams: weight.toNumber(),
                             isRecipe,
-                            extraInfo,
-                        });
+                        };
+
+                        if (extraInfo) {
+                            newIngredient.extraInfo = extraInfo;
+                        }
+
+                        mainDoughIngredientsMap.set(id, newIngredient);
                     }
                 }
             }
