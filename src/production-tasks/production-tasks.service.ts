@@ -1122,6 +1122,57 @@ export class ProductionTasksService {
         }
 
         const { notes, completedItems } = completeDto;
+
+        // [核心新增] 开始：在所有操作之前进行严格的库存检查
+        // 1. 计算本次完成所有产品所需的原料总量
+        const totalConsumptionNeeded = new Map<string, { name: string; totalConsumed: number }>();
+        for (const item of completedItems) {
+            // 只计算实际生产了的产品
+            if (item.completedQuantity > 0) {
+                const consumptions = await this.costingService.calculateProductConsumptions(
+                    tenantId,
+                    item.productId,
+                    item.completedQuantity,
+                );
+                for (const cons of consumptions) {
+                    const existing = totalConsumptionNeeded.get(cons.ingredientId);
+                    if (existing) {
+                        existing.totalConsumed += cons.totalConsumed;
+                    } else {
+                        totalConsumptionNeeded.set(cons.ingredientId, {
+                            name: cons.ingredientName,
+                            totalConsumed: cons.totalConsumed,
+                        });
+                    }
+                }
+            }
+        }
+
+        const neededIngredientIds = Array.from(totalConsumptionNeeded.keys());
+        if (neededIngredientIds.length > 0) {
+            // 2. 获取这些原料的当前库存
+            const ingredientsInStock = await this.prisma.ingredient.findMany({
+                where: { id: { in: neededIngredientIds }, type: IngredientType.STANDARD }, // 只检查需要追踪的原料
+                select: { id: true, currentStockInGrams: true },
+            });
+            const stockMap = new Map(ingredientsInStock.map((i) => [i.id, i.currentStockInGrams]));
+
+            // 3. 比较需求量和库存量，找出所有库存不足的原料
+            const insufficientIngredients: string[] = [];
+            for (const [id, needed] of totalConsumptionNeeded.entries()) {
+                const currentStock = stockMap.get(id) ?? 0;
+                if (currentStock < needed.totalConsumed) {
+                    insufficientIngredients.push(needed.name);
+                }
+            }
+
+            // 4. 如果有任何原料不足，则抛出异常，终止操作
+            if (insufficientIngredients.length > 0) {
+                throw new BadRequestException(`操作失败：原料库存不足 (${insufficientIngredients.join(', ')})`);
+            }
+        }
+        // [核心新增] 结束：库存检查完毕
+
         const plannedQuantities = new Map(task.items.map((item) => [item.productId, item.quantity]));
 
         return this.prisma.$transaction(async (tx) => {
@@ -1134,35 +1185,26 @@ export class ProductionTasksService {
                 data: { taskId: id, notes },
             });
 
+            // [核心修改] totalSuccessfulConsumption 现在可以直接使用上面库存检查时计算好的 totalConsumptionNeeded
             const totalSuccessfulConsumption = new Map<string, { totalConsumed: number; activeSkuId: string | null }>();
+            for (const [ingId, data] of totalConsumptionNeeded.entries()) {
+                // 需要补充 activeSkuId
+                const ingredientInfo = await tx.ingredient.findUnique({
+                    where: { id: ingId },
+                    select: { activeSkuId: true },
+                });
+                totalSuccessfulConsumption.set(ingId, {
+                    totalConsumed: data.totalConsumed,
+                    activeSkuId: ingredientInfo?.activeSkuId || null,
+                });
+            }
 
             for (const completedItem of completedItems) {
                 const { productId, completedQuantity, spoilageDetails } = completedItem;
-                // [核心修复] 修复了变量名冲突 (plannedQuantities -> plannedQuantity) 并修正后续所有引用
                 const plannedQuantity = plannedQuantities.get(productId);
 
                 if (plannedQuantity === undefined) {
                     throw new BadRequestException(`产品ID ${productId} 不在任务中。`);
-                }
-
-                // 1. 处理成功生产的部分
-                if (completedQuantity > 0) {
-                    const consumptions = await this.costingService.calculateProductConsumptions(
-                        tenantId,
-                        productId,
-                        completedQuantity,
-                    );
-                    for (const cons of consumptions) {
-                        const existing = totalSuccessfulConsumption.get(cons.ingredientId);
-                        if (existing) {
-                            existing.totalConsumed += cons.totalConsumed;
-                        } else {
-                            totalSuccessfulConsumption.set(cons.ingredientId, {
-                                totalConsumed: cons.totalConsumed,
-                                activeSkuId: cons.activeSkuId,
-                            });
-                        }
-                    }
                 }
 
                 const calculatedSpoilage = spoilageDetails?.reduce((sum, s) => sum + s.quantity, 0) || 0;
@@ -1175,7 +1217,6 @@ export class ProductionTasksService {
                     );
                 }
 
-                // 2. 处理损耗
                 if (actualSpoilage > 0 && spoilageDetails) {
                     const spoiledConsumptions = await this.costingService.calculateProductConsumptions(
                         tenantId,
@@ -1209,7 +1250,6 @@ export class ProductionTasksService {
                     }
                 }
 
-                // 3. 处理超产
                 if (calculatedOverproduction > 0) {
                     await tx.productionTaskOverproductionLog.create({
                         data: {
@@ -1221,7 +1261,6 @@ export class ProductionTasksService {
                 }
             }
 
-            // 4. 统一处理所有成功生产的原料消耗
             const ingredientIds = Array.from(totalSuccessfulConsumption.keys());
             if (ingredientIds.length > 0) {
                 const ingredients = await tx.ingredient.findMany({
@@ -1242,7 +1281,8 @@ export class ProductionTasksService {
 
                     const ingredient = ingredientDataMap.get(ingId);
                     if (ingredient) {
-                        const decrementAmount = Math.min(ingredient.currentStockInGrams, cons.totalConsumed);
+                        // 因为已经在前面检查过库存，这里的扣减是安全的
+                        const decrementAmount = cons.totalConsumed;
                         const currentStockValue = new Prisma.Decimal(ingredient.currentStockValue.toString());
                         let valueToDecrement = new Prisma.Decimal(0);
                         if (ingredient.currentStockInGrams > 0) {
