@@ -5,7 +5,8 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -224,16 +225,16 @@ model DoughIngredient {
 
 // 最终产品：由配方制作出的具体面包或产品
 model Product {
-  id              String                      @id @default(uuid())
-  recipeVersionId String // 所属配方版本ID
-  name            String // 产品名称，如“熊掌卡仕达”
-  baseDoughWeight Float // 基础面团克重 (不含mixIn)
-  procedure       String[] // 制作流程要点 (如烘烤参数)
-  recipeVersion   RecipeVersion               @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
-  ingredients     ProductIngredient[] // 产品的附加原料 (搅拌、馅料、装饰)
-  productionTasks ProductionTaskItem[]
+  id                 String                            @id @default(uuid())
+  recipeVersionId    String // 所属配方版本ID
+  name               String // 产品名称，如“熊掌卡仕达”
+  baseDoughWeight    Float // 基础面团克重 (不含mixIn)
+  procedure          String[] // 制作流程要点 (如烘烤参数)
+  recipeVersion      RecipeVersion                     @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  ingredients        ProductIngredient[] // 产品的附加原料 (搅拌、馅料、装饰)
+  productionTasks    ProductionTaskItem[]
   // [核心新增] 新增与损耗日志的关联
-  spoilageLogs    ProductionTaskSpoilageLog[]
+  spoilageLogs       ProductionTaskSpoilageLog[]
   // [核心新增] 新增与超产日志的关联
   overproductionLogs ProductionTaskOverproductionLog[]
 
@@ -378,14 +379,14 @@ model ProductionTaskItem {
 
 // 生产日志模型
 model ProductionLog {
-  id              String                      @id @default(uuid())
-  taskId          String                      @unique
-  completedAt     DateTime                    @default(now())
-  notes           String?
-  task            ProductionTask              @relation(fields: [taskId], references: [id])
-  consumptionLogs IngredientConsumptionLog[]
+  id                 String                            @id @default(uuid())
+  taskId             String                            @unique
+  completedAt        DateTime                          @default(now())
+  notes              String?
+  task               ProductionTask                    @relation(fields: [taskId], references: [id])
+  consumptionLogs    IngredientConsumptionLog[]
   // [核心新增] 新增与损耗日志的关联
-  spoilageLogs    ProductionTaskSpoilageLog[]
+  spoilageLogs       ProductionTaskSpoilageLog[]
   // [核心新增] 新增与超产日志的关联
   overproductionLogs ProductionTaskOverproductionLog[]
 
