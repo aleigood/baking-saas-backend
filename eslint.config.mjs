@@ -6,7 +6,8 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
     {
-        ignores: ['eslint.config.mjs'],
+        // [最终修正] 告诉 ESLint 忽略 seed 脚本和编译输出目录
+        ignores: ['eslint.config.mjs', 'dist', 'prisma/seed.ts'],
     },
     eslint.configs.recommended,
     ...tseslint.configs.recommendedTypeChecked,
