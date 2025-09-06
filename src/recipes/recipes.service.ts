@@ -334,6 +334,7 @@ export class RecipesService {
         };
     }
 
+    // [核心修改] 重构 findProductsForTasks 方法以实现按制作次数排序
     async findProductsForTasks(tenantId: string) {
         const recipeFamilies = await this.prisma.recipeFamily.findMany({
             where: {
@@ -353,13 +354,41 @@ export class RecipesService {
                     },
                 },
             },
-            orderBy: {
-                name: 'asc',
-            },
         });
 
+        // [核心新增] 计算每个配方家族的制作次数
+        const familiesWithProductionCount = await Promise.all(
+            recipeFamilies.map(async (family) => {
+                const activeVersion = family.versions[0];
+                if (!activeVersion || activeVersion.products.length === 0) {
+                    return { ...family, productionTaskCount: 0 };
+                }
+
+                const productIds = activeVersion.products.map((p) => p.id);
+
+                const taskCount = await this.prisma.productionTaskItem.count({
+                    where: {
+                        productId: { in: productIds },
+                        task: {
+                            status: 'COMPLETED',
+                            deletedAt: null,
+                        },
+                    },
+                });
+
+                return {
+                    ...family,
+                    productionTaskCount: taskCount,
+                };
+            }),
+        );
+
+        // [核心新增] 按制作次数降序排序
+        familiesWithProductionCount.sort((a, b) => b.productionTaskCount - a.productionTaskCount);
+
+        // [核心修改] 使用排序后的数组生成结果
         const groupedProducts: Record<string, { id: string; name: string }[]> = {};
-        recipeFamilies.forEach((family) => {
+        familiesWithProductionCount.forEach((family) => {
             const activeVersion = family.versions[0];
             if (activeVersion && activeVersion.products.length > 0) {
                 if (!groupedProducts[family.name]) {
