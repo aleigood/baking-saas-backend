@@ -255,6 +255,7 @@ export class IngredientsService {
         });
     }
 
+    // [核心改造] 彻底重构库存调整逻辑，以支持期初成本录入并确保加权平均法准确性
     async adjustStock(tenantId: string, id: string, userId: string, adjustStockDto: AdjustStockDto) {
         const member = await this.prisma.tenantUser.findUnique({
             where: { userId_tenantId: { userId, tenantId } },
@@ -273,8 +274,9 @@ export class IngredientsService {
                 throw new NotFoundException('原料不存在');
             }
 
-            const { changeInGrams, reason } = adjustStockDto;
+            const { changeInGrams, reason, initialCostPerKg } = adjustStockDto;
 
+            // 记录原始流水，无论如何都执行
             await tx.ingredientStockAdjustment.create({
                 data: {
                     ingredientId: id,
@@ -284,26 +286,61 @@ export class IngredientsService {
                 },
             });
 
-            const oldStock = ingredient.currentStockInGrams;
-            const oldStockValue = new Prisma.Decimal(ingredient.currentStockValue.toString());
+            const oldStock = new Prisma.Decimal(ingredient.currentStockInGrams);
+            const oldStockValue = new Prisma.Decimal(ingredient.currentStockValue);
             let valueChange = new Prisma.Decimal(0);
 
-            if (oldStock > 0) {
+            // 场景1: 期初库存录入 (库存从0开始增加)
+            if (oldStock.isZero() && changeInGrams > 0) {
+                if (!initialCostPerKg || initialCostPerKg <= 0) {
+                    throw new BadRequestException('期初库存录入必须提供一个有效的初始单价(元/kg)。');
+                }
+                // 根据初始单价计算初始库存总价值
+                valueChange = new Prisma.Decimal(initialCostPerKg).mul(changeInGrams).div(1000);
+            }
+            // 场景2: 非期初的库存调整 (增加或减少)
+            else if (!oldStock.isZero()) {
+                // 计算当前的平均每克成本
                 const avgCostPerGram = oldStockValue.div(oldStock);
+                // 根据平均成本计算价值变动
                 valueChange = avgCostPerGram.mul(changeInGrams);
             }
+            // 场景3: 库存为0时减少库存 (逻辑上不可能，但作为保护) 或增加0库存，价值不变
+            else {
+                valueChange = new Prisma.Decimal(0);
+            }
 
-            return tx.ingredient.update({
-                where: { id },
-                data: {
-                    currentStockInGrams: {
-                        increment: changeInGrams,
+            // [核心逻辑] 确保扣减后库存价值不会小于0
+            const newStockValue = oldStockValue.add(valueChange);
+            if (newStockValue.isNegative()) {
+                // 如果计算出的新库存价值为负，说明扣减过多，直接将库存价值清零
+                // 这种情况理论上只会在浮点数精度问题时发生，Decimal库可避免，但作为最后防线
+                await tx.ingredient.update({
+                    where: { id },
+                    data: {
+                        currentStockValue: 0,
+                        currentStockInGrams: {
+                            increment: changeInGrams,
+                        },
                     },
-                    currentStockValue: {
-                        increment: valueChange,
+                });
+            } else {
+                // 正常更新库存数量和价值
+                await tx.ingredient.update({
+                    where: { id },
+                    data: {
+                        currentStockInGrams: {
+                            increment: changeInGrams,
+                        },
+                        currentStockValue: {
+                            increment: valueChange,
+                        },
                     },
-                },
-            });
+                });
+            }
+
+            // 返回最新的原料信息
+            return tx.ingredient.findUnique({ where: { id } });
         });
     }
 
