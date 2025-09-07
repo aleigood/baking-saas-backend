@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsDate, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsDate, IsInt, IsNotEmpty, IsNumber, IsString } from 'class-validator';
 
 export class CreateProcurementDto {
     @IsString()
@@ -14,10 +14,9 @@ export class CreateProcurementDto {
     @IsNotEmpty()
     pricePerPackage: number;
 
-    // 将采购日期设为可选，以支持补录功能
-    // 如果前端不传递此字段，后端将使用当前时间
-    @IsOptional()
+    // [核心修改] 将采购日期从可选改为必需，确保时间戳总是由客户端提供
     @IsDate()
+    @IsNotEmpty()
     @Type(() => Date)
-    purchaseDate?: Date;
+    purchaseDate: Date;
 }

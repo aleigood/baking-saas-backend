@@ -425,9 +425,10 @@ export class ProductionTasksService {
     }
 
     async findActive(tenantId: string, date?: string) {
-        const [tasksForDate, todayStats] = await Promise.all([
+        // [核心修改] 将对 getTodaysPendingStats 的调用改为 getPendingStatsForDate，并传入日期
+        const [tasksForDate, dateStats] = await Promise.all([
             this.findTasksForDate(tenantId, date),
-            this.getTodaysPendingStats(tenantId),
+            this.getPendingStatsForDate(tenantId, date),
         ]);
 
         const prepTask = await this._getPrepTask(tenantId, date);
@@ -451,7 +452,7 @@ export class ProductionTasksService {
         }
 
         return {
-            stats: todayStats,
+            stats: dateStats, // [核心修改] 返回新的统计数据
             // [核心修改] tasks 字段现在是包含 prepTask (如果存在) 并已排序的完整列表
             tasks: combinedTasks,
             // [核心修改] prepTask 字段不再单独返回，将其设为 null 以保持 API 结构一致性
@@ -528,15 +529,33 @@ export class ProductionTasksService {
     }
 
     /**
-     * @description [核心修改] 此函数现在只计算今天的待完成任务总数
+     * @description [核心修改] 此函数现在根据传入的日期计算待完成任务总数
      * @param tenantId 租户ID
-     * @returns 返回包含今日待完成数量的对象
+     * @param date 'YYYY-MM-DD' 格式的日期字符串 (可选)
+     * @returns 返回包含指定日期待完成数量的对象
      */
-    private async getTodaysPendingStats(tenantId: string) {
-        // [核心新增] 获取今天的开始和结束时间，确保查询不受时区影响
-        const today = new Date();
-        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
-        const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+    private async getPendingStatsForDate(tenantId: string, date?: string) {
+        // [核心修改] 使用与 findTasksForDate 相同的逻辑来确定目标日期
+        let targetDate: Date;
+        if (date) {
+            targetDate = new Date(date);
+            if (isNaN(targetDate.getTime())) {
+                targetDate = new Date();
+            }
+        } else {
+            targetDate = new Date();
+        }
+
+        const startOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 0, 0, 0, 0);
+        const endOfDay = new Date(
+            targetDate.getFullYear(),
+            targetDate.getMonth(),
+            targetDate.getDate(),
+            23,
+            59,
+            59,
+            999,
+        );
 
         const pendingTasks = await this.prisma.productionTask.findMany({
             where: {
@@ -545,7 +564,7 @@ export class ProductionTasksService {
                     in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
                 },
                 deletedAt: null,
-                // [核心新增] 增加日期过滤条件，只查询今天的任务
+                // [核心修改] 使用目标日期的开始和结束时间进行过滤
                 startDate: {
                     lte: endOfDay,
                 },
