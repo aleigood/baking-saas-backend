@@ -575,9 +575,9 @@ export class IngredientsService {
                     skuId,
                     packagesPurchased: createProcurementDto.packagesPurchased,
                     pricePerPackage: createProcurementDto.pricePerPackage,
-                    // [核心修改] 移除 || new Date()，强制使用客户端传入的日期
-                    purchaseDate: createProcurementDto.purchaseDate,
-                    userId: userId, // [核心修改] 保存操作人ID
+                    // [核心改造] 强制使用服务器当前时间，忽略 DTO 中的 purchaseDate
+                    purchaseDate: new Date(),
+                    userId: userId,
                 },
             });
 
