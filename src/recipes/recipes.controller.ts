@@ -33,6 +33,20 @@ export class RecipesController {
     }
 
     /**
+     * [核心新增] 修改一个尚未被生产任务使用过的配方版本。
+     */
+    @Patch(':familyId/versions/:versionId')
+    updateVersion(
+        @GetUser() user: UserPayload,
+        @Param('familyId') familyId: string,
+        @Param('versionId') versionId: string,
+        @Body() updateRecipeDto: CreateRecipeDto,
+    ) {
+        const tenantId = user.tenantId;
+        return this.recipesService.updateVersion(tenantId, familyId, versionId, updateRecipeDto);
+    }
+
+    /**
      * [核心新增] 获取用于创建新版本的表单模板数据
      */
     @Get(':familyId/versions/:versionId/form-template')
