@@ -77,16 +77,23 @@ export class RecipesService {
             throw new NotFoundException('指定的配方版本不存在');
         }
 
-        // 2. 核心安全检查：检查此版本是否已被任何生产任务使用
+        // 2. [核心改造] 精确检查：仅当配方被“已完成”的任务使用时，才禁止修改
         const productIds = versionToUpdate.products.map((p) => p.id);
         if (productIds.length > 0) {
             const usageCount = await this.prisma.productionTaskItem.count({
                 where: {
                     productId: { in: productIds },
+                    // 关键：增加对关联任务状态的过滤
+                    task: {
+                        status: 'COMPLETED',
+                    },
                 },
             });
             if (usageCount > 0) {
-                throw new BadRequestException('此配方版本已在生产任务中使用，无法直接修改。请创建一个新版本。');
+                // [核心改造] 提供更友好、更明确的错误信息
+                throw new BadRequestException(
+                    '此配方版本已在生产任务中使用，无法直接修改。请创建一个新版本。',
+                );
             }
         }
 
