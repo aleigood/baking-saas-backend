@@ -658,6 +658,7 @@ export class RecipesService {
                         .filter((ing) => ing.type === type && (ing.ingredient || ing.linkedExtra))
                         .map((ing) => ({
                             id: ing.ingredient?.id || ing.linkedExtra?.id || null,
+                            name: ing.ingredient?.name || ing.linkedExtra?.name || '', // [修改] 在此处添加 name 字段
                             ratio: ing.ratio ? new Prisma.Decimal(ing.ratio).mul(100).toNumber() : null,
                             weightInGrams: ing.weightInGrams,
                         }));
