@@ -7,6 +7,7 @@ import { RecipeType } from '@prisma/client';
 
 export interface SubIngredientTemplate {
     id: string | null;
+    name: string; // [新增] 为辅料、馅料等子原料模板添加 name 字段
     ratio: number | null;
     weightInGrams?: number | null;
 }
