@@ -91,9 +91,7 @@ export class RecipesService {
             });
             if (usageCount > 0) {
                 // [核心改造] 提供更友好、更明确的错误信息
-                throw new BadRequestException(
-                    '此配方版本已在生产任务中使用，无法直接修改。请创建一个新版本。',
-                );
+                throw new BadRequestException('此配方版本已在生产任务中使用，无法直接修改。请创建一个新版本。');
             }
         }
 
