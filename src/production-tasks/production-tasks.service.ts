@@ -584,12 +584,13 @@ export class ProductionTasksService {
             },
         });
 
-        const todayPendingCount = pendingTasks.reduce((sum, task) => {
+        const pendingCount = pendingTasks.reduce((sum, task) => {
             return sum + task.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
         }, 0);
 
         return {
-            todayPendingCount: todayPendingCount,
+            // [核心改造] 将 todayPendingCount 重命名为 pendingCount
+            pendingCount: pendingCount,
         };
     }
 
