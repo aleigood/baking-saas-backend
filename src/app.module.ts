@@ -12,6 +12,7 @@ import { IngredientsModule } from './ingredients/ingredients.module';
 import { CostingModule } from './costing/costing.module';
 import { StatsModule } from './stats/stats.module';
 import { ProductionTasksModule } from './production-tasks/production-tasks.module';
+import { FermentationModule } from './fermentation/fermentation.module'; // [核心新增] 导入新模块
 
 @Module({
     imports: [
@@ -25,7 +26,8 @@ import { ProductionTasksModule } from './production-tasks/production-tasks.modul
         IngredientsModule,
         CostingModule,
         StatsModule,
-        ProductionTasksModule, // 新增：生产任务模块
+        ProductionTasksModule,
+        FermentationModule, // [核心新增] 注册新模块
     ],
     controllers: [AppController],
     providers: [AppService],
