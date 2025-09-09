@@ -137,6 +137,30 @@ export class ProductionTasksService {
         return ice;
     }
 
+    /**
+     * [核心新增] 反向计算当所有水都换成冰块时，其他液体原料需要达到的温度
+     * (New: Reverse calculate the required temperature for other liquid ingredients when all water is replaced by ice)
+     * @param targetWaterTemp 目标水温 (摄氏度)
+     * @param totalRecipeWater 配方总水量 (克)
+     * @param availableWaterToReplace 可用于替换成冰的水量 (克)
+     * @returns 其他液体原料需要达到的温度 (摄氏度)
+     */
+    private _calculateRequiredWetIngredientTemp(
+        targetWaterTemp: number,
+        totalRecipeWater: number,
+        availableWaterToReplace: number,
+    ): number {
+        // 公式 T_required = (-TotalWater * T_targetWater - 80 * AllAvailableWater) / (AllAvailableWater - TotalWater)
+        // 该公式确保即使总水量为0，也不会出现除以0的错误
+        if (availableWaterToReplace - totalRecipeWater === 0) {
+            return 0; // 或者一个合理的默认值
+        }
+        return (
+            (-totalRecipeWater * targetWaterTemp - 80 * availableWaterToReplace) /
+            (availableWaterToReplace - totalRecipeWater)
+        );
+    }
+
     private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<PrepTask | null> {
         if (!task || !task.items || task.items.length === 0) {
             return null;
@@ -817,15 +841,13 @@ export class ProductionTasksService {
                         continue;
                     }
 
-                    weight = weight.mul(item.quantity);
-                    totalDoughWeight = totalDoughWeight.add(weight);
+                    const currentWaterWeight = weight.mul(item.quantity);
+                    totalDoughWeight = totalDoughWeight.add(currentWaterWeight);
 
-                    // [核心修改] 将用冰量和后加水信息存入 extraInfo 字段
+                    // [核心修改] 增强用冰量计算逻辑
                     if (canCalculateIce && name === '水' && mainDoughInfo.targetTemp) {
-                        // 使用一个数组来收集所有附加信息，最后统一拼接
                         const extraInfoParts: string[] = [];
 
-                        // 1. 计算冰量 (现有逻辑)
                         const targetWaterTemp = this._calculateWaterTemp(
                             mainDoughInfo.targetTemp,
                             mixerType,
@@ -838,22 +860,33 @@ export class ProductionTasksService {
                             waterTemp,
                         );
 
-                        // 只有当冰量大于0时才添加信息 (需求1)
-                        if (iceWeight > 0) {
+                        // [逻辑整合] 检查所需冰量是否超过可用水量
+                        if (iceWeight > currentWaterWeight.toNumber()) {
+                            // [逻辑整合] 如果超过，则反向计算其他液体原料所需温度
+                            const requiredTemp = this._calculateRequiredWetIngredientTemp(
+                                targetWaterTemp,
+                                totalWaterForFamily.toNumber(),
+                                currentWaterWeight.toNumber(),
+                            );
+                            extraInfoParts.push(
+                                `需将所有水换成冰块，且其他液体原料需冷却至 ${new Prisma.Decimal(requiredTemp)
+                                    .toDP(1)
+                                    .toNumber()}°C`,
+                            );
+                        } else if (iceWeight > 0) {
+                            // [逻辑整合] 如果未超过，则按原逻辑提示替换冰块
                             extraInfoParts.push(`需要替换 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰`);
                         }
 
-                        // 2. 计算后加水量 (新需求2)
+                        // 后加水逻辑保持不变
                         if (!totalFlourForFamily.isZero()) {
                             const trueHydrationRatio = totalWaterForFamily.div(totalFlourForFamily);
                             if (trueHydrationRatio.gt(0.65)) {
-                                // 后加水量 = 总水量 - (总粉量 * 65%)
                                 const holdBackWater = totalWaterForFamily.sub(totalFlourForFamily.mul(0.65));
                                 extraInfoParts.push(`需要保留 ${holdBackWater.toDP(1).toNumber()}g 水在搅拌过程中加入`);
                             }
                         }
 
-                        // 3. 合并所有附加信息
                         if (extraInfoParts.length > 0) {
                             extraInfo = extraInfoParts.join('\n');
                         }
@@ -861,14 +894,13 @@ export class ProductionTasksService {
 
                     const existing = mainDoughIngredientsMap.get(id);
                     if (existing) {
-                        existing.weightInGrams += weight.toNumber();
+                        existing.weightInGrams += currentWaterWeight.toNumber();
                     } else {
-                        // [核心修改] 仅当 extraInfo 有内容时才将其添加到对象中
                         const newIngredient: TaskIngredientDetail = {
                             id,
                             name,
                             brand,
-                            weightInGrams: weight.toNumber(),
+                            weightInGrams: currentWaterWeight.toNumber(),
                             isRecipe,
                         };
 
