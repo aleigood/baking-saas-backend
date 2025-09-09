@@ -582,7 +582,6 @@ export class RecipesService {
             return {
                 name: version.family.name,
                 type: version.family.type,
-                // [核心改造] 将源版本的 notes 传递给模板
                 notes: version.notes || '',
                 ingredients: doughSource.ingredients
                     .filter((ing) => ing.ingredient && ing.ratio !== null)
@@ -654,8 +653,9 @@ export class RecipesService {
         const formTemplate: RecipeFormTemplateDto = {
             name: version.family.name,
             type: 'MAIN',
-            // [核心改造] 将源版本的 notes 传递给模板
             notes: version.notes || '',
+            // [核心修复] 在返回的顶层对象中添加 targetTemp
+            targetTemp: mainDoughSource.targetTemp ?? undefined,
             doughs: [mainDoughObjectForForm, ...preDoughObjectsForForm],
             products: version.products.map((p) => {
                 const processIngredients = (type: ProductIngredientType) => {
@@ -663,7 +663,7 @@ export class RecipesService {
                         .filter((ing) => ing.type === type && (ing.ingredient || ing.linkedExtra))
                         .map((ing) => ({
                             id: ing.ingredient?.id || ing.linkedExtra?.id || null,
-                            name: ing.ingredient?.name || ing.linkedExtra?.name || '', // [修改] 在此处添加 name 字段
+                            name: ing.ingredient?.name || ing.linkedExtra?.name || '',
                             ratio: ing.ratio ? new Prisma.Decimal(ing.ratio).mul(100).toNumber() : null,
                             weightInGrams: ing.weightInGrams,
                         }));
