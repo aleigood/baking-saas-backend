@@ -7,7 +7,7 @@ import { RecipeType } from '@prisma/client';
 
 export interface SubIngredientTemplate {
     id: string | null;
-    name: string; // [新增] 为辅料、馅料等子原料模板添加 name 字段
+    name: string;
     ratio: number | null;
     weightInGrams?: number | null;
 }
@@ -42,6 +42,8 @@ export class RecipeFormTemplateDto {
     name: string;
     type: RecipeType; // 使用枚举，更灵活
     notes: string;
+    // [核心修复] 新增 targetTemp 字段以匹配 service 层的返回数据
+    targetTemp?: number;
     doughs?: DoughTemplate[]; // 主配方使用
     products?: ProductTemplate[]; // 主配方使用
     ingredients?: DoughIngredientTemplate[]; // 其他配方使用
