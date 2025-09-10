@@ -1,6 +1,6 @@
 /**
  * 文件路径: src/fermentation/dto/query-fermentation.dto.ts
- * 文件描述: [新增] 定义查询发酵用量接口的请求参数。
+ * 文件描述: [修改] 将温度单位从华氏度(F)改为摄氏度(C)。
  */
 import { IsEnum, IsNotEmpty, IsNumber } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -16,8 +16,8 @@ export enum YeastBrand {
     INSTANT_DRY = 'INSTANT_DRY',
     ACTIVE_DRY = 'ACTIVE_DRY',
     FRESH = 'FRESH',
-    SEMI_DRY = 'SEMI_DRY', // [核心新增] 新增半干酵母
-    LEVAIN = 'LEVAIN', // 鲁邦种也作为一种类型
+    SEMI_DRY = 'SEMI_DRY',
+    LEVAIN = 'LEVAIN',
 }
 
 export class QueryFermentationDto {
@@ -32,7 +32,7 @@ export class QueryFermentationDto {
     @IsNumber()
     @IsNotEmpty()
     @Type(() => Number)
-    temperatureF: number; // 温度 (华氏度)
+    temperatureC: number; // [核心修改] 将 temperatureF 改为 temperatureC，接收摄氏度
 
     @IsNumber()
     @IsNotEmpty()
