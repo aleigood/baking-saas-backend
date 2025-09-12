@@ -12,8 +12,9 @@ import {
 import { Type } from 'class-transformer';
 import { ProductIngredientType, RecipeType } from '@prisma/client';
 
+// [核心修正] 导出 ProductIngredientDto 以在其他文件中使用
 // 用于产品中附加原料（搅拌、馅料、装饰）的DTO
-class ProductIngredientDto {
+export class ProductIngredientDto {
     @IsString()
     @IsNotEmpty()
     name: string; // name 字段用于创建新原料或关联预制/附加配方
@@ -36,8 +37,9 @@ class ProductIngredientDto {
     ingredientId?: string; // [核心修改] 客户端可传入已存在原料的ID
 }
 
+// [核心修正] 导出 ProductDto 以在其他文件中使用
 // 用于最终产品的DTO
-class ProductDto {
+export class ProductDto {
     @IsString()
     @IsNotEmpty()
     name: string;

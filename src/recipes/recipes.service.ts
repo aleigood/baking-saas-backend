@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateRecipeDto, DoughIngredientDto } from './dto/create-recipe.dto';
+import { CreateRecipeDto, DoughIngredientDto, ProductDto } from './dto/create-recipe.dto'; // [核心修正] 补全对 ProductDto 的导入
 // [核心修复] 在导入语句中加入 Dough 和 DoughIngredient 类型
 import {
     Prisma,
@@ -11,6 +11,7 @@ import {
     IngredientType,
     Dough,
     DoughIngredient,
+    Product, // [核心修改] 导入 Product
 } from '@prisma/client';
 import { RecipeFormTemplateDto } from './dto/recipe-form-template.dto';
 import type { DoughTemplate } from './dto/recipe-form-template.dto';
@@ -60,6 +61,7 @@ export class RecipesService {
         return this.createVersionInternal(tenantId, familyId, createRecipeDto);
     }
 
+    // [核心改造] 重构 updateVersion 函数，采用“同步”逻辑代替“先删后创”，以保留产品ID，防止历史任务数据显示为“未知产品”
     async updateVersion(tenantId: string, familyId: string, versionId: string, updateRecipeDto: CreateRecipeDto) {
         // 1. 验证版本是否存在
         const versionToUpdate = await this.prisma.recipeVersion.findFirst({
@@ -69,7 +71,7 @@ export class RecipesService {
                 family: { tenantId },
             },
             include: {
-                products: true,
+                products: true, // [核心改造] 预加载现有产品用于后续对比
             },
         });
 
@@ -95,17 +97,11 @@ export class RecipesService {
             }
         }
 
-        // 3. 执行“先删除旧内容，再创建新内容”的更新操作
+        // 3. [核心改造] 执行新的同步逻辑
         return this.prisma.$transaction(async (tx) => {
-            // 3.1 删除所有与此版本关联的产品 (及其原料)
-            await tx.productIngredient.deleteMany({
-                where: { product: { recipeVersionId: versionId } },
-            });
-            await tx.product.deleteMany({
-                where: { recipeVersionId: versionId },
-            });
+            const { ingredients, products, targetTemp, lossRatio, procedure, name, type = 'MAIN' } = updateRecipeDto;
 
-            // 3.2 删除所有与此版本关联的面团原料和面团
+            // 3.1 [核心改造] 处理面团部分：对于面团，仍然可以采用先删后创，因为它没有外部依赖问题
             await tx.doughIngredient.deleteMany({
                 where: { dough: { recipeVersionId: versionId } },
             });
@@ -113,10 +109,172 @@ export class RecipesService {
                 where: { recipeVersionId: versionId },
             });
 
-            // 3.3 [重用逻辑] 复用创建新内容的内部逻辑
-            // 注意：这里传入 versionId 而不是 familyId，因为我们是在特定的版本上操作
-            return this.recreateVersionContents(tenantId, versionId, updateRecipeDto, tx);
+            // 重新验证并创建面团及原料
+            const ingredientNames = new Set<string>();
+            for (const ing of ingredients) {
+                if (ingredientNames.has(ing.name)) {
+                    throw new BadRequestException(`配方中包含重复的原料或面种: "${ing.name}"`);
+                }
+                ingredientNames.add(ing.name);
+            }
+            // [核心改造] 将原料检查和自动创建逻辑提前，确保在处理产品之前所有原料都已存在
+            await this._ensureIngredientsExist(tenantId, updateRecipeDto, tx);
+
+            const preDoughFamilies = await this.preloadPreDoughFamilies(tenantId, ingredients, tx);
+            this.calculatePreDoughTotalRatio(ingredients, preDoughFamilies);
+            this._validateBakerPercentage(type, ingredients);
+
+            const dough = await tx.dough.create({
+                data: {
+                    recipeVersionId: versionId,
+                    name: name,
+                    targetTemp: type === 'MAIN' ? targetTemp : undefined,
+                    lossRatio: lossRatio,
+                    procedure: procedure,
+                },
+            });
+
+            for (const ingredientDto of ingredients) {
+                const linkedPreDough = preDoughFamilies.get(ingredientDto.name);
+                await tx.doughIngredient.create({
+                    data: {
+                        doughId: dough.id,
+                        ratio: linkedPreDough ? null : ingredientDto.ratio,
+                        flourRatio: ingredientDto.flourRatio,
+                        ingredientId: linkedPreDough ? null : ingredientDto.ingredientId,
+                        linkedPreDoughId: linkedPreDough?.id,
+                    },
+                });
+            }
+
+            // 3.2 [核心改造] 处理产品部分：执行同步逻辑
+            await this._syncProductsForVersion(tenantId, versionId, versionToUpdate.products, products || [], tx);
+
+            // 3.3 更新版本备注
+            await tx.recipeVersion.update({
+                where: { id: versionId },
+                data: { notes: updateRecipeDto.notes },
+            });
+
+            // 3.4 返回更新后的完整数据
+            return this.prisma.recipeVersion.findUnique({
+                where: { id: versionId },
+                include: {
+                    family: true,
+                    doughs: {
+                        include: {
+                            ingredients: { include: { ingredient: true, linkedPreDough: true } },
+                        },
+                    },
+                    products: {
+                        include: {
+                            ingredients: { include: { ingredient: true, linkedExtra: true } },
+                        },
+                    },
+                },
+            });
         });
+    }
+
+    // [核心新增] 这是一个新的私有方法，用于同步产品列表
+    private async _syncProductsForVersion(
+        tenantId: string,
+        versionId: string,
+        existingProducts: Product[],
+        newProductsDto: ProductDto[],
+        tx: Prisma.TransactionClient,
+    ) {
+        const existingProductsMap = new Map(existingProducts.map((p) => [p.name, p]));
+        const newProductsDtoMap = new Map(newProductsDto.map((p) => [p.name, p]));
+
+        // 1. 识别要删除的产品
+        const productsToDelete = existingProducts.filter((p) => !newProductsDtoMap.has(p.name));
+        if (productsToDelete.length > 0) {
+            // [核心新增] 在删除单个产品前，再次进行精确检查，确保这个产品没有被任何任务使用
+            const productIdsToDelete = productsToDelete.map((p) => p.id);
+            const usageCount = await tx.productionTaskItem.count({
+                where: {
+                    productId: { in: productIdsToDelete },
+                },
+            });
+            if (usageCount > 0) {
+                // 如果发现即将被删除的产品已经被任务使用，则抛出异常，防止数据不一致
+                throw new BadRequestException(
+                    `无法删除产品: ${productsToDelete
+                        .map((p) => p.name)
+                        .join(', ')}，因为它已被一个或多个生产任务使用。`,
+                );
+            }
+
+            // 先删除关联的原料，再删除产品本身
+            await tx.productIngredient.deleteMany({ where: { productId: { in: productIdsToDelete } } });
+            await tx.product.deleteMany({ where: { id: { in: productIdsToDelete } } });
+        }
+
+        // 2. 遍历新的产品 DTO，进行更新或创建
+        for (const productDto of newProductsDto) {
+            const existingProduct = existingProductsMap.get(productDto.name);
+
+            if (existingProduct) {
+                // 2.1 产品已存在 -> 更新
+                await tx.product.update({
+                    where: { id: existingProduct.id },
+                    data: {
+                        baseDoughWeight: productDto.weight,
+                        procedure: productDto.procedure,
+                    },
+                });
+                // 清理旧的原料，然后重新创建
+                await tx.productIngredient.deleteMany({ where: { productId: existingProduct.id } });
+                await this._createProductIngredients(tenantId, existingProduct.id, productDto, tx);
+            } else {
+                // 2.2 产品不存在 -> 创建
+                const newProduct = await tx.product.create({
+                    data: {
+                        recipeVersionId: versionId,
+                        name: productDto.name,
+                        baseDoughWeight: productDto.weight,
+                        procedure: productDto.procedure,
+                    },
+                });
+                await this._createProductIngredients(tenantId, newProduct.id, productDto, tx);
+            }
+        }
+    }
+
+    // [核心新增] 这是一个新的辅助函数，用于统一处理产品原料的创建逻辑，避免代码重复
+    private async _createProductIngredients(
+        tenantId: string,
+        productId: string,
+        productDto: ProductDto,
+        tx: Prisma.TransactionClient,
+    ) {
+        const allProductIngredients = [
+            ...(productDto.mixIn?.map((i) => ({ ...i, type: ProductIngredientType.MIX_IN })) ?? []),
+            ...(productDto.fillings?.map((i) => ({ ...i, type: ProductIngredientType.FILLING })) ?? []),
+            ...(productDto.toppings?.map((i) => ({ ...i, type: ProductIngredientType.TOPPING })) ?? []),
+        ];
+
+        for (const pIngredientDto of allProductIngredients) {
+            const linkedExtra = await tx.recipeFamily.findFirst({
+                where: {
+                    name: pIngredientDto.name,
+                    tenantId: tenantId,
+                    type: 'EXTRA',
+                    deletedAt: null,
+                },
+            });
+            await tx.productIngredient.create({
+                data: {
+                    productId: productId,
+                    type: pIngredientDto.type,
+                    ratio: pIngredientDto.ratio,
+                    weightInGrams: pIngredientDto.weightInGrams,
+                    ingredientId: linkedExtra ? null : pIngredientDto.ingredientId,
+                    linkedExtraId: linkedExtra?.id,
+                },
+            });
+        }
     }
 
     private async createVersionInternal(tenantId: string, familyId: string | null, createRecipeDto: CreateRecipeDto) {
@@ -152,8 +310,8 @@ export class RecipesService {
                         isActive: !hasActiveVersion,
                     },
                 });
-
-                return this.recreateVersionContents(tenantId, recipeVersion.id, createRecipeDto, tx);
+                // [核心改造] 将原 recreateVersionContents 的逻辑拆分并在此处调用
+                return this.createVersionContents(tenantId, recipeVersion.id, createRecipeDto, tx);
             },
             {
                 isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -161,7 +319,8 @@ export class RecipesService {
         );
     }
 
-    private async recreateVersionContents(
+    // [核心改造] 将原 recreateVersionContents 重命名为 createVersionContents，并移除产品删除逻辑
+    private async createVersionContents(
         tenantId: string,
         versionId: string,
         recipeDto: CreateRecipeDto,
@@ -176,42 +335,12 @@ export class RecipesService {
             }
             ingredientNames.add(ing.name);
         }
+        // [核心改造] 调用独立的原料确保函数
+        await this._ensureIngredientsExist(tenantId, recipeDto, tx);
 
         const preDoughFamilies = await this.preloadPreDoughFamilies(tenantId, ingredients, tx);
         this.calculatePreDoughTotalRatio(ingredients, preDoughFamilies);
         this._validateBakerPercentage(type, ingredients);
-
-        const allRawIngredients = [
-            ...ingredients,
-            ...(products ?? []).flatMap((p) => [...(p.mixIn ?? []), ...(p.fillings ?? []), ...(p.toppings ?? [])]),
-        ];
-
-        for (const ing of allRawIngredients) {
-            if (ing.ingredientId) continue;
-
-            const isPreDoughOrExtra = await tx.recipeFamily.findFirst({
-                where: { name: ing.name, tenantId, type: { in: ['PRE_DOUGH', 'EXTRA'] } },
-            });
-            if (isPreDoughOrExtra) continue;
-
-            let existingIngredient = await tx.ingredient.findFirst({
-                where: { tenantId, name: ing.name, deletedAt: null },
-            });
-
-            if (!existingIngredient) {
-                const isWater = ing.name === '水';
-                existingIngredient = await tx.ingredient.create({
-                    data: {
-                        tenantId,
-                        name: ing.name,
-                        type: isWater ? IngredientType.UNTRACKED : IngredientType.STANDARD,
-                        isFlour: isWater ? false : 'isFlour' in ing ? (ing.isFlour ?? false) : false,
-                        waterContent: isWater ? 1 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0,
-                    },
-                });
-            }
-            ing.ingredientId = existingIngredient.id;
-        }
 
         await tx.recipeVersion.update({
             where: { id: versionId },
@@ -251,33 +380,8 @@ export class RecipesService {
                         procedure: productDto.procedure,
                     },
                 });
-
-                const allProductIngredients = [
-                    ...(productDto.mixIn?.map((i) => ({ ...i, type: ProductIngredientType.MIX_IN })) ?? []),
-                    ...(productDto.fillings?.map((i) => ({ ...i, type: ProductIngredientType.FILLING })) ?? []),
-                    ...(productDto.toppings?.map((i) => ({ ...i, type: ProductIngredientType.TOPPING })) ?? []),
-                ];
-
-                for (const pIngredientDto of allProductIngredients) {
-                    const linkedExtra = await tx.recipeFamily.findFirst({
-                        where: {
-                            name: pIngredientDto.name,
-                            tenantId: tenantId,
-                            type: 'EXTRA',
-                            deletedAt: null,
-                        },
-                    });
-                    await tx.productIngredient.create({
-                        data: {
-                            productId: product.id,
-                            type: pIngredientDto.type,
-                            ratio: pIngredientDto.ratio,
-                            weightInGrams: pIngredientDto.weightInGrams,
-                            ingredientId: linkedExtra ? null : pIngredientDto.ingredientId,
-                            linkedExtraId: linkedExtra?.id,
-                        },
-                    });
-                }
+                // [核心改造] 调用抽离的原料创建函数
+                await this._createProductIngredients(tenantId, product.id, productDto, tx);
             }
         }
 
@@ -324,6 +428,46 @@ export class RecipesService {
                 },
             },
         });
+    }
+
+    // [核心新增] 新增一个私有方法，用于检查并自动创建配方中尚不存在的原料
+    private async _ensureIngredientsExist(tenantId: string, recipeDto: CreateRecipeDto, tx: Prisma.TransactionClient) {
+        const { ingredients, products } = recipeDto;
+        const allRawIngredients = [
+            ...ingredients,
+            ...(products ?? []).flatMap((p) => [...(p.mixIn ?? []), ...(p.fillings ?? []), ...(p.toppings ?? [])]),
+        ];
+
+        for (const ing of allRawIngredients) {
+            if (ing.ingredientId) continue; // 如果已经有ID，跳过
+
+            // 检查是否为预制件或附加项
+            const isPreDoughOrExtra = await tx.recipeFamily.findFirst({
+                where: { name: ing.name, tenantId, type: { in: ['PRE_DOUGH', 'EXTRA'] } },
+            });
+            if (isPreDoughOrExtra) continue;
+
+            // 检查原料是否已存在
+            let existingIngredient = await tx.ingredient.findFirst({
+                where: { tenantId, name: ing.name, deletedAt: null },
+            });
+
+            // 如果不存在，则创建新原料
+            if (!existingIngredient) {
+                const isWater = ing.name === '水';
+                existingIngredient = await tx.ingredient.create({
+                    data: {
+                        tenantId,
+                        name: ing.name,
+                        type: isWater ? IngredientType.UNTRACKED : IngredientType.STANDARD,
+                        isFlour: isWater ? false : 'isFlour' in ing ? (ing.isFlour ?? false) : false,
+                        waterContent: isWater ? 1 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0,
+                    },
+                });
+            }
+            // 将找到的或创建的ID回写到DTO对象中，供后续使用
+            ing.ingredientId = existingIngredient.id;
+        }
     }
 
     async findAll(tenantId: string) {
