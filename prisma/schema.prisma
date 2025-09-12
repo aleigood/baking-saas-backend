@@ -383,6 +383,8 @@ model ProductionLog {
   taskId             String                            @unique
   completedAt        DateTime                          @default(now())
   notes              String?
+  // [核心新增] 用于存储任务完成时配方的完整快照，实现历史数据与配方的解耦
+  recipeSnapshot     Json?
   task               ProductionTask                    @relation(fields: [taskId], references: [id])
   consumptionLogs    IngredientConsumptionLog[]
   // [核心新增] 新增与损耗日志的关联

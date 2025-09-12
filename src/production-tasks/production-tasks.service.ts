@@ -26,10 +26,11 @@ import {
 
 // [核心修改] 将损耗阶段定义移至服务顶部，方便管理
 const spoilageStages = [
-    { key: 'kneading', label: '揉面失败' },
+    { key: 'kneading', label: '打面失败' },
     { key: 'fermentation', label: '发酵失败' },
     { key: 'shaping', label: '整形失败' },
     { key: 'baking', label: '烘烤失败' },
+    { key: 'development', label: '新品研发' },
     { key: 'other', label: '其他原因' },
 ];
 
@@ -86,6 +87,12 @@ const taskWithDetailsInclude = {
                     },
                 },
             },
+        },
+    },
+    // [核心修正] 将关联字段名从 productionLog 改为 log，以匹配 schema.prisma 定义
+    log: {
+        select: {
+            recipeSnapshot: true,
         },
     },
 };
@@ -742,7 +749,17 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
-        const doughGroups = this._calculateDoughGroups(task, query);
+        // [核心改造] 如果是已完成任务且有快照，则使用快照数据；否则使用实时数据
+        // [核心修正] 将关联字段名从 task.productionLog 改为 task.log，以匹配 schema.prisma 定义
+        const isCompletedWithSnapshot = task.status === 'COMPLETED' && task.log?.recipeSnapshot;
+
+        const taskDataForCalc = isCompletedWithSnapshot
+            ? // [核心修正] 使用非空断言(!)来告诉TypeScript，在此上下文中task.log必然存在
+              (task.log!.recipeSnapshot as unknown as TaskWithDetails)
+            : task;
+
+        // [核心改造] 将用于计算的数据源 (实时或快照) 传递给计算函数
+        const doughGroups = this._calculateDoughGroups(taskDataForCalc, query, task.items);
         const { stockWarning } = await this._calculateStockWarning(tenantId, task);
 
         return {
@@ -750,7 +767,7 @@ export class ProductionTasksService {
             status: task.status,
             notes: task.notes,
             stockWarning,
-            prepTask: await this._getPrepItemsForTask(tenantId, task),
+            prepTask: await this._getPrepItemsForTask(tenantId, task), // 备料任务总是基于实时数据
             doughGroups,
             items: task.items.map((item) => ({
                 id: item.product.id,
@@ -762,13 +779,24 @@ export class ProductionTasksService {
 
     /**
      * @description [核心重构] 恢复并优化了递归逻辑，以正确展示面种及其原料
+     * @param task [核心改造] 此参数现在可以是实时的任务数据，也可以是历史快照数据
+     * @param query 查询参数
+     * @param originalItems [核心新增] 总是传入原始的任务项以获取正确的计划生产数量
      */
-    private _calculateDoughGroups(task: TaskWithDetails, query: QueryTaskDetailDto): DoughGroup[] {
+    private _calculateDoughGroups(
+        task: TaskWithDetails,
+        query: QueryTaskDetailDto,
+        originalItems: TaskItemWithDetails[],
+    ): DoughGroup[] {
         const { mixerType, envTemp, flourTemp, waterTemp } = query;
         const canCalculateIce =
             mixerType !== undefined && envTemp !== undefined && flourTemp !== undefined && waterTemp !== undefined;
 
+        // [核心改造] 创建一个从 productId 到原始任务项的映射，以便随时获取计划数量
+        const originalItemsMap = new Map(originalItems.map((item) => [item.productId, item]));
+
         const doughsMap = new Map<string, { familyName: string; items: TaskItemWithDetails[] }>();
+        // [核心改造] 这里的 task.items 可能来自快照，也可能来自实时数据
         task.items.forEach((item) => {
             const familyId = item.product.recipeVersion.family.id;
             if (!doughsMap.has(familyId)) {
@@ -790,13 +818,17 @@ export class ProductionTasksService {
             // [核心新增] 为后加水逻辑计算面团家族的总面粉量
             let totalFlourForFamily = new Prisma.Decimal(0);
             for (const item of data.items) {
+                const originalItem = originalItemsMap.get(item.productId);
+                const quantity = originalItem?.quantity ?? 0; // [核心改造] 使用原始计划数量
                 const flourPerUnit = this._calculateTotalFlourWeightForProduct(item.product);
-                totalFlourForFamily = totalFlourForFamily.add(flourPerUnit.mul(item.quantity));
+                totalFlourForFamily = totalFlourForFamily.add(flourPerUnit.mul(quantity));
             }
 
             // [核心修改] 采用与 cal.js 一致的精确总水量计算逻辑
             let totalWaterForFamily = new Prisma.Decimal(0);
             for (const item of data.items) {
+                const originalItem = originalItemsMap.get(item.productId);
+                const quantity = originalItem?.quantity ?? 0; // [核心改造] 使用原始计划数量
                 const flattened = this._flattenIngredientsForProduct(item.product);
                 for (const [, ingData] of flattened.entries()) {
                     // 检查原料是否定义了含水量，并且大于0
@@ -804,13 +836,15 @@ export class ProductionTasksService {
                         // 计算该原料的实际水重（原料总重 * 含水比例）
                         const waterWeight = ingData.weight.mul(new Prisma.Decimal(ingData.waterContent));
                         // 累加到家族总水量中，并乘以产品数量
-                        totalWaterForFamily = totalWaterForFamily.add(waterWeight.mul(item.quantity));
+                        totalWaterForFamily = totalWaterForFamily.add(waterWeight.mul(quantity));
                     }
                 }
             }
 
             // [核心恢复] 遍历原始配方结构以建立包含面种的原料列表
             for (const item of data.items) {
+                const originalItem = originalItemsMap.get(item.productId);
+                const quantity = originalItem?.quantity ?? 0; // [核心改造] 使用原始计划数量
                 const totalFlour = this._calculateTotalFlourWeightForProduct(item.product);
                 for (const ing of mainDoughInfo.ingredients) {
                     let weight: Prisma.Decimal;
@@ -841,7 +875,7 @@ export class ProductionTasksService {
                         continue;
                     }
 
-                    const currentWaterWeight = weight.mul(item.quantity);
+                    const currentWaterWeight = weight.mul(quantity);
                     totalDoughWeight = totalDoughWeight.add(currentWaterWeight);
 
                     // [核心修改] 增强用冰量计算逻辑
@@ -916,7 +950,11 @@ export class ProductionTasksService {
             const products: DoughProductSummary[] = [];
             const productDetails: ProductDetails[] = [];
             data.items.forEach((item) => {
-                const { product, quantity } = item;
+                const originalItem = originalItemsMap.get(item.productId);
+                const quantity = originalItem?.quantity ?? 0; // [核心改造] 使用原始计划数量
+                if (quantity === 0) return; // 如果计划数量为0，则跳过
+
+                const { product } = item;
                 const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
                 const flattenedProductIngredients = this._flattenIngredientsForProduct(product, false);
 
@@ -980,7 +1018,13 @@ export class ProductionTasksService {
             doughGroups.push({
                 familyId,
                 familyName: data.familyName,
-                productsDescription: data.items.map((i) => `${i.product.name} x${i.quantity}`).join(', '),
+                productsDescription: data.items
+                    .map((i) => {
+                        const originalItem = originalItemsMap.get(i.productId);
+                        const quantity = originalItem?.quantity ?? 0;
+                        return `${i.product.name} x${quantity}`;
+                    })
+                    .join(', '),
                 totalDoughWeight: totalDoughWeight.toNumber(),
                 mainDoughIngredients: Array.from(mainDoughIngredientsMap.values()),
                 mainDoughProcedure: mainDoughInfo.procedure || [],
@@ -1163,9 +1207,10 @@ export class ProductionTasksService {
 
     // [核心重构] complete 方法的整体逻辑
     async complete(tenantId: string, userId: string, id: string, completeDto: CompleteProductionTaskDto) {
+        // [核心改造] 查询任务时，使用包含完整配方数据的 taskWithDetailsInclude
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
-            include: { items: { include: { product: true } } },
+            include: taskWithDetailsInclude,
         });
 
         if (!task) throw new NotFoundException('生产任务不存在');
@@ -1233,8 +1278,14 @@ export class ProductionTasksService {
                 data: { status: ProductionTaskStatus.COMPLETED },
             });
 
+            // [核心改造] 在创建生产日志时，生成并存入配方快照
+            const recipeSnapshot = this._buildRecipeSnapshot(task);
             const productionLog = await tx.productionLog.create({
-                data: { taskId: id, notes },
+                data: {
+                    taskId: id,
+                    notes,
+                    recipeSnapshot, // 存入快照
+                },
             });
 
             // [核心修改] totalSuccessfulConsumption 现在可以直接使用上面库存检查时计算好的 totalConsumptionNeeded
@@ -1355,5 +1406,22 @@ export class ProductionTasksService {
 
             return this.findOne(tenantId, id, {});
         });
+    }
+
+    /**
+     * [核心新增] 根据完整的任务数据构建一个用于归档的配方快照
+     * @param task 从数据库中查询到的，包含了完整 recipeVersion 信息的任务对象
+     * @returns 一个 JSON 对象，其结构与 TaskWithDetails 兼容
+     */
+    private _buildRecipeSnapshot(task: TaskWithDetails): Prisma.JsonObject {
+        // 创建一个深拷贝，移除不必要的循环引用或敏感信息
+        // 在这个场景下，task 对象已经是从数据库获取的纯数据，可以直接使用
+        // 我们只保留 items 数组，因为其他任务信息 (id, status, notes) 已经存储在任务表本身
+        const snapshot = {
+            items: task.items,
+        };
+
+        // Prisma.JsonObject 要求返回一个可以被 JSON.stringify 的对象
+        return snapshot as unknown as Prisma.JsonObject;
     }
 }
