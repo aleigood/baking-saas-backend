@@ -1026,7 +1026,10 @@ export class ProductionTasksService {
                     })
                     .join(', '),
                 totalDoughWeight: totalDoughWeight.toNumber(),
-                mainDoughIngredients: Array.from(mainDoughIngredientsMap.values()),
+                // [核心改造] 对主面团原料进行排序，将面种类（isRecipe: true）的原料置于列表顶部
+                mainDoughIngredients: Array.from(mainDoughIngredientsMap.values()).sort(
+                    (a, b) => (b.isRecipe ? 1 : 0) - (a.isRecipe ? 1 : 0),
+                ),
                 mainDoughProcedure: mainDoughInfo.procedure || [],
                 products,
                 productDetails,
