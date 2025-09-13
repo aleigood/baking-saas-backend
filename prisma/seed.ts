@@ -45,6 +45,10 @@ const recipesData: RecipeSeedData[] = [
                 ratio: 0.5,
                 waterContent: 1.0,
             },
+            {
+                name: '半干酵母',
+                ratio: 0.008,
+            },
         ],
         procedure: [],
     },
@@ -291,7 +295,7 @@ const recipesData: RecipeSeedData[] = [
                 waterContent: 1.0,
             },
         ],
-        procedure: [],
+        procedure: ['发至两倍大然后放冰箱冷藏一夜'],
     },
     {
         name: '有盐黄油',
@@ -306,7 +310,7 @@ const recipesData: RecipeSeedData[] = [
                 ratio: 0.017,
             },
         ],
-        procedure: [],
+        procedure: ['用裱花袋挤成条状，放冰箱冷冻定型'],
     },
     {
         name: '海盐卷',
@@ -882,13 +886,13 @@ const recipesData: RecipeSeedData[] = [
                     },
                 ],
                 mixIn: [],
+                procedure: [
+                    '发酵：二发温度35度50分钟',
+                    '烘烤：烤前刷过筛蛋液，两个杏仁片 一盘11个 上火210 下火180 烤10分钟',
+                ],
             },
         ],
-        procedure: [
-            '搅拌：采用后糖法，搅拌至完全扩展',
-            '发酵：二发温度35度50分钟',
-            '烘烤：烤前刷过筛蛋液，两个杏仁片 一盘10个 上火210 下火180 烤10分钟',
-        ],
+        procedure: ['搅拌：采用后糖法，搅拌至完全扩展'],
     },
     {
         name: '黑麦鲁邦种',

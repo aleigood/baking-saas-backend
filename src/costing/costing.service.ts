@@ -473,7 +473,7 @@ export class CostingService {
         ): CalculatedDoughGroup => {
             const group: CalculatedDoughGroup = {
                 // [核心修改] 如果是主面团，则使用产品名称，否则使用面团（配方）名称
-                name: isMainDough ? product.name : dough.name,
+                name: isMainDough ? '主面团' : dough.name,
                 ingredients: [],
                 procedure: dough.procedure,
                 totalCost: 0,
