@@ -29,6 +29,19 @@ export class MembersService {
             throw new ForbiddenExceptionMembers('您没有权限创建新成员。');
         }
 
+        // [核心新增] 权限校验：管理员不能创建管理员或所有者
+        if (
+            currentUser.role === RoleMembers.ADMIN &&
+            (dto.role === RoleMembers.ADMIN || dto.role === RoleMembers.OWNER)
+        ) {
+            throw new ForbiddenExceptionMembers('管理员只能创建普通员工。');
+        }
+
+        // [核心新增] 权限校验：所有者不能直接创建另一个所有者
+        if (dto.role === RoleMembers.OWNER) {
+            throw new ForbiddenExceptionMembers('不能直接创建所有者角色。');
+        }
+
         const existingUser = await this.prisma.user.findUnique({
             where: { phone: dto.phone },
         });
@@ -65,7 +78,7 @@ export class MembersService {
                 data: {
                     tenantId: tenantId,
                     userId: newUser.id,
-                    role: RoleMembers.MEMBER, // 新创建的成员默认为MEMBER角色
+                    role: dto.role, // [核心修改] 使用DTO中传入的角色
                     status: UserStatus.ACTIVE,
                 },
             });
