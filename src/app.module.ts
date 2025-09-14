@@ -12,7 +12,8 @@ import { IngredientsModule } from './ingredients/ingredients.module';
 import { CostingModule } from './costing/costing.module';
 import { StatsModule } from './stats/stats.module';
 import { ProductionTasksModule } from './production-tasks/production-tasks.module';
-import { FermentationModule } from './fermentation/fermentation.module'; // [核心新增] 导入新模块
+import { FermentationModule } from './fermentation/fermentation.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
     imports: [
@@ -27,7 +28,8 @@ import { FermentationModule } from './fermentation/fermentation.module'; // [核
         CostingModule,
         StatsModule,
         ProductionTasksModule,
-        FermentationModule, // [核心新增] 注册新模块
+        FermentationModule,
+        UsersModule,
     ],
     controllers: [AppController],
     providers: [AppService],

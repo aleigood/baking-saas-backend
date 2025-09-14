@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards, Post, Body } from '@nestjs/common';
+import { Controller, Get, UseGuards, Post, Body, Patch, Param } from '@nestjs/common';
 import { TenantsService } from './tenants.service';
 import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -19,5 +19,16 @@ export class TenantsController {
     @Post()
     create(@GetUser() user: UserPayload, @Body() tenantData: TenantDataDto) {
         return this.tenantsService.create(user.sub, tenantData);
+    }
+
+    /**
+     * [核心新增] 更新店铺信息的端点
+     * @param id 店铺ID
+     * @param user 当前用户信息
+     * @param tenantData 更新的数据
+     */
+    @Patch(':id')
+    update(@Param('id') id: string, @GetUser() user: UserPayload, @Body() tenantData: Partial<TenantDataDto>) {
+        return this.tenantsService.update(id, user.sub, tenantData);
     }
 }

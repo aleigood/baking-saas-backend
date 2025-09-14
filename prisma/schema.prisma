@@ -88,6 +88,7 @@ model User {
   id                 String                      @id @default(uuid())
   phone              String                      @unique
   name               String? // [新增] 用户姓名 (New: User's name)
+  avatarUrl          String? // [核心新增] 用户头像URL
   password           String
   role               Role                        @default(MEMBER) // Global role, SUPER_ADMIN is highest
   status             UserStatus                  @default(ACTIVE)
@@ -148,16 +149,15 @@ model Invitation {
 // 配方族：用于管理一个配方的所有版本
 // 例如，“甜面团”是一个Family，它可能有V1, V2等多个Version
 model RecipeFamily {
-  id        String          @id @default(uuid())
-  name      String // 配方名称，如“甜面团”、“烫种”
-  tenantId  String
-  type      RecipeType // 配方类型 (主配方, 预制面团, 或附加项)
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  deletedAt DateTime?
-  tenant    Tenant          @relation(fields: [tenantId], references: [id])
-  versions  RecipeVersion[] // 一个配方族包含多个版本
-
+  id             String              @id @default(uuid())
+  name           String // 配方名称，如“甜面团”、“烫种”
+  tenantId       String
+  type           RecipeType // 配方类型 (主配方, 预制面团, 或附加项)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  deletedAt      DateTime?
+  tenant         Tenant              @relation(fields: [tenantId], references: [id])
+  versions       RecipeVersion[] // 一个配方族包含多个版本
   // 当此配方作为预制面团在其他配方中使用时
   usedInDoughs   DoughIngredient[]   @relation("PreDoughLink")
   // 当此配方作为附加项(馅料/装饰)在其他配方中使用时
@@ -169,17 +169,16 @@ model RecipeFamily {
 
 // 配方版本：记录配方的具体版本信息
 model RecipeVersion {
-  id        String   @id @default(uuid())
+  id        String       @id @default(uuid())
   familyId  String // 所属配方族ID
   version   Int // 版本号
   notes     String? // 版本备注，如“夏季版，减少水量”
-  isActive  Boolean  @default(true) // 是否为当前激活版本
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  family   RecipeFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  doughs   Dough[] // 该版本包含的面团 (可以是主面团、预制面团等)
-  products Product[] // 该版本包含的最终产品 (仅MAIN类型的配方有)
+  isActive  Boolean      @default(true) // 是否为当前激活版本
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  family    RecipeFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  doughs    Dough[] // 该版本包含的面团 (可以是主面团、预制面团等)
+  products  Product[] // 该版本包含的最终产品 (仅MAIN类型的配方有)
 
   @@unique([familyId, version])
   @@index([familyId])
@@ -187,15 +186,14 @@ model RecipeVersion {
 
 // 面团：配方版本中的一个组成部分，如主面团、烫种等
 model Dough {
-  id              String   @id @default(uuid())
+  id              String            @id @default(uuid())
   recipeVersionId String // 所属配方版本ID
   name            String // 面团名称，如“主面团”、“烫种”
   targetTemp      Float? // 出缸温度
-  lossRatio       Float    @default(0) // 损耗率
+  lossRatio       Float             @default(0) // 损耗率
   procedure       String[] // 制作流程要点
-
-  recipeVersion RecipeVersion     @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
-  ingredients   DoughIngredient[] // 面团包含的原料
+  recipeVersion   RecipeVersion     @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  ingredients     DoughIngredient[] // 面团包含的原料
 
   @@index([recipeVersionId])
 }
@@ -322,15 +320,14 @@ model ProcurementRecord {
 
 // [核心修改] 新增库存调整日志模型
 model IngredientStockAdjustment {
-  id            String   @id @default(uuid())
+  id            String     @id @default(uuid())
   ingredientId  String
   userId        String // 操作人ID
   changeInGrams Float // 变化量 (正数表示盘盈增加, 负数表示损耗减少)
   reason        String? // 调整原因, 如 "月度盘点", "过期损耗", "报溢" 等
-  createdAt     DateTime @default(now())
-
-  ingredient Ingredient @relation(fields: [ingredientId], references: [id])
-  user       User       @relation(fields: [userId], references: [id])
+  createdAt     DateTime   @default(now())
+  ingredient    Ingredient @relation(fields: [ingredientId], references: [id])
+  user          User       @relation(fields: [userId], references: [id])
 
   @@index([ingredientId])
   @@index([userId])
@@ -361,13 +358,12 @@ model ProductionTask {
 
 // 生产任务清单项 (中间表)
 model ProductionTaskItem {
-  id        String @id @default(uuid())
+  id        String         @id @default(uuid())
   taskId    String
   productId String
   quantity  Int
-
-  task    ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  task      ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([taskId])
   @@index([productId])

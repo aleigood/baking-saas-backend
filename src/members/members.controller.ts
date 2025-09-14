@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Param, Body, Delete, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, Delete, UseGuards, ParseUUIDPipe, Query } from '@nestjs/common';
 import { MembersService } from './members.service';
 import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -11,13 +11,17 @@ export class MembersController {
     constructor(private readonly membersService: MembersService) {}
 
     @Get()
-    findAll(@GetUser() user: UserPayload) {
-        return this.membersService.findAll(user.tenantId);
+    findAll(@GetUser() user: UserPayload, @Query('tenantId') tenantId?: string) {
+        // [核心修改] 允许所有者跨店铺查询，否则使用token中的tenantId
+        const targetTenantId = this.membersService.getTargetTenantIdForOwner(user, tenantId);
+        return this.membersService.findAll(targetTenantId);
     }
 
     @Get(':id')
     findOne(@GetUser() user: UserPayload, @Param('id', ParseUUIDPipe) id: string) {
-        return this.membersService.findOne(user.tenantId, id);
+        // [核心修改] 此处也应使用目标店铺ID，尽管当前场景不常用
+        const targetTenantId = this.membersService.getTargetTenantIdForOwner(user, user.tenantId);
+        return this.membersService.findOne(targetTenantId, id);
     }
 
     @Patch(':id')

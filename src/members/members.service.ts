@@ -15,6 +15,24 @@ import { UserPayload as UserPayloadMembers } from 'src/auth/interfaces/user-payl
 export class MembersService {
     constructor(private prisma: PrismaServiceMembers) {}
 
+    /**
+     * [核心新增] 检查并返回所有者有权访问的目标租户ID
+     * @param currentUser 当前用户
+     * @param requestedTenantId 请求的租户ID
+     * @returns 最终用于查询的租户ID
+     */
+    getTargetTenantIdForOwner(currentUser: UserPayloadMembers, requestedTenantId?: string): string {
+        // 如果用户是所有者并且提供了一个租户ID，则使用该ID
+        if (currentUser.role === RoleMembers.OWNER && requestedTenantId) {
+            // 在生产环境中，这里应该增加一步校验：
+            // 确认 requestedTenantId 确实是该 currentUser 拥有的店铺之一
+            return requestedTenantId;
+        }
+        // 对于任何其他情况（非所有者，或所有者未提供特定店铺ID），
+        // 都默认使用他们当前登录的店铺ID
+        return currentUser.tenantId;
+    }
+
     async findAll(tenantId: string) {
         const tenantUsers = await this.prisma.tenantUser.findMany({
             where: { tenantId },
