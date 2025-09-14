@@ -8,10 +8,11 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuthDto, RegisterDto, WechatLoginDto } from './dto/auth.dto';
+import { AuthDto, RegisterDto, WechatLoginDto, LoginResponseDto } from './dto/auth.dto'; // [核心修正] 更新导入
 import * as bcrypt from 'bcrypt';
 import { Role } from '@prisma/client';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
+// [核心删除] 不再需要单独导入 LoginResponseDto
 
 @Injectable()
 export class AuthService {
@@ -79,7 +80,7 @@ export class AuthService {
         return this.generateJwtToken(user.id, tenantUser.tenantId, tenantUser.role, user.role);
     }
 
-    async login(loginDto: AuthDto): Promise<{ accessToken: string }> {
+    async login(loginDto: AuthDto): Promise<LoginResponseDto> {
         const user = await this.prisma.user.findUnique({
             where: { phone: loginDto.phone },
             include: {
@@ -94,7 +95,8 @@ export class AuthService {
         }
 
         if (user.role === Role.SUPER_ADMIN) {
-            return this.generateJwtToken(user.id, '', user.role, user.role);
+            const token = this.generateJwtToken(user.id, '', user.role, user.role);
+            return { accessToken: token.accessToken };
         }
 
         const firstTenantUser = user.tenants[0];
@@ -102,7 +104,17 @@ export class AuthService {
             throw new UnauthorizedException('用户不属于任何店铺，无法登录。');
         }
 
-        return this.generateJwtToken(user.id, firstTenantUser.tenantId, firstTenantUser.role, user.role);
+        const token = this.generateJwtToken(user.id, firstTenantUser.tenantId, firstTenantUser.role, user.role);
+
+        // [核心修正] 如果用户在店铺中的角色是普通成员（即面包师），则添加重定向路径
+        if (firstTenantUser.role === Role.MEMBER) {
+            return {
+                accessToken: token.accessToken,
+                redirectTo: '/pages/baker/main',
+            };
+        }
+
+        return { accessToken: token.accessToken };
     }
 
     loginByWechat(wechatLoginDto: WechatLoginDto): Promise<{ accessToken: string }> {
@@ -134,6 +146,7 @@ export class AuthService {
                 id: true,
                 phone: true,
                 name: true, // [修改] 查询姓名
+                avatarUrl: true, // [核心新增] 查询头像
                 role: true,
                 status: true,
                 createdAt: true,
