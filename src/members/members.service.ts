@@ -137,12 +137,27 @@ export class MembersService {
             throw new NotFoundExceptionMembers('该成员不存在');
         }
 
-        const { user, ...rest } = tenantUser;
-        return { ...rest, ...user };
+        // [核心修正] 格式化返回数据，确保包含 joinDate 字段
+        const { user } = tenantUser;
+        return {
+            id: user.id,
+            name: user.name || user.phone,
+            phone: user.phone,
+            role: tenantUser.role,
+            status: tenantUser.status,
+            joinDate: user.createdAt.toISOString().split('T')[0],
+        };
     }
 
     async update(tenantId: string, memberId: string, dto: UpdateMemberDtoMembers, currentUser: UserPayloadMembers) {
-        const memberToUpdate = await this.findOne(tenantId, memberId);
+        // [核心修正] findOne 现在返回的是格式化后的数据，需要调整这里的逻辑
+        const memberToUpdate = await this.prisma.tenantUser.findUnique({
+            where: { userId_tenantId: { tenantId, userId: memberId } },
+        });
+
+        if (!memberToUpdate) {
+            throw new NotFoundExceptionMembers('该成员不存在');
+        }
 
         if (currentUser.role === RoleMembers.MEMBER) {
             throw new ForbiddenExceptionMembers('您没有权限修改成员信息。');
@@ -165,7 +180,14 @@ export class MembersService {
     }
 
     async remove(tenantId: string, memberId: string, currentUser: UserPayloadMembers) {
-        const memberToRemove = await this.findOne(tenantId, memberId);
+        // [核心修正] findOne 现在返回的是格式化后的数据，需要调整这里的逻辑
+        const memberToRemove = await this.prisma.tenantUser.findUnique({
+            where: { userId_tenantId: { tenantId, userId: memberId } },
+        });
+
+        if (!memberToRemove) {
+            throw new NotFoundExceptionMembers('该成员不存在');
+        }
 
         if (memberToRemove.role === RoleMembers.OWNER) {
             throw new ForbiddenExceptionMembers('不能移除店铺所有者。');
