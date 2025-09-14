@@ -14,6 +14,7 @@ import { StatsModule } from './stats/stats.module';
 import { ProductionTasksModule } from './production-tasks/production-tasks.module';
 import { FermentationModule } from './fermentation/fermentation.module';
 import { UsersModule } from './users/users.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
     imports: [
@@ -30,6 +31,7 @@ import { UsersModule } from './users/users.module';
         ProductionTasksModule,
         FermentationModule,
         UsersModule,
+        DashboardModule,
     ],
     controllers: [AppController],
     providers: [AppService],
