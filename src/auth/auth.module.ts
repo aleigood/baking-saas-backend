@@ -8,7 +8,7 @@ import { AuthController } from './auth.controller';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './jwt.strategy';
-import { InvitationsModule } from '../invitations/invitations.module';
+// import { InvitationsModule } from '../invitations/invitations.module'; // [核心删除] 移除导入
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
@@ -29,7 +29,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
                 };
             },
         }),
-        InvitationsModule,
+        // InvitationsModule, // [核心删除] 移除导入
     ],
     controllers: [AuthController],
     providers: [AuthService, JwtStrategy],

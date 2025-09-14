@@ -6,7 +6,6 @@ import { AuthModule } from './auth/auth.module';
 import { SuperAdminModule } from './super-admin/super-admin.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { MembersModule } from './members/members.module';
-import { InvitationsModule } from './invitations/invitations.module';
 import { RecipesModule } from './recipes/recipes.module';
 import { IngredientsModule } from './ingredients/ingredients.module';
 import { CostingModule } from './costing/costing.module';
@@ -23,7 +22,6 @@ import { DashboardModule } from './dashboard/dashboard.module';
         SuperAdminModule,
         TenantsModule,
         MembersModule,
-        InvitationsModule,
         RecipesModule,
         IngredientsModule,
         CostingModule,

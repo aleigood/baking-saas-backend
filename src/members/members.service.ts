@@ -5,15 +5,75 @@ import {
     Injectable as InjectableMembers,
     NotFoundException as NotFoundExceptionMembers,
     ForbiddenException as ForbiddenExceptionMembers,
+    ConflictException,
 } from '@nestjs/common';
 import { PrismaService as PrismaServiceMembers } from '../prisma/prisma.service';
-import { Role as RoleMembers } from '@prisma/client';
+import { Role as RoleMembers, UserStatus } from '@prisma/client';
 import { UpdateMemberDto as UpdateMemberDtoMembers } from './dto/update-member.dto';
 import { UserPayload as UserPayloadMembers } from 'src/auth/interfaces/user-payload.interface';
+import { CreateMemberDto } from './dto/create-member.dto'; // [核心新增] 导入CreateMemberDto
+import * as bcrypt from 'bcrypt'; // [核心新增] 导入bcrypt用于密码哈希
 
 @InjectableMembers()
 export class MembersService {
     constructor(private prisma: PrismaServiceMembers) {}
+
+    /**
+     * [核心新增] 在指定店铺中创建一个新成员
+     * @param tenantId 店铺ID
+     * @param dto 成员数据
+     * @param currentUser 当前操作用户
+     */
+    async create(tenantId: string, dto: CreateMemberDto, currentUser: UserPayloadMembers) {
+        if (currentUser.role === RoleMembers.MEMBER) {
+            throw new ForbiddenExceptionMembers('您没有权限创建新成员。');
+        }
+
+        const existingUser = await this.prisma.user.findUnique({
+            where: { phone: dto.phone },
+        });
+
+        if (existingUser) {
+            throw new ConflictException('该手机号已被注册。');
+        }
+
+        const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+        // 使用事务确保用户创建和店铺关联的原子性
+        return this.prisma.$transaction(async (tx) => {
+            const newUser = await tx.user.create({
+                data: {
+                    name: dto.name,
+                    phone: dto.phone,
+                    password: hashedPassword,
+                    status: UserStatus.ACTIVE, // 直接创建的用户默认为激活状态
+                },
+                // [核心修正] 使用 select 来返回不包含密码的用户信息，以解决 lint 错误
+                select: {
+                    id: true,
+                    phone: true,
+                    name: true,
+                    avatarUrl: true,
+                    role: true,
+                    status: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            });
+
+            await tx.tenantUser.create({
+                data: {
+                    tenantId: tenantId,
+                    userId: newUser.id,
+                    role: RoleMembers.MEMBER, // 新创建的成员默认为MEMBER角色
+                    status: UserStatus.ACTIVE,
+                },
+            });
+
+            // 直接返回已筛选字段的 newUser 对象
+            return newUser;
+        });
+    }
 
     /**
      * [核心新增] 检查并返回所有者有权访问的目标租户ID
