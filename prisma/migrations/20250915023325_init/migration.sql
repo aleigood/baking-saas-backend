@@ -30,6 +30,7 @@ CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
     "name" TEXT,
+    "avatarUrl" TEXT,
     "password" TEXT NOT NULL,
     "role" "Role" NOT NULL DEFAULT 'MEMBER',
     "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
@@ -215,6 +216,7 @@ CREATE TABLE "ProductionTask" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
+    "createdById" TEXT NOT NULL,
 
     CONSTRAINT "ProductionTask_pkey" PRIMARY KEY ("id")
 );
@@ -333,6 +335,9 @@ CREATE INDEX "IngredientStockAdjustment_userId_idx" ON "IngredientStockAdjustmen
 CREATE INDEX "ProductionTask_tenantId_idx" ON "ProductionTask"("tenantId");
 
 -- CreateIndex
+CREATE INDEX "ProductionTask_createdById_idx" ON "ProductionTask"("createdById");
+
+-- CreateIndex
 CREATE INDEX "ProductionTaskItem_taskId_idx" ON "ProductionTaskItem"("taskId");
 
 -- CreateIndex
@@ -424,6 +429,9 @@ ALTER TABLE "IngredientStockAdjustment" ADD CONSTRAINT "IngredientStockAdjustmen
 
 -- AddForeignKey
 ALTER TABLE "IngredientStockAdjustment" ADD CONSTRAINT "IngredientStockAdjustment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductionTask" ADD CONSTRAINT "ProductionTask_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductionTask" ADD CONSTRAINT "ProductionTask_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

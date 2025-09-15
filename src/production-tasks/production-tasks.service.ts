@@ -95,6 +95,13 @@ const taskWithDetailsInclude = {
             recipeSnapshot: true,
         },
     },
+    // [核心新增] 在查询任务时，预加载创建者的信息
+    createdBy: {
+        select: {
+            name: true,
+            phone: true,
+        },
+    },
 };
 
 type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
@@ -360,8 +367,8 @@ export class ProductionTasksService {
         };
     }
 
-    async create(tenantId: string, createProductionTaskDto: CreateProductionTaskDto) {
-        // [修改] 解构出 startDate 和 endDate
+    // [核心修正] 更新 create 方法的签名以接收 userId
+    async create(tenantId: string, userId: string, createProductionTaskDto: CreateProductionTaskDto) {
         const { startDate, endDate, notes, products } = createProductionTaskDto;
 
         if (!products || products.length === 0) {
@@ -432,10 +439,11 @@ export class ProductionTasksService {
 
         const createdTask = await this.prisma.productionTask.create({
             data: {
-                startDate, // [修改] 使用 startDate
-                endDate, // [修改] 使用 endDate
+                startDate,
+                endDate,
                 notes,
                 tenantId,
+                createdById: userId, // [核心修正] 关联创建任务的用户
                 items: {
                     create: products.map((p) => ({
                         productId: p.productId,
@@ -447,6 +455,13 @@ export class ProductionTasksService {
                 items: {
                     include: {
                         product: true,
+                    },
+                },
+                // [核心新增] 返回创建者信息以便前端立即显示
+                createdBy: {
+                    select: {
+                        name: true,
+                        phone: true,
                     },
                 },
             },
@@ -550,6 +565,13 @@ export class ProductionTasksService {
                                 },
                             },
                         },
+                    },
+                },
+                // [核心新增] 在查询任务列表时也一并返回创建者信息
+                createdBy: {
+                    select: {
+                        name: true,
+                        phone: true,
                     },
                 },
             },
@@ -695,6 +717,13 @@ export class ProductionTasksService {
                                 },
                             },
                         },
+                    },
+                },
+                // [核心新增] 在查询历史任务时也一并返回创建者信息
+                createdBy: {
+                    select: {
+                        name: true,
+                        phone: true,
                     },
                 },
             },

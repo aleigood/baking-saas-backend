@@ -28,7 +28,8 @@ export class ProductionTasksController {
 
     @Post()
     create(@GetUser() user: UserPayload, @Body() createProductionTaskDto: CreateProductionTaskDto) {
-        return this.productionTasksService.create(user.tenantId, createProductionTaskDto);
+        // [核心修正] 将 user.sub (用户ID) 传递给 service 方法
+        return this.productionTasksService.create(user.tenantId, user.sub, createProductionTaskDto);
     }
 
     /**
