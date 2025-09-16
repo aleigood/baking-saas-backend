@@ -222,7 +222,7 @@ export class ProductionTasksService {
                     let weight = 0;
                     if (pIng.weightInGrams) {
                         weight = pIng.weightInGrams * item.quantity;
-                    } else if (pIng.ratio) {
+                    } else if (pIng.ratio && pIng.type === 'MIX_IN') {
                         weight = totalFlourWeight.mul(pIng.ratio).mul(item.quantity).toNumber();
                     }
                     const existing = requiredPrepItems.get(pIng.linkedExtra.id);
@@ -332,7 +332,7 @@ export class ProductionTasksService {
                         let weight = 0;
                         if (pIng.weightInGrams) {
                             weight = pIng.weightInGrams * item.quantity;
-                        } else if (pIng.ratio) {
+                        } else if (pIng.ratio && pIng.type === 'MIX_IN') {
                             weight = totalFlourWeight.mul(pIng.ratio).mul(item.quantity).toNumber();
                         }
                         const existing = requiredPrepItems.get(pIng.linkedExtra.id);
@@ -987,6 +987,8 @@ export class ProductionTasksService {
                 const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
                 const flattenedProductIngredients = this._flattenIngredientsForProduct(product, false);
 
+                // [核心回滚] 按照用户的澄清，恢复原始的计算逻辑
+                // MIX_IN 使用 ratio 计算，而 FILLING 和 TOPPING 只使用固定的 weightInGrams
                 const mixIns: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
                     .filter((ing) => ing.type === 'MIX_IN')
                     .map((ing) => ({
@@ -1110,7 +1112,9 @@ export class ProductionTasksService {
 
         for (const pIng of product.ingredients) {
             if (pIng.ingredient) {
-                flattened.set(pIng.ingredient.id, {
+                // [核心修复] 使用 `原料ID-类型` 作为唯一键，防止当同一原料被用作不同类型（如辅料和馅料）时发生数据覆盖
+                const uniqueKey = `${pIng.ingredient.id}-${pIng.type}`;
+                flattened.set(uniqueKey, {
                     id: pIng.ingredient.id,
                     name: pIng.ingredient.name,
                     weight: new Prisma.Decimal(0),
@@ -1122,7 +1126,9 @@ export class ProductionTasksService {
                     waterContent: pIng.ingredient.waterContent,
                 });
             } else if (pIng.linkedExtra) {
-                flattened.set(pIng.linkedExtra.id, {
+                // [核心修复] 同样，对附加配方也使用复合键
+                const uniqueKey = `${pIng.linkedExtra.id}-${pIng.type}`;
+                flattened.set(uniqueKey, {
                     id: pIng.linkedExtra.id,
                     name: pIng.linkedExtra.name,
                     weight: new Prisma.Decimal(0),

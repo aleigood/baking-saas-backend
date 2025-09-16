@@ -461,7 +461,22 @@ export class CostingService {
 
         const doughGroups: CalculatedDoughGroup[] = [];
         let totalCost = new Prisma.Decimal(0);
-        let totalFlourWeight = new Prisma.Decimal(0);
+
+        // [核心修复] 在计算辅料重量前，先精确计算出包含所有面种面粉在内的“真实总面粉重量”
+        // 1. 获取所有原料的详细信息 (为了获取isFlour属性)
+        const allIngredientsMeta = await this.prisma.ingredient.findMany({
+            where: { id: { in: ingredientIds } },
+            select: { id: true, isFlour: true },
+        });
+        const ingredientsMetaMap = new Map(allIngredientsMeta.map((i) => [i.id, i]));
+
+        // 2. 遍历扁平化后的原料列表，累加所有面粉类原料的重量
+        let trueTotalFlourWeight = new Prisma.Decimal(0);
+        for (const [id, weight] of flatIngredients.entries()) {
+            if (ingredientsMetaMap.get(id)?.isFlour) {
+                trueTotalFlourWeight = trueTotalFlourWeight.add(weight);
+            }
+        }
 
         // [核心修改] 增加 parentConversionFactor 参数，用于在递归时计算正确的有效比例
         const processDough = (
@@ -562,10 +577,6 @@ export class CostingService {
                         extraInfo, // [核心新增] 传入附加信息
                     });
                     group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
-
-                    if (ingredient.ingredient.isFlour && isMainDough) {
-                        totalFlourWeight = totalFlourWeight.add(weight);
-                    }
                 }
             }
             totalCost = totalCost.add(group.totalCost);
@@ -622,8 +633,10 @@ export class CostingService {
             const id = ing.ingredient?.id || ing.linkedExtra?.id || ing.id;
             const pricePerKg = getPricePerKg(id);
             let finalWeightInGrams = new Prisma.Decimal(0);
+
+            // [核心修复] 对MIX_IN类型的原料，使用新计算的`trueTotalFlourWeight`作为基准来计算其重量
             if (ing.type === 'MIX_IN' && ing.ratio) {
-                finalWeightInGrams = totalFlourWeight.mul(new Prisma.Decimal(ing.ratio));
+                finalWeightInGrams = trueTotalFlourWeight.mul(new Prisma.Decimal(ing.ratio));
             } else if (ing.weightInGrams) {
                 finalWeightInGrams = new Prisma.Decimal(ing.weightInGrams);
             }
