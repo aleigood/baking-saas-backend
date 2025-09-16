@@ -1,10 +1,23 @@
-import { Controller, Get, Patch, Param, Body, Delete, UseGuards, ParseUUIDPipe, Query, Post } from '@nestjs/common';
+import {
+    Controller,
+    Get,
+    Patch,
+    Param,
+    Body,
+    Delete,
+    UseGuards,
+    ParseUUIDPipe,
+    Query,
+    Post,
+    ForbiddenException,
+} from '@nestjs/common';
 import { MembersService } from './members.service';
 import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { UpdateMemberDto } from './dto/update-member.dto'; // 修复：使用正确的DTO名称
 import { CreateMemberDto } from './dto/create-member.dto'; // [核心新增] 导入CreateMemberDto
+import { Role } from '@prisma/client';
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('members')
@@ -15,6 +28,17 @@ export class MembersController {
     create(@GetUser() user: UserPayload, @Body() createMemberDto: CreateMemberDto) {
         // [核心新增] 创建新成员的端点
         return this.membersService.create(user.tenantId, createMemberDto, user);
+    }
+
+    /**
+     * [核心新增] 获取所有者名下所有店铺的全部成员列表
+     */
+    @Get('all-by-owner')
+    findAllInAllTenantsByOwner(@GetUser() user: UserPayload) {
+        if (user.role !== Role.OWNER) {
+            throw new ForbiddenException('只有店铺所有者才能访问此资源。');
+        }
+        return this.membersService.findAllInAllTenantsByOwner(user.sub);
     }
 
     @Get()

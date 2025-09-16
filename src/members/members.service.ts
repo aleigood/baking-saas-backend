@@ -89,6 +89,68 @@ export class MembersService {
     }
 
     /**
+     * [核心新增] 获取所有者名下所有店铺的全部成员列表
+     * @param ownerId 所有者的用户ID
+     */
+    async findAllInAllTenantsByOwner(ownerId: string) {
+        // 1. 验证用户是否为所有者，并获取其拥有的所有店铺ID
+        const ownerTenants = await this.prisma.tenantUser.findMany({
+            where: {
+                userId: ownerId,
+                role: RoleMembers.OWNER,
+            },
+            select: {
+                tenantId: true,
+            },
+        });
+
+        if (ownerTenants.length === 0) {
+            // 如果该用户不是任何店铺的所有者，返回空数组
+            return [];
+        }
+
+        const tenantIds = ownerTenants.map((t) => t.tenantId);
+
+        // 2. 查询这些店铺中的所有成员
+        const tenantsWithMembers = await this.prisma.tenant.findMany({
+            where: {
+                id: { in: tenantIds },
+            },
+            include: {
+                members: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                name: true,
+                                phone: true,
+                                createdAt: true,
+                            },
+                        },
+                    },
+                    orderBy: { user: { createdAt: 'asc' } },
+                },
+            },
+        });
+
+        // 3. 格式化数据以便前端展示
+        const allMembersByTenant = tenantsWithMembers.map((tenant) => ({
+            tenantId: tenant.id,
+            tenantName: tenant.name,
+            members: tenant.members.map((tu) => ({
+                id: tu.user.id,
+                name: tu.user.name || tu.user.phone,
+                phone: tu.user.phone,
+                role: tu.role,
+                status: tu.status,
+                joinDate: tu.user.createdAt.toISOString().split('T')[0],
+            })),
+        }));
+
+        return allMembersByTenant;
+    }
+
+    /**
      * [核心新增] 检查并返回所有者有权访问的目标租户ID
      * @param currentUser 当前用户
      * @param requestedTenantId 请求的租户ID
