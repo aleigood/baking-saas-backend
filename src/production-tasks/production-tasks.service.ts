@@ -855,6 +855,8 @@ export class ProductionTasksService {
 
             // [核心修改] 采用与 cal.js 一致的精确总水量计算逻辑
             let totalWaterForFamily = new Prisma.Decimal(0);
+            // [核心新增] 定义一个变量来存储水的 ingredientId，以便后续更新
+            let waterIngredientId: string | null = null;
             for (const item of data.items) {
                 const originalItem = originalItemsMap.get(item.productId);
                 const quantity = originalItem?.quantity ?? 0; // [核心改造] 使用原始计划数量
@@ -881,7 +883,6 @@ export class ProductionTasksService {
                     let name: string;
                     let brand: string | null = null;
                     let isRecipe = false;
-                    let extraInfo: string | null = null;
 
                     if (ing.linkedPreDough && ing.flourRatio) {
                         const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.doughs[0];
@@ -900,78 +901,81 @@ export class ProductionTasksService {
                         id = ing.ingredient.id;
                         name = ing.ingredient.name;
                         brand = ing.ingredient.activeSku?.brand || null;
+
+                        // [核心新增] 如果是水，记录其ID
+                        if (name === '水') {
+                            waterIngredientId = id;
+                        }
                     } else {
                         continue;
                     }
 
-                    const currentWaterWeight = weight.mul(quantity);
-                    totalDoughWeight = totalDoughWeight.add(currentWaterWeight);
+                    const currentTotalWeight = weight.mul(quantity);
+                    totalDoughWeight = totalDoughWeight.add(currentTotalWeight);
 
-                    // [核心修改] 增强用冰量计算逻辑
-                    if (canCalculateIce && name === '水' && mainDoughInfo.targetTemp) {
-                        const extraInfoParts: string[] = [];
-
-                        const targetWaterTemp = this._calculateWaterTemp(
-                            mainDoughInfo.targetTemp,
-                            mixerType,
-                            flourTemp,
-                            envTemp,
-                        );
-                        const iceWeight = this._calculateIce(
-                            targetWaterTemp,
-                            totalWaterForFamily.toNumber(),
-                            waterTemp,
-                        );
-
-                        // [逻辑整合] 检查所需冰量是否超过可用水量
-                        if (iceWeight > currentWaterWeight.toNumber()) {
-                            // [逻辑整合] 如果超过，则反向计算其他液体原料所需温度
-                            const requiredTemp = this._calculateRequiredWetIngredientTemp(
-                                targetWaterTemp,
-                                totalWaterForFamily.toNumber(),
-                                currentWaterWeight.toNumber(),
-                            );
-                            extraInfoParts.push(
-                                `需将所有水换成冰块，且其他液体原料需冷却至 ${new Prisma.Decimal(requiredTemp)
-                                    .toDP(1)
-                                    .toNumber()}°C`,
-                            );
-                        } else if (iceWeight > 0) {
-                            // [逻辑整合] 如果未超过，则按原逻辑提示替换冰块
-                            extraInfoParts.push(`需要替换 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰`);
-                        }
-
-                        // 后加水逻辑保持不变
-                        if (!totalFlourForFamily.isZero()) {
-                            const trueHydrationRatio = totalWaterForFamily.div(totalFlourForFamily);
-                            if (trueHydrationRatio.gt(0.65)) {
-                                const holdBackWater = totalWaterForFamily.sub(totalFlourForFamily.mul(0.65));
-                                extraInfoParts.push(`需要保留 ${holdBackWater.toDP(1).toNumber()}g 水在搅拌过程中加入`);
-                            }
-                        }
-
-                        if (extraInfoParts.length > 0) {
-                            extraInfo = extraInfoParts.join('\n');
-                        }
-                    }
+                    // [核心删除] 删除此处不准确的用冰量计算逻辑，将统一移动到循环之后
+                    // The ice calculation logic that was here has been removed.
 
                     const existing = mainDoughIngredientsMap.get(id);
                     if (existing) {
-                        existing.weightInGrams += currentWaterWeight.toNumber();
+                        existing.weightInGrams += currentTotalWeight.toNumber();
                     } else {
                         const newIngredient: TaskIngredientDetail = {
                             id,
                             name,
                             brand,
-                            weightInGrams: currentWaterWeight.toNumber(),
+                            weightInGrams: currentTotalWeight.toNumber(),
                             isRecipe,
                         };
-
-                        if (extraInfo) {
-                            newIngredient.extraInfo = extraInfo;
-                        }
-
                         mainDoughIngredientsMap.set(id, newIngredient);
+                    }
+                }
+            }
+
+            // [核心重构] 将用冰量和后加水计算逻辑移至所有产品遍历之后，以确保基于整个面团家族的总量进行一次性精确计算
+            if (canCalculateIce && mainDoughInfo.targetTemp && waterIngredientId) {
+                const waterIngredient = mainDoughIngredientsMap.get(waterIngredientId);
+                if (waterIngredient) {
+                    const extraInfoParts: string[] = [];
+                    const targetWaterTemp = this._calculateWaterTemp(
+                        mainDoughInfo.targetTemp,
+                        mixerType,
+                        flourTemp,
+                        envTemp,
+                    );
+                    const iceWeight = this._calculateIce(
+                        targetWaterTemp,
+                        totalWaterForFamily.toNumber(), // 使用精确计算的家族总水量
+                        waterTemp,
+                    );
+
+                    // [核心修复] 比较总用冰量和家族总水量
+                    if (iceWeight > totalWaterForFamily.toNumber()) {
+                        const requiredTemp = this._calculateRequiredWetIngredientTemp(
+                            targetWaterTemp,
+                            totalWaterForFamily.toNumber(),
+                            totalWaterForFamily.toNumber(), // 可用于替换的水就是全部的水
+                        );
+                        extraInfoParts.push(
+                            `需将所有水换成冰块，且其他液体原料需冷却至 ${new Prisma.Decimal(requiredTemp)
+                                .toDP(1)
+                                .toNumber()}°C`,
+                        );
+                    } else if (iceWeight > 0) {
+                        extraInfoParts.push(`需要替换 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰`);
+                    }
+
+                    // 后加水逻辑
+                    if (!totalFlourForFamily.isZero()) {
+                        const trueHydrationRatio = totalWaterForFamily.div(totalFlourForFamily);
+                        if (trueHydrationRatio.gt(0.65)) {
+                            const holdBackWater = totalWaterForFamily.sub(totalFlourForFamily.mul(0.65));
+                            extraInfoParts.push(`需要保留 ${holdBackWater.toDP(1).toNumber()}g 水在搅拌过程中加入`);
+                        }
+                    }
+
+                    if (extraInfoParts.length > 0) {
+                        waterIngredient.extraInfo = extraInfoParts.join('\n');
                     }
                 }
             }
