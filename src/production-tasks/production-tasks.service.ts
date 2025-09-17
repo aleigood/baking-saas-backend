@@ -23,6 +23,8 @@ import {
     TaskDetailResponseDto,
     TaskIngredientDetail,
 } from './dto/task-detail.dto';
+// [核心新增] 导入用于修改任务详情的 DTO
+import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 
 // [核心修改] 将损耗阶段定义移至服务顶部，方便管理
 const spoilageStages = [
@@ -1229,8 +1231,91 @@ export class ProductionTasksService {
         return { stockWarning };
     }
 
+    // [核心新增] 新增方法，用于修改未开始的任务详情
+    async updateTaskDetails(tenantId: string, id: string, updateDto: UpdateTaskDetailsDto) {
+        return this.prisma.$transaction(async (tx) => {
+            // 1. 查找任务并验证状态
+            const task = await tx.productionTask.findFirst({
+                where: {
+                    id,
+                    tenantId,
+                    deletedAt: null,
+                },
+            });
+
+            if (!task) {
+                throw new NotFoundException('生产任务不存在');
+            }
+
+            if (task.status !== ProductionTaskStatus.PENDING) {
+                throw new BadRequestException('只有“待开始”的任务才能被修改');
+            }
+
+            const { startDate, endDate, notes, products } = updateDto;
+
+            if (!products || products.length === 0) {
+                throw new BadRequestException('一个生产任务至少需要包含一个产品。');
+            }
+
+            // 2. 删除旧的产品项
+            await tx.productionTaskItem.deleteMany({
+                where: { taskId: id },
+            });
+
+            // 3. 验证新产品项并更新任务
+            const productIds = products.map((p) => p.productId);
+            const existingProducts = await tx.product.findMany({
+                where: {
+                    id: { in: productIds },
+                    recipeVersion: { family: { tenantId } },
+                },
+            });
+
+            if (existingProducts.length !== productIds.length) {
+                throw new NotFoundException('一个或多个目标产品不存在或不属于该店铺。');
+            }
+
+            const updatedTask = await tx.productionTask.update({
+                where: { id },
+                data: {
+                    startDate,
+                    endDate,
+                    notes,
+                    items: {
+                        create: products.map((p) => ({
+                            productId: p.productId,
+                            quantity: p.quantity,
+                        })),
+                    },
+                },
+                include: {
+                    items: {
+                        include: {
+                            product: true,
+                        },
+                    },
+                    createdBy: {
+                        select: {
+                            name: true,
+                            phone: true,
+                        },
+                    },
+                },
+            });
+            return updatedTask;
+        });
+    }
+
     async update(tenantId: string, id: string, updateProductionTaskDto: UpdateProductionTaskDto) {
-        await this.findOne(tenantId, id, {});
+        // [核心修复] 修复此方法，使其不再依赖于复杂的 findOne 方法
+        const task = await this.prisma.productionTask.findFirst({
+            where: { id, tenantId, deletedAt: null },
+        });
+
+        if (!task) {
+            throw new NotFoundException('生产任务不存在');
+        }
+
         return this.prisma.productionTask.update({
             where: { id },
             data: updateProductionTaskDto,

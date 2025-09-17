@@ -10,6 +10,7 @@ import {
     ParseUUIDPipe,
     Query,
     ValidationPipe,
+    Put,
 } from '@nestjs/common';
 import { ProductionTasksService } from './production-tasks.service';
 import { CreateProductionTaskDto } from './dto/create-production-task.dto';
@@ -20,6 +21,7 @@ import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
 import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
+import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('production-tasks')
@@ -77,6 +79,21 @@ export class ProductionTasksController {
         query: QueryTaskDetailDto,
     ) {
         return this.productionTasksService.findOne(user.tenantId, id, query);
+    }
+
+    /**
+     * [核心新增] 修改一个未开始的任务详情
+     * @param user 当前用户
+     * @param id 任务ID
+     * @param updateTaskDetailsDto 更新的数据
+     */
+    @Put(':id')
+    updateTaskDetails(
+        @GetUser() user: UserPayload,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() updateTaskDetailsDto: UpdateTaskDetailsDto,
+    ) {
+        return this.productionTasksService.updateTaskDetails(user.tenantId, id, updateTaskDetailsDto);
     }
 
     @Patch(':id')
