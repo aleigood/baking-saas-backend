@@ -8,8 +8,10 @@ import { SkuStatus, Prisma, IngredientType } from '@prisma/client'; // [修改] 
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
-// [核心新增] 导入分页查询 DTO
-import { QueryLedgerDto } from './dto/query-ledger.dto';
+// [核心修改] 导入 LedgerEntry 接口
+import { QueryLedgerDto, LedgerEntryType, LedgerEntry } from './dto/query-ledger.dto';
+
+// [核心删除] 移除本地的 LedgerEntry 接口定义，因为它已被移至 DTO 文件
 
 @Injectable()
 export class IngredientsService {
@@ -382,21 +384,72 @@ export class IngredientsService {
         });
     }
 
-    // [核心修改] 实现库存流水分页逻辑
+    // [核心重构] 重构库存流水查询逻辑以支持多维度筛选
     async getIngredientLedger(tenantId: string, ingredientId: string, query: QueryLedgerDto) {
-        await this.findOne(tenantId, ingredientId);
-        const { page = 1, limit = 10 } = query;
+        await this.findOne(tenantId, ingredientId); // 验证原料存在性
+        const { page = 1, limit = 10, type, userId, startDate, endDate, keyword } = query;
         const pageNum = Number(page);
         const limitNum = Number(limit);
         const skip = (pageNum - 1) * limitNum;
 
-        const [procurements, consumptions, adjustments] = await Promise.all([
-            this.prisma.procurementRecord.findMany({
-                where: { sku: { ingredientId: ingredientId } },
-                include: { sku: true, user: { select: { name: true, phone: true } } }, // [核心修改] 关联查询用户信息
-            }),
-            this.prisma.ingredientConsumptionLog.findMany({
-                where: { ingredientId: ingredientId },
+        // 构建日期过滤条件
+        const dateFilter: { gte?: Date; lte?: Date } = {};
+        if (startDate) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            dateFilter.gte = start;
+        }
+        if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            dateFilter.lte = end;
+        }
+        const hasDateFilter = startDate || endDate;
+
+        // [核心修复] 为流水账数组指定明确的类型，以解决 Eslint 错误
+        const ledger: LedgerEntry[] = [];
+
+        // 1. 查询采购记录 (Procurement)
+        if (!type || type === LedgerEntryType.PROCUREMENT) {
+            const procurements = await this.prisma.procurementRecord.findMany({
+                where: {
+                    sku: { ingredientId: ingredientId },
+                    ...(userId && { userId: userId }), // 按人员筛选
+                    ...(hasDateFilter && { purchaseDate: dateFilter }), // 按日期筛选
+                    ...(keyword && {
+                        // 按关键字筛选
+                        OR: [
+                            { sku: { brand: { contains: keyword, mode: 'insensitive' } } },
+                            { sku: { specName: { contains: keyword, mode: 'insensitive' } } },
+                            { user: { name: { contains: keyword, mode: 'insensitive' } } },
+                        ],
+                    }),
+                },
+                include: { sku: true, user: { select: { name: true, phone: true } } },
+            });
+            const procurementLedger = procurements.map((p) => ({
+                date: p.purchaseDate,
+                type: '采购入库',
+                change: p.packagesPurchased * p.sku.specWeightInGrams,
+                details: `采购 ${p.sku.brand || ''} ${p.sku.specName} × ${p.packagesPurchased}`,
+                operator: p.user.name || p.user.phone,
+            }));
+            ledger.push(...procurementLedger);
+        }
+
+        // 2. 查询生产消耗 (Consumption)
+        if ((!type || type === LedgerEntryType.CONSUMPTION) && !userId) {
+            // 生产消耗是系统行为，不按人员筛选
+            const consumptions = await this.prisma.ingredientConsumptionLog.findMany({
+                where: {
+                    ingredientId: ingredientId,
+                    ...(hasDateFilter && { productionLog: { completedAt: dateFilter } }),
+                    ...(keyword && {
+                        productionLog: {
+                            task: { id: { contains: keyword, mode: 'insensitive' } },
+                        },
+                    }),
+                },
                 include: {
                     productionLog: {
                         include: {
@@ -406,43 +459,58 @@ export class IngredientsService {
                         },
                     },
                 },
-            }),
-            this.prisma.ingredientStockAdjustment.findMany({
-                where: { ingredientId: ingredientId },
+            });
+            const consumptionLedger = consumptions.map((c) => ({
+                date: c.productionLog.completedAt,
+                type: '生产消耗',
+                change: -c.quantityInGrams,
+                details: `生产任务 #${c.productionLog.task.id.slice(0, 8)}`,
+                operator: '系统',
+            }));
+            ledger.push(...consumptionLedger);
+        }
+
+        // 3. 查询库存调整和生产损耗 (Adjustment & Spoilage)
+        if (!type || type === LedgerEntryType.ADJUSTMENT || type === LedgerEntryType.SPOILAGE) {
+            const adjustments = await this.prisma.ingredientStockAdjustment.findMany({
+                where: {
+                    ingredientId: ingredientId,
+                    ...(userId && { userId: userId }),
+                    ...(hasDateFilter && { createdAt: dateFilter }),
+                    ...(keyword && {
+                        OR: [
+                            { reason: { contains: keyword, mode: 'insensitive' } },
+                            { user: { name: { contains: keyword, mode: 'insensitive' } } },
+                        ],
+                    }),
+                },
                 include: { user: { select: { name: true, phone: true } } },
-            }),
-        ]);
+            });
 
-        const procurementLedger = procurements.map((p) => ({
-            date: p.purchaseDate,
-            type: '采购入库',
-            change: p.packagesPurchased * p.sku.specWeightInGrams,
-            details: `采购 ${p.sku.brand || ''} ${p.sku.specName} × ${p.packagesPurchased}`,
-            operator: p.user.name || p.user.phone, // [核心修改] 使用用户名作为操作人
-        }));
+            let adjustmentLedger = adjustments.map((a) => ({
+                date: a.createdAt,
+                type: a.reason?.startsWith('生产损耗') ? '生产损耗' : '库存调整',
+                change: a.changeInGrams,
+                details: a.reason || '无原因',
+                operator: a.user.name || a.user.phone,
+            }));
 
-        const consumptionLedger = consumptions.map((c) => ({
-            date: c.productionLog.completedAt,
-            type: '生产消耗',
-            change: -c.quantityInGrams,
-            details: `生产任务 #${c.productionLog.task.id.slice(0, 8)}`,
-            operator: '系统',
-        }));
+            // 如果前端通过 type 筛选了 "库存调整" 或 "生产损耗"，则在内存中进一步过滤
+            if (type === LedgerEntryType.ADJUSTMENT) {
+                adjustmentLedger = adjustmentLedger.filter((a) => a.type === '库存调整');
+            }
+            if (type === LedgerEntryType.SPOILAGE) {
+                adjustmentLedger = adjustmentLedger.filter((a) => a.type === '生产损耗');
+            }
 
-        const adjustmentLedger = adjustments.map((a) => ({
-            date: a.createdAt,
-            // [核心修改] 根据变动量判断是“库存调整”还是“生产损耗”
-            type: a.reason?.startsWith('生产损耗') ? '生产损耗' : '库存调整',
-            change: a.changeInGrams,
-            details: a.reason || '无原因',
-            operator: a.user.name || a.user.phone,
-        }));
+            ledger.push(...adjustmentLedger);
+        }
 
-        const ledger = [...procurementLedger, ...consumptionLedger, ...adjustmentLedger];
+        // 统一排序、分页
         ledger.sort((a, b) => b.date.getTime() - a.date.getTime());
 
-        const paginatedData = ledger.slice(skip, skip + limitNum);
         const total = ledger.length;
+        const paginatedData = ledger.slice(skip, skip + limitNum);
 
         return {
             data: paginatedData,
