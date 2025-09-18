@@ -50,6 +50,7 @@ export interface CalculatedProductCostDetails {
     doughGroups: CalculatedDoughGroup[];
     extraIngredients: CalculatedExtraIngredientInfo[];
     groupedExtraIngredients: Record<string, CalculatedExtraIngredientInfo[]>;
+    productProcedure: string[]; // [核心新增] 增加产品制作要点字段
 }
 
 // [核心修改] 为 CalculatedRecipeIngredient 接口增加可选的 brand 和 isRecipe 字段
@@ -679,6 +680,7 @@ export class CostingService {
             doughGroups,
             extraIngredients: allExtraIngredients,
             groupedExtraIngredients,
+            productProcedure: product.procedure, // [核心新增] 在返回对象中加入产品的制作要点
         };
     }
 
