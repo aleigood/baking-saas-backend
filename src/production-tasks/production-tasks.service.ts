@@ -898,6 +898,7 @@ export class ProductionTasksService {
                         id = ing.linkedPreDough.id;
                         name = ing.linkedPreDough.name;
                         isRecipe = true;
+                        brand = '自制面种'; // [核心修改] 为自制面种设置品牌
                     } else if (ing.ingredient && ing.ratio) {
                         weight = totalFlour.mul(ing.ratio);
                         id = ing.ingredient.id;
@@ -914,9 +915,6 @@ export class ProductionTasksService {
 
                     const currentTotalWeight = weight.mul(quantity);
                     totalDoughWeight = totalDoughWeight.add(currentTotalWeight);
-
-                    // [核心删除] 删除此处不准确的用冰量计算逻辑，将统一移动到循环之后
-                    // The ice calculation logic that was here has been removed.
 
                     const existing = mainDoughIngredientsMap.get(id);
                     if (existing) {
@@ -1000,7 +998,7 @@ export class ProductionTasksService {
                     .map((ing) => ({
                         id: ing.id,
                         name: ing.name,
-                        brand: ing.brand,
+                        brand: ing.isRecipe ? '自制原料' : ing.brand, // [核心修改] 为自制原料设置品牌
                         isRecipe: ing.isRecipe,
                         weightInGrams: totalFlourWeight.mul(ing.ratio ?? 0).toNumber(),
                     }));
@@ -1010,7 +1008,7 @@ export class ProductionTasksService {
                     .map((ing) => ({
                         id: ing.id,
                         name: ing.name,
-                        brand: ing.brand,
+                        brand: ing.isRecipe ? '自制原料' : ing.brand, // [核心修改] 为自制原料设置品牌
                         isRecipe: ing.isRecipe,
                         weightInGrams: ing.weightInGrams ?? 0,
                     }));
@@ -1020,7 +1018,7 @@ export class ProductionTasksService {
                     .map((ing) => ({
                         id: ing.id,
                         name: ing.name,
-                        brand: ing.brand,
+                        brand: ing.isRecipe ? '自制原料' : ing.brand, // [核心修改] 为自制原料设置品牌
                         isRecipe: ing.isRecipe,
                         weightInGrams: ing.weightInGrams ?? 0,
                     }));
