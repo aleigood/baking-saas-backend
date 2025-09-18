@@ -3,7 +3,7 @@ import {
     IsNotEmpty,
     IsArray,
     ValidateNested,
-    IsOptional,
+    IsOptional, // [核心修改] 导入 IsOptional
     IsNumber,
     IsEnum,
     IsBoolean,
@@ -19,9 +19,11 @@ export class ProductIngredientDto {
     @IsNotEmpty()
     name: string; // name 字段用于创建新原料或关联预制/附加配方
 
+    // [核心修改] 将 type 字段变为可选
     @IsEnum(ProductIngredientType)
-    @IsNotEmpty()
-    type: ProductIngredientType; // 'MIX_IN', 'FILLING', 'TOPPING'
+    @IsOptional() // 添加 @IsOptional()
+    // @IsNotEmpty() // 移除 @IsNotEmpty()
+    type?: ProductIngredientType; // 'MIX_IN', 'FILLING', 'TOPPING'
 
     // [核心修改] ratio 现在应为小数形式 (例如: 1% 应传入 0.01)
     @IsNumber()

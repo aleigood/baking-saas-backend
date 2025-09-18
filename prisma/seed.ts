@@ -445,31 +445,49 @@ const recipesData: RecipeSeedData[] = [
                         ratio: 0.15,
                     },
                 ],
+                procedure: ['烘烤：一盘6个 上火255 下火250 喷3-4秒蒸汽 烤13分钟'],
+            },
+            {
+                name: '披萨',
+                weight: 250,
+                fillings: [],
+                mixIn: [],
+            },
+            {
+                name: '佛卡夏',
+                weight: 80,
+                fillings: [],
+                mixIn: [],
+                procedure: ['烘烤：一盘9个 上火260 下火250 喷3-4秒蒸汽 烤12分钟'],
             },
         ],
         procedure: [
             '搅拌：搅拌至有延展性和弹性，易搅碎的馅料折叠进去',
             '发酵：一发充分发酵，半小时小时翻一次面或翻面后放入冰箱发酵12小时，最终发酵时面团不要放太近，容易粘在一起',
-            '烘烤：一盘6个 上火255 下火250 喷3-4秒蒸汽 烤13分钟',
         ],
     },
     {
-        name: '佛卡夏',
+        name: '全麦面团',
         type: 'MAIN',
-        targetTemp: 22,
+        targetTemp: 26,
         ingredients: [
             {
                 name: '鲁邦种',
-                flourRatio: 0.2, // 意图：使用主面团20%的面粉制作鲁邦种
-            },
-            {
-                name: 'T65',
-                ratio: 0.3,
-                isFlour: true,
+                flourRatio: 0.1, // 意图：使用主面团10%的面粉制作鲁邦种
             },
             {
                 name: '高筋粉',
-                ratio: 0.5,
+                ratio: 0.6,
+                isFlour: true,
+            },
+            {
+                name: 'T80',
+                ratio: 0.2,
+                isFlour: true,
+            },
+            {
+                name: 'T150',
+                ratio: 0.1,
                 isFlour: true,
             },
             {
@@ -479,37 +497,41 @@ const recipesData: RecipeSeedData[] = [
             },
             {
                 name: '盐',
-                ratio: 0.018,
+                ratio: 0.02,
             },
             {
                 name: '糖',
-                ratio: 0.01,
+                ratio: 0.04,
             },
             {
                 name: '半干酵母',
                 ratio: 0.005,
             },
             {
-                name: '麦芽精',
-                ratio: 0.003,
+                name: '奶粉',
+                ratio: 0.04,
             },
             {
                 name: '黄油',
-                ratio: 0.05,
+                ratio: 0.04,
+            },
+            {
+                name: '蜂蜜',
+                ratio: 0.02,
             },
         ],
         products: [
             {
-                name: '佛卡夏',
+                name: '全麦谷物餐包',
                 weight: 80,
                 fillings: [],
                 mixIn: [],
+                procedure: ['烘烤：一盘9个 上火220 下火180 喷3-4秒蒸汽 烤12分钟'],
             },
         ],
         procedure: [
             '搅拌：搅拌至有延展性和弹性，易搅碎的馅料折叠进去',
-            '发酵：一发充分发酵，半小时小时翻一次面或翻面后放入冰箱发酵12小时，最终发酵时面团不要放太近，容易粘在一起',
-            '烘烤：一盘9个 上火260 下火250 喷3-4秒蒸汽 烤12分钟',
+            '发酵：室温半小时发酵后翻面后放入冰箱发酵16小时',
         ],
     },
     {
