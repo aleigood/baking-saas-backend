@@ -968,9 +968,14 @@ export class ProductionTasksService {
                     // 后加水逻辑
                     if (!totalFlourForFamily.isZero()) {
                         const trueHydrationRatio = totalWaterForFamily.div(totalFlourForFamily);
+                        // [核心修改] 仅在总含水量严格大于65%时才提示后加水
                         if (trueHydrationRatio.gt(0.65)) {
                             const holdBackWater = totalWaterForFamily.sub(totalFlourForFamily.mul(0.65));
-                            extraInfoParts.push(`需要保留 ${holdBackWater.toDP(1).toNumber()}g 水在搅拌过程中加入`);
+                            const holdBackWaterDisplay = holdBackWater.toDP(1); // 四舍五入到一位小数
+                            // [核心修改] 仅在需要后加的水量大于0时才显示提示，避免显示“后加水0.0g”
+                            if (holdBackWaterDisplay.gt(0)) {
+                                extraInfoParts.push(`需要保留 ${holdBackWaterDisplay.toNumber()}g 水在搅拌过程中加入`);
+                            }
                         }
                     }
 
