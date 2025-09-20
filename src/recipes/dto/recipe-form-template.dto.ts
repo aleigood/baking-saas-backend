@@ -10,6 +10,7 @@ export interface SubIngredientTemplate {
     name: string;
     ratio: number | null;
     weightInGrams?: number | null;
+    isRecipe: boolean; // [核心新增] 新增字段，用于区分是基础原料还是子配方
 }
 
 export interface ProductTemplate {
@@ -25,6 +26,7 @@ export interface DoughIngredientTemplate {
     id: string | null;
     name: string;
     ratio: number | null;
+    isRecipe: boolean; // [核心新增] 新增字段，用于区分是基础原料还是子配方
 }
 
 export interface DoughTemplate {
