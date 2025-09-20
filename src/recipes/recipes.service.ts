@@ -733,6 +733,7 @@ export class RecipesService {
                         id: ing.ingredient!.id,
                         name: ing.ingredient!.name,
                         ratio: new Prisma.Decimal(ing.ratio!).mul(100).toNumber(),
+                        isRecipe: false, // [核心修改] 对于半成品配方自身的定义，其原料均为基础原料
                     })),
                 procedure: doughSource.procedure || [],
             };
@@ -743,7 +744,12 @@ export class RecipesService {
             throw new NotFoundException('源配方数据不完整: 缺少主面团');
         }
 
-        const mainDoughIngredientsForForm: { id: string | null; name: string; ratio: number | null }[] = [];
+        const mainDoughIngredientsForForm: {
+            id: string | null;
+            name: string;
+            ratio: number | null;
+            isRecipe: boolean;
+        }[] = [];
         const preDoughObjectsForForm: DoughTemplate[] = [];
 
         for (const ing of mainDoughSource.ingredients) {
@@ -763,6 +769,7 @@ export class RecipesService {
                             id: i.ingredient!.id,
                             name: i.ingredient!.name,
                             ratio: flourRatioInMainDough.mul(i.ratio!).mul(100).toNumber(),
+                            isRecipe: false, // [核心修改] 预制面团模板中的原料是基础原料
                         }));
 
                     preDoughObjectsForForm.push({
@@ -779,6 +786,7 @@ export class RecipesService {
                     id: ing.ingredient.id,
                     name: ing.ingredient.name,
                     ratio: new Prisma.Decimal(ing.ratio).mul(100).toNumber(),
+                    isRecipe: false, // [核心修改] 主面团中的基础原料
                 });
             }
         }
@@ -810,6 +818,7 @@ export class RecipesService {
                             name: ing.ingredient?.name || ing.linkedExtra?.name || '',
                             ratio: ing.ratio ? new Prisma.Decimal(ing.ratio).mul(100).toNumber() : null,
                             weightInGrams: ing.weightInGrams,
+                            isRecipe: !!ing.linkedExtra, // [核心修改] 如果关联的是附加配方(linkedExtra)，则为true
                         }));
                 };
                 return {
