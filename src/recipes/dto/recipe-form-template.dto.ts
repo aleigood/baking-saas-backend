@@ -11,6 +11,8 @@ export interface SubIngredientTemplate {
     ratio: number | null;
     weightInGrams?: number | null;
     isRecipe: boolean; // [核心新增] 新增字段，用于区分是基础原料还是子配方
+    isFlour?: boolean; // [核心新增] 新增字段，标识是否为面粉
+    waterContent?: number; // [核心新增] 新增字段，标识含水量
 }
 
 export interface ProductTemplate {
@@ -27,6 +29,8 @@ export interface DoughIngredientTemplate {
     name: string;
     ratio: number | null;
     isRecipe: boolean; // [核心新增] 新增字段，用于区分是基础原料还是子配方
+    isFlour?: boolean; // [核心新增] 新增字段，标识是否为面粉
+    waterContent?: number; // [核心新增] 新增字段，标识含水量
 }
 
 export interface DoughTemplate {
