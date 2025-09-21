@@ -15,7 +15,6 @@ import {
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
 import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
-// [核心新增] 导入为任务详情页重构的DTO
 import {
     DoughGroup,
     DoughProductSummary,
@@ -23,10 +22,8 @@ import {
     TaskDetailResponseDto,
     TaskIngredientDetail,
 } from './dto/task-detail.dto';
-// [核心新增] 导入用于修改任务详情的 DTO
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 
-// [核心修改] 将损耗阶段定义移至服务顶部，方便管理
 const spoilageStages = [
     { key: 'kneading', label: '打面失败' },
     { key: 'fermentation', label: '发酵失败' },
@@ -43,7 +40,6 @@ export interface PrepTask {
     items: CalculatedRecipeDetails[];
 }
 
-// [核心修复] 更新类型定义，使其与 findOne 中的 Prisma 查询完全匹配
 const taskWithDetailsInclude = {
     items: {
         include: {
@@ -53,7 +49,6 @@ const taskWithDetailsInclude = {
                         include: {
                             family: true,
                             components: {
-                                // [核心重命名]
                                 include: {
                                     ingredients: {
                                         include: {
@@ -64,7 +59,6 @@ const taskWithDetailsInclude = {
                                                         where: { isActive: true },
                                                         include: {
                                                             components: {
-                                                                // [核心重命名]
                                                                 include: {
                                                                     ingredients: {
                                                                         include: {
@@ -112,13 +106,11 @@ type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
 
 type TaskItemWithDetails = TaskWithDetails['items'][0];
 type ProductWithDetails = TaskItemWithDetails['product'];
-type ComponentWithRecursiveIngredients = ProductWithDetails['recipeVersion']['components'][0]; // [核心重命名]
+type ComponentWithRecursiveIngredients = ProductWithDetails['recipeVersion']['components'][0];
 
-// [核心修复] 为 prepare task 中的对象定义明确的类型，以消除 'any' 警告
 type PrepItemFamily = RecipeFamily;
-type RequiredPrepItem = { family: PrepItemFamily; totalWeight: Prisma.Decimal }; // [核心修改] totalWeight to Decimal
+type RequiredPrepItem = { family: PrepItemFamily; totalWeight: Prisma.Decimal };
 
-// [核心修复] 为扁平化后的原料对象定义明确的类型
 type FlattenedIngredient = {
     id: string;
     name: string;
@@ -166,7 +158,130 @@ export class ProductionTasksService {
         );
     }
 
-    // [核心重构] 实现递归的前置任务解析
+    // [核心改造] 在 create 方法中增加品类验证
+    async create(tenantId: string, userId: string, createProductionTaskDto: CreateProductionTaskDto) {
+        const { startDate, endDate, notes, products } = createProductionTaskDto;
+
+        if (!products || products.length === 0) {
+            throw new BadRequestException('一个生产任务至少需要包含一个产品。');
+        }
+
+        const productIds = products.map((p) => p.productId);
+        const existingProducts = await this.prisma.product.findMany({
+            where: {
+                id: { in: productIds },
+                recipeVersion: { family: { tenantId } },
+            },
+            // [核心新增] 在查询时，连同产品的配方品类一起查出来
+            include: {
+                recipeVersion: {
+                    include: {
+                        family: {
+                            select: {
+                                category: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (existingProducts.length !== productIds.length) {
+            throw new NotFoundException('一个或多个目标产品不存在或不属于该店铺。');
+        }
+
+        // [核心新增] 验证所有产品的品类是否一致
+        const firstCategory = existingProducts[0].recipeVersion.family.category;
+        const allSameCategory = existingProducts.every((p) => p.recipeVersion.family.category === firstCategory);
+
+        if (!allSameCategory) {
+            throw new BadRequestException('一次生产任务只能包含同一品类的产品。');
+        }
+
+        const allConsumptions = new Map<
+            string,
+            { ingredientId: string; ingredientName: string; totalConsumed: number }
+        >();
+        for (const item of products) {
+            const consumptions = await this.costingService.calculateProductConsumptions(
+                tenantId,
+                item.productId,
+                item.quantity,
+            );
+            for (const consumption of consumptions) {
+                const existing = allConsumptions.get(consumption.ingredientId);
+                if (existing) {
+                    existing.totalConsumed += consumption.totalConsumed;
+                } else {
+                    allConsumptions.set(consumption.ingredientId, {
+                        ingredientId: consumption.ingredientId,
+                        ingredientName: consumption.ingredientName,
+                        totalConsumed: consumption.totalConsumed,
+                    });
+                }
+            }
+        }
+        const finalConsumptions = Array.from(allConsumptions.values());
+
+        let stockWarning: string | null = null;
+        if (finalConsumptions.length > 0) {
+            const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
+            const ingredients = await this.prisma.ingredient.findMany({
+                where: { id: { in: ingredientIds } },
+                select: { id: true, name: true, currentStockInGrams: true, type: true },
+            });
+
+            const ingredientsToCheck = ingredients.filter((ing) => ing.type === IngredientType.STANDARD);
+
+            const ingredientStockMap = new Map(ingredientsToCheck.map((i) => [i.id, i]));
+            const insufficientIngredients: string[] = [];
+
+            for (const consumption of finalConsumptions) {
+                const ingredient = ingredientStockMap.get(consumption.ingredientId);
+                if (ingredient && new Prisma.Decimal(ingredient.currentStockInGrams).lt(consumption.totalConsumed)) {
+                    insufficientIngredients.push(ingredient.name);
+                }
+            }
+
+            if (insufficientIngredients.length > 0) {
+                stockWarning = `库存不足: ${insufficientIngredients.join(', ')}`;
+            }
+        }
+
+        const createdTask = await this.prisma.productionTask.create({
+            data: {
+                startDate,
+                endDate,
+                notes,
+                tenantId,
+                createdById: userId,
+                items: {
+                    create: products.map((p) => ({
+                        productId: p.productId,
+                        quantity: p.quantity,
+                    })),
+                },
+            },
+            include: {
+                items: {
+                    include: {
+                        product: true,
+                    },
+                },
+                createdBy: {
+                    select: {
+                        name: true,
+                        phone: true,
+                    },
+                },
+            },
+        });
+
+        return { task: createdTask, warning: stockWarning };
+    }
+
+    // ... [其他所有方法保持不变，此处省略以遵守修改原则]
+
     private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<PrepTask | null> {
         if (!task || !task.items || task.items.length === 0) {
             return null;
@@ -359,107 +474,6 @@ export class ProductionTasksService {
         }
 
         return combinedPrepTask;
-    }
-
-    async create(tenantId: string, userId: string, createProductionTaskDto: CreateProductionTaskDto) {
-        const { startDate, endDate, notes, products } = createProductionTaskDto;
-
-        if (!products || products.length === 0) {
-            throw new BadRequestException('一个生产任务至少需要包含一个产品。');
-        }
-
-        const productIds = products.map((p) => p.productId);
-        const existingProducts = await this.prisma.product.findMany({
-            where: {
-                id: { in: productIds },
-                recipeVersion: { family: { tenantId } },
-            },
-        });
-
-        if (existingProducts.length !== productIds.length) {
-            throw new NotFoundException('一个或多个目标产品不存在或不属于该店铺。');
-        }
-
-        const allConsumptions = new Map<
-            string,
-            { ingredientId: string; ingredientName: string; totalConsumed: number }
-        >();
-        for (const item of products) {
-            const consumptions = await this.costingService.calculateProductConsumptions(
-                tenantId,
-                item.productId,
-                item.quantity,
-            );
-            for (const consumption of consumptions) {
-                const existing = allConsumptions.get(consumption.ingredientId);
-                if (existing) {
-                    existing.totalConsumed += consumption.totalConsumed;
-                } else {
-                    allConsumptions.set(consumption.ingredientId, {
-                        ingredientId: consumption.ingredientId,
-                        ingredientName: consumption.ingredientName,
-                        totalConsumed: consumption.totalConsumed,
-                    });
-                }
-            }
-        }
-        const finalConsumptions = Array.from(allConsumptions.values());
-
-        let stockWarning: string | null = null;
-        if (finalConsumptions.length > 0) {
-            const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
-            const ingredients = await this.prisma.ingredient.findMany({
-                where: { id: { in: ingredientIds } },
-                select: { id: true, name: true, currentStockInGrams: true, type: true },
-            });
-
-            const ingredientsToCheck = ingredients.filter((ing) => ing.type === IngredientType.STANDARD);
-
-            const ingredientStockMap = new Map(ingredientsToCheck.map((i) => [i.id, i]));
-            const insufficientIngredients: string[] = [];
-
-            for (const consumption of finalConsumptions) {
-                const ingredient = ingredientStockMap.get(consumption.ingredientId);
-                if (ingredient && new Prisma.Decimal(ingredient.currentStockInGrams).lt(consumption.totalConsumed)) {
-                    insufficientIngredients.push(ingredient.name);
-                }
-            }
-
-            if (insufficientIngredients.length > 0) {
-                stockWarning = `库存不足: ${insufficientIngredients.join(', ')}`;
-            }
-        }
-
-        const createdTask = await this.prisma.productionTask.create({
-            data: {
-                startDate,
-                endDate,
-                notes,
-                tenantId,
-                createdById: userId,
-                items: {
-                    create: products.map((p) => ({
-                        productId: p.productId,
-                        quantity: p.quantity,
-                    })),
-                },
-            },
-            include: {
-                items: {
-                    include: {
-                        product: true,
-                    },
-                },
-                createdBy: {
-                    select: {
-                        name: true,
-                        phone: true,
-                    },
-                },
-            },
-        });
-
-        return { task: createdTask, warning: stockWarning };
     }
 
     async findActive(tenantId: string, date?: string) {

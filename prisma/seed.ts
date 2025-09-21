@@ -35,7 +35,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: 'BIGA',
         type: 'PRE_DOUGH',
-        category: 'OTHER', // [核心修正] 面种是面包的专属组件，品类为 BREAD 是正确的
+        category: 'OTHER', // [核心修正] 根据最终方案，组件配方的品类统一为 OTHER
         ingredients: [
             { name: '高筋粉', ratio: 1.0, isFlour: true },
             { name: '水', ratio: 0.5, waterContent: 1.0 },
@@ -46,7 +46,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: '烫种',
         type: 'PRE_DOUGH',
-        category: 'OTHER', // [核心修正] 面种是面包的专属组件，品类为 BREAD 是正确的
+        category: 'OTHER', // [核心修正] 根据最终方案，组件配方的品类统一为 OTHER
         ingredients: [
             { name: '高筋粉', ratio: 1.0, isFlour: true },
             { name: '水', ratio: 2.0, waterContent: 1.0 },
@@ -58,7 +58,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: '柠檬奶油奶酪',
         type: 'EXTRA',
-        category: 'OTHER', // [核心修正] 这是一个通用的甜点类组件
+        category: 'OTHER', // [核心修正] 根据最终方案，组件配方的品类统一为 OTHER
         ingredients: [
             { name: '奶油奶酪', ratio: 1.0 },
             { name: '糖', ratio: 0.07 },
@@ -70,7 +70,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: '酒渍芒果干',
         type: 'EXTRA',
-        category: 'OTHER', // [核心修正] 这是一个通用的其他类组件
+        category: 'OTHER',
         ingredients: [
             { name: '芒果干', ratio: 1.0 },
             { name: '荔枝酒', ratio: 0.25 },
@@ -80,7 +80,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: '酒渍蔓越莓干',
         type: 'EXTRA',
-        category: 'OTHER', // [核心修正] 这是一个通用的其他类组件
+        category: 'OTHER',
         ingredients: [
             { name: '蔓越莓干', ratio: 1.0 },
             { name: '荔枝酒', ratio: 0.25 },
@@ -90,7 +90,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: '酒渍提子干',
         type: 'EXTRA',
-        category: 'OTHER', // [核心修正] 这是一个通用的其他类组件
+        category: 'OTHER',
         ingredients: [
             { name: '提子干', ratio: 1.0 },
             { name: '朗姆酒', ratio: 0.25 },
@@ -155,7 +155,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: '鲁邦种',
         type: 'PRE_DOUGH',
-        category: 'OTHER',
+        category: 'OTHER', // [核心修正] 根据最终方案，组件配方的品类统一为 OTHER
         ingredients: [
             { name: 'T65', ratio: 1.0, isFlour: true },
             { name: '水', ratio: 1.0, waterContent: 1.0 },
@@ -165,7 +165,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: '有盐黄油',
         type: 'EXTRA',
-        category: 'OTHER',
+        category: 'OTHER', // [核心修正] 根据最终方案，组件配方的品类统一为 OTHER
         ingredients: [
             { name: '发酵黄油', ratio: 1.0 },
             { name: '海盐', ratio: 0.017 },
@@ -357,7 +357,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: '咸蛋黄酱',
         type: 'EXTRA',
-        category: 'OTHER',
+        category: 'OTHER', // [核心修正] 根据最终方案，组件配方的品类统一为 OTHER
         ingredients: [
             { name: '咸蛋黄', ratio: 1.0 },
             { name: '黄油', ratio: 0.15 },
@@ -413,7 +413,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: '卡仕达酱',
         type: 'EXTRA',
-        category: 'OTHER',
+        category: 'OTHER', // [核心修正] 根据最终方案，组件配方的品类统一为 OTHER
         ingredients: [
             { name: '牛奶', ratio: 1.0 },
             { name: '蛋黄', ratio: 0.2 },
@@ -457,7 +457,7 @@ const recipesData: RecipeSeedData[] = [
     {
         name: '黑麦鲁邦种',
         type: 'PRE_DOUGH',
-        category: 'OTHER',
+        category: 'OTHER', // [核心修正] 根据最终方案，组件配方的品类统一为 OTHER
         ingredients: [
             { name: 'T170', ratio: 1.0, isFlour: true },
             { name: '水', ratio: 1.5, waterContent: 1.0 },

@@ -1,28 +1,26 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateRecipeDto, DoughIngredientDto, ProductDto } from './dto/create-recipe.dto'; // [核心修正] 补全对 ProductDto 的导入
-// [核心修复] 在导入语句中加入 RecipeComponent 和 ComponentIngredient 类型
+import { CreateRecipeDto, DoughIngredientDto, ProductDto } from './dto/create-recipe.dto';
 import {
     Prisma,
     RecipeFamily,
     RecipeVersion,
     ProductIngredientType,
+    RecipeType,
     IngredientType,
     RecipeComponent,
     ComponentIngredient,
-    Product, // [核心修改] 导入 Product
-    RecipeCategory, // [核心新增] 导入 RecipeCategory
+    Product,
+    RecipeCategory,
 } from '@prisma/client';
 import { RecipeFormTemplateDto } from './dto/recipe-form-template.dto';
 import type { DoughTemplate } from './dto/recipe-form-template.dto';
 
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
 
-// [核心新增] 为预加载的配方家族定义更精确的类型
 type PreloadedRecipeFamily = RecipeFamily & {
     versions: (RecipeVersion & {
         components: (RecipeComponent & {
-            // [核心重命名] doughs -> components
             ingredients: ComponentIngredient[];
         })[];
     })[];
@@ -62,9 +60,7 @@ export class RecipesService {
         return this.createVersionInternal(tenantId, familyId, createRecipeDto);
     }
 
-    // [核心改造] 重构 updateVersion 函数，采用“同步”逻辑代替“先删后创”，以保留产品ID，防止历史任务数据显示为“未知产品”
     async updateVersion(tenantId: string, familyId: string, versionId: string, updateRecipeDto: CreateRecipeDto) {
-        // 1. 验证版本是否存在
         const versionToUpdate = await this.prisma.recipeVersion.findFirst({
             where: {
                 id: versionId,
@@ -72,7 +68,7 @@ export class RecipesService {
                 family: { tenantId },
             },
             include: {
-                products: true, // [核心改造] 预加载现有产品用于后续对比
+                products: true,
             },
         });
 
@@ -80,25 +76,21 @@ export class RecipesService {
             throw new NotFoundException('指定的配方版本不存在');
         }
 
-        // 2. [核心改造] 精确检查：仅当配方被“已完成”的任务使用时，才禁止修改
         const productIds = versionToUpdate.products.map((p) => p.id);
         if (productIds.length > 0) {
             const usageCount = await this.prisma.productionTaskItem.count({
                 where: {
                     productId: { in: productIds },
-                    // 关键：增加对关联任务状态的过滤
                     task: {
                         status: 'COMPLETED',
                     },
                 },
             });
             if (usageCount > 0) {
-                // [核心改造] 提供更友好、更明确的错误信息
                 throw new BadRequestException('此配方版本已在生产任务中使用，无法直接修改。请创建一个新版本。');
             }
         }
 
-        // 3. [核心改造] 执行新的同步逻辑
         return this.prisma.$transaction(async (tx) => {
             const {
                 ingredients,
@@ -108,10 +100,9 @@ export class RecipesService {
                 procedure,
                 name,
                 type = 'MAIN',
-                category = 'BREAD',
+                category,
             } = updateRecipeDto;
 
-            // 3.1 [核心改造] 处理配方组件部分：对于组件，仍然可以采用先删后创
             await tx.componentIngredient.deleteMany({
                 where: { component: { recipeVersionId: versionId } },
             });
@@ -119,7 +110,6 @@ export class RecipesService {
                 where: { recipeVersionId: versionId },
             });
 
-            // 重新验证并创建组件及原料
             const ingredientNames = new Set<string>();
             for (const ing of ingredients) {
                 if (ingredientNames.has(ing.name)) {
@@ -127,16 +117,15 @@ export class RecipesService {
                 }
                 ingredientNames.add(ing.name);
             }
-            // [核心改造] 将原料检查和自动创建逻辑提前，确保在处理产品之前所有原料都已存在
             await this._ensureIngredientsExist(tenantId, updateRecipeDto, tx);
 
             const preDoughFamilies = await this.preloadPreDoughFamilies(tenantId, ingredients, tx);
             this.calculatePreDoughTotalRatio(ingredients, preDoughFamilies);
-            // [核心改造] 根据品类决定是否执行烘焙百分比验证
-            this._validateBakerPercentage(category, ingredients);
+
+            // [核心改造] 传递 type 和 category 进行验证
+            this._validateBakerPercentage(type, category, ingredients);
 
             const component = await tx.recipeComponent.create({
-                // [核心重命名] dough -> component
                 data: {
                     recipeVersionId: versionId,
                     name: name,
@@ -149,9 +138,8 @@ export class RecipesService {
             for (const ingredientDto of ingredients) {
                 const linkedPreDough = preDoughFamilies.get(ingredientDto.name);
                 await tx.componentIngredient.create({
-                    // [核心重命名] doughIngredient -> componentIngredient
                     data: {
-                        componentId: component.id, // [核心重命名] doughId -> componentId
+                        componentId: component.id,
                         ratio: linkedPreDough ? null : ingredientDto.ratio,
                         flourRatio: ingredientDto.flourRatio,
                         ingredientId: linkedPreDough ? null : ingredientDto.ingredientId,
@@ -160,22 +148,18 @@ export class RecipesService {
                 });
             }
 
-            // 3.2 [核心改造] 处理产品部分：执行同步逻辑
             await this._syncProductsForVersion(tenantId, versionId, versionToUpdate.products, products || [], tx);
 
-            // 3.3 更新版本备注
             await tx.recipeVersion.update({
                 where: { id: versionId },
                 data: { notes: updateRecipeDto.notes },
             });
 
-            // 3.4 返回更新后的完整数据
             return this.prisma.recipeVersion.findUnique({
                 where: { id: versionId },
                 include: {
                     family: true,
                     components: {
-                        // [核心重命名] doughs -> components
                         include: {
                             ingredients: { include: { ingredient: true, linkedPreDough: true } },
                         },
@@ -190,7 +174,6 @@ export class RecipesService {
         });
     }
 
-    // [核心新增] 这是一个新的私有方法，用于同步产品列表
     private async _syncProductsForVersion(
         tenantId: string,
         versionId: string,
@@ -201,10 +184,8 @@ export class RecipesService {
         const existingProductsMap = new Map(existingProducts.map((p) => [p.name, p]));
         const newProductsDtoMap = new Map(newProductsDto.map((p) => [p.name, p]));
 
-        // 1. 识别要删除的产品
         const productsToDelete = existingProducts.filter((p) => !newProductsDtoMap.has(p.name));
         if (productsToDelete.length > 0) {
-            // [核心新增] 在删除单个产品前，再次进行精确检查，确保这个产品没有被任何任务使用
             const productIdsToDelete = productsToDelete.map((p) => p.id);
             const usageCount = await tx.productionTaskItem.count({
                 where: {
@@ -212,7 +193,6 @@ export class RecipesService {
                 },
             });
             if (usageCount > 0) {
-                // 如果发现即将被删除的产品已经被任务使用，则抛出异常，防止数据不一致
                 throw new BadRequestException(
                     `无法删除产品: ${productsToDelete
                         .map((p) => p.name)
@@ -220,17 +200,14 @@ export class RecipesService {
                 );
             }
 
-            // 先删除关联的原料，再删除产品本身
             await tx.productIngredient.deleteMany({ where: { productId: { in: productIdsToDelete } } });
             await tx.product.deleteMany({ where: { id: { in: productIdsToDelete } } });
         }
 
-        // 2. 遍历新的产品 DTO，进行更新或创建
         for (const productDto of newProductsDto) {
             const existingProduct = existingProductsMap.get(productDto.name);
 
             if (existingProduct) {
-                // 2.1 产品已存在 -> 更新
                 await tx.product.update({
                     where: { id: existingProduct.id },
                     data: {
@@ -238,11 +215,9 @@ export class RecipesService {
                         procedure: productDto.procedure,
                     },
                 });
-                // 清理旧的原料，然后重新创建
                 await tx.productIngredient.deleteMany({ where: { productId: existingProduct.id } });
                 await this._createProductIngredients(tenantId, existingProduct.id, productDto, tx);
             } else {
-                // 2.2 产品不存在 -> 创建
                 const newProduct = await tx.product.create({
                     data: {
                         recipeVersionId: versionId,
@@ -256,7 +231,6 @@ export class RecipesService {
         }
     }
 
-    // [核心新增] 这是一个新的辅助函数，用于统一处理产品原料的创建逻辑，避免代码重复
     private async _createProductIngredients(
         tenantId: string,
         productId: string,
@@ -292,7 +266,13 @@ export class RecipesService {
     }
 
     private async createVersionInternal(tenantId: string, familyId: string | null, createRecipeDto: CreateRecipeDto) {
-        const { name, type = 'MAIN', category = 'BREAD' } = createRecipeDto; // [核心改造] 读取 category
+        const { name, type = 'MAIN', category } = createRecipeDto;
+
+        // [核心改造] 根据最终方案，为组件配方强制设置品类为 OTHER
+        const finalCategory = type === 'MAIN' ? category : 'OTHER';
+        if (type === 'MAIN' && !finalCategory) {
+            throw new BadRequestException('产品配方必须指定一个品类。');
+        }
 
         return this.prisma.$transaction(
             async (tx) => {
@@ -307,7 +287,7 @@ export class RecipesService {
                     recipeFamily = existingFamily;
                 } else {
                     recipeFamily = await tx.recipeFamily.create({
-                        data: { name, tenantId, type, category }, // [核心改造] 保存 category
+                        data: { name, tenantId, type, category: finalCategory },
                         include: { versions: true },
                     });
                 }
@@ -324,7 +304,6 @@ export class RecipesService {
                         isActive: !hasActiveVersion,
                     },
                 });
-                // [核心改造] 将原 recreateVersionContents 的逻辑拆分并在此处调用
                 return this.createVersionContents(tenantId, recipeVersion.id, createRecipeDto, tx);
             },
             {
@@ -333,7 +312,6 @@ export class RecipesService {
         );
     }
 
-    // [核心改造] 将原 recreateVersionContents 重命名为 createVersionContents，并移除产品删除逻辑
     private async createVersionContents(
         tenantId: string,
         versionId: string,
@@ -358,13 +336,12 @@ export class RecipesService {
             }
             ingredientNames.add(ing.name);
         }
-        // [核心改造] 调用独立的原料确保函数
         await this._ensureIngredientsExist(tenantId, recipeDto, tx);
 
         const preDoughFamilies = await this.preloadPreDoughFamilies(tenantId, ingredients, tx);
         this.calculatePreDoughTotalRatio(ingredients, preDoughFamilies);
-        // [核心改造] 根据品类决定是否执行烘焙百分比验证
-        this._validateBakerPercentage(category, ingredients);
+        // [核心改造] 传递 type 和 category 进行验证
+        this._validateBakerPercentage(type, category, ingredients);
 
         await tx.recipeVersion.update({
             where: { id: versionId },
@@ -372,7 +349,6 @@ export class RecipesService {
         });
 
         const component = await tx.recipeComponent.create({
-            // [核心重命名] dough -> component
             data: {
                 recipeVersionId: versionId,
                 name: name,
@@ -385,9 +361,8 @@ export class RecipesService {
         for (const ingredientDto of ingredients) {
             const linkedPreDough = preDoughFamilies.get(ingredientDto.name);
             await tx.componentIngredient.create({
-                // [核心重命名] doughIngredient -> componentIngredient
                 data: {
-                    componentId: component.id, // [核心重命名] doughId -> componentId
+                    componentId: component.id,
                     ratio: linkedPreDough ? null : ingredientDto.ratio,
                     flourRatio: ingredientDto.flourRatio,
                     ingredientId: linkedPreDough ? null : ingredientDto.ingredientId,
@@ -406,7 +381,6 @@ export class RecipesService {
                         procedure: productDto.procedure,
                     },
                 });
-                // [核心改造] 调用抽离的原料创建函数
                 await this._createProductIngredients(tenantId, product.id, productDto, tx);
             }
         }
@@ -416,7 +390,6 @@ export class RecipesService {
             include: {
                 family: true,
                 components: {
-                    // [核心重命名] doughs -> components
                     include: {
                         ingredients: {
                             include: {
@@ -427,7 +400,6 @@ export class RecipesService {
                                             where: { isActive: true },
                                             include: {
                                                 components: {
-                                                    // [核心重命名] doughs -> components
                                                     include: {
                                                         ingredients: {
                                                             include: {
@@ -458,7 +430,6 @@ export class RecipesService {
         });
     }
 
-    // [核心新增] 新增一个私有方法，用于检查并自动创建配方中尚不存在的原料
     private async _ensureIngredientsExist(tenantId: string, recipeDto: CreateRecipeDto, tx: Prisma.TransactionClient) {
         const { ingredients, products } = recipeDto;
         const allRawIngredients = [
@@ -467,20 +438,17 @@ export class RecipesService {
         ];
 
         for (const ing of allRawIngredients) {
-            if (ing.ingredientId) continue; // 如果已经有ID，跳过
+            if (ing.ingredientId) continue;
 
-            // 检查是否为预制件或附加项
             const isPreDoughOrExtra = await tx.recipeFamily.findFirst({
                 where: { name: ing.name, tenantId, type: { in: ['PRE_DOUGH', 'EXTRA'] } },
             });
             if (isPreDoughOrExtra) continue;
 
-            // 检查原料是否已存在
             let existingIngredient = await tx.ingredient.findFirst({
                 where: { tenantId, name: ing.name, deletedAt: null },
             });
 
-            // 如果不存在，则创建新原料
             if (!existingIngredient) {
                 const isWater = ing.name === '水';
                 existingIngredient = await tx.ingredient.create({
@@ -493,7 +461,6 @@ export class RecipesService {
                     },
                 });
             }
-            // 将找到的或创建的ID回写到DTO对象中，供后续使用
             ing.ingredientId = existingIngredient.id;
         }
     }
@@ -509,7 +476,6 @@ export class RecipesService {
                     include: {
                         products: true,
                         components: {
-                            // [核心重命名] doughs -> components
                             include: {
                                 _count: {
                                     select: { ingredients: true },
@@ -571,12 +537,22 @@ export class RecipesService {
         };
     }
 
+    // [核心改造] 重构 findProductsForTasks 方法，使其返回按品类分组的产品
     async findProductsForTasks(tenantId: string) {
         const recipeFamilies = await this.prisma.recipeFamily.findMany({
             where: {
                 tenantId,
                 type: 'MAIN',
                 deletedAt: null,
+                // [核心新增] 只查询那些拥有至少一个产品的配方
+                versions: {
+                    some: {
+                        isActive: true,
+                        products: {
+                            some: {},
+                        },
+                    },
+                },
             },
             include: {
                 versions: {
@@ -595,10 +571,6 @@ export class RecipesService {
         const familiesWithProductionCount = await Promise.all(
             recipeFamilies.map(async (family) => {
                 const activeVersion = family.versions[0];
-                if (!activeVersion || activeVersion.products.length === 0) {
-                    return { ...family, productionTaskCount: 0 };
-                }
-
                 const productIds = activeVersion.products.map((p) => p.id);
 
                 const taskCount = await this.prisma.productionTaskItem.count({
@@ -620,15 +592,22 @@ export class RecipesService {
 
         familiesWithProductionCount.sort((a, b) => b.productionTaskCount - a.productionTaskCount);
 
-        const groupedProducts: Record<string, { id: string; name: string }[]> = {};
+        // [核心修复] 为累加器提供明确的类型定义，以解决所有 ESLint unsafe 错误
+        const groupedByCategory: Record<string, Record<string, { id: string; name: string }[]>> = {};
+
         familiesWithProductionCount.forEach((family) => {
+            const category = family.category;
             const activeVersion = family.versions[0];
+
             if (activeVersion && activeVersion.products.length > 0) {
-                if (!groupedProducts[family.name]) {
-                    groupedProducts[family.name] = [];
+                if (!groupedByCategory[category]) {
+                    groupedByCategory[category] = {};
+                }
+                if (!groupedByCategory[category][family.name]) {
+                    groupedByCategory[category][family.name] = [];
                 }
                 activeVersion.products.forEach((product) => {
-                    groupedProducts[family.name].push({
+                    groupedByCategory[category][family.name].push({
                         id: product.id,
                         name: product.name,
                     });
@@ -636,7 +615,7 @@ export class RecipesService {
             }
         });
 
-        return groupedProducts;
+        return groupedByCategory;
     }
 
     async findOne(familyId: string) {
@@ -648,7 +627,6 @@ export class RecipesService {
                 versions: {
                     include: {
                         components: {
-                            // [核心重命名] doughs -> components
                             include: {
                                 ingredients: {
                                     include: {
@@ -659,7 +637,6 @@ export class RecipesService {
                                                     where: { isActive: true },
                                                     include: {
                                                         components: {
-                                                            // [核心重命名] doughs -> components
                                                             include: {
                                                                 ingredients: {
                                                                     include: {
@@ -712,7 +689,6 @@ export class RecipesService {
             include: {
                 family: true,
                 components: {
-                    // [核心重命名] doughs -> components
                     include: {
                         ingredients: {
                             include: {
@@ -723,7 +699,6 @@ export class RecipesService {
                                             where: { isActive: true },
                                             include: {
                                                 components: {
-                                                    // [核心重命名] doughs -> components
                                                     include: {
                                                         ingredients: { include: { ingredient: true } },
                                                     },
@@ -762,7 +737,7 @@ export class RecipesService {
             return {
                 name: version.family.name,
                 type: version.family.type,
-                category: version.family.category, // [核心修复] 增加 category 字段
+                category: version.family.category,
                 notes: version.notes || '',
                 ingredients: componentSource.ingredients
                     .filter((ing) => ing.ingredient && ing.ratio !== null)
@@ -850,7 +825,7 @@ export class RecipesService {
         const formTemplate: RecipeFormTemplateDto = {
             name: version.family.name,
             type: 'MAIN',
-            category: version.family.category, // [核心修复] 增加 category 字段
+            category: version.family.category,
             notes: version.notes || '',
             targetTemp: mainComponentSource.targetTemp?.toNumber() ?? undefined,
             doughs: [mainDoughObjectForForm, ...preDoughObjectsForForm],
@@ -1058,7 +1033,7 @@ export class RecipesService {
             include: {
                 versions: {
                     where: { isActive: true },
-                    include: { components: { include: { ingredients: true } } }, // [核心重命名] doughs -> components
+                    include: { components: { include: { ingredients: true } } },
                 },
             },
         });
@@ -1073,7 +1048,7 @@ export class RecipesService {
         for (const ing of ingredients) {
             if (ing.flourRatio !== undefined && ing.flourRatio !== null) {
                 const preDoughFamily = preDoughFamilies.get(ing.name);
-                const preDoughRecipe = preDoughFamily?.versions[0]?.components[0]; // [核心重命名] doughs -> components
+                const preDoughRecipe = preDoughFamily?.versions[0]?.components[0];
 
                 if (!preDoughRecipe) {
                     throw new BadRequestException(`名为 "${ing.name}" 的预制面团配方不存在或未激活。`);
@@ -1093,10 +1068,14 @@ export class RecipesService {
         }
     }
 
-    // [核心改造] 增加 category 参数，并根据其值决定是否执行验证
-    private _validateBakerPercentage(category: RecipeCategory, ingredients: DoughIngredientDto[]) {
-        // [核心改造] 如果品类不是面包，则直接跳过验证
-        if (category !== RecipeCategory.BREAD) {
+    // [核心改造] 更新烘焙百分比验证逻辑
+    private _validateBakerPercentage(
+        type: RecipeType,
+        category: RecipeCategory | undefined,
+        ingredients: DoughIngredientDto[],
+    ) {
+        // [核心逻辑] 当品类为面包，或者类型为面种时，执行验证
+        if (category !== RecipeCategory.BREAD && type !== RecipeType.PRE_DOUGH) {
             return;
         }
 
@@ -1110,7 +1089,6 @@ export class RecipesService {
             }
         }
 
-        // 使用 Decimal.js 的 `sub` 和 `abs` 方法进行高精度比较
         if (totalFlourRatio.sub(1).abs().gt(0.001)) {
             throw new BadRequestException(
                 `配方验证失败：所有面粉类原料（包括用于制作预制面团的面粉）的比例总和必须为100%。当前计算总和为: ${totalFlourRatio
