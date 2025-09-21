@@ -10,7 +10,7 @@ import {
     IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ProductIngredientType, RecipeType } from '@prisma/client';
+import { ProductIngredientType, RecipeCategory, RecipeType } from '@prisma/client'; // [核心修改] 导入 RecipeCategory
 
 // [核心修正] 导出 ProductIngredientDto 以在其他文件中使用
 // 用于产品中附加原料（搅拌、馅料、装饰）的DTO
@@ -114,6 +114,11 @@ export class CreateRecipeDto {
     @IsEnum(RecipeType)
     @IsOptional()
     type?: RecipeType; // 'MAIN', 'PRE_DOUGH', 'EXTRA'
+
+    // [核心新增] 增加 category 字段，允许前端指定配方品类
+    @IsEnum(RecipeCategory)
+    @IsOptional()
+    category?: RecipeCategory;
 
     @IsString()
     @IsOptional()

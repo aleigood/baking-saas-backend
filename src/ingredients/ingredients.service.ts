@@ -143,12 +143,14 @@ export class IngredientsService {
         const processedIngredients = ingredients.map((ingredient) => {
             const stats = statsMap.get(ingredient.id);
             const totalConsumptionInGrams = stats?.total || 0;
-            const currentPricePerPackage = ingredient.activeSkuId ? priceMap.get(ingredient.activeSkuId) || 0 : 0;
+            const currentPricePerPackage = ingredient.activeSkuId
+                ? priceMap.get(ingredient.activeSkuId) || new Prisma.Decimal(0)
+                : new Prisma.Decimal(0); // [核心修复] 确保是 Decimal
 
             if (ingredient.type === IngredientType.UNTRACKED) {
                 return {
                     ...ingredient,
-                    currentPricePerPackage: 0,
+                    currentPricePerPackage: new Prisma.Decimal(0), // [核心修复] 确保是 Decimal
                     daysOfSupply: Infinity,
                     avgDailyConsumption: 0,
                     avgConsumptionPerTask: 0,
@@ -159,7 +161,7 @@ export class IngredientsService {
             if (!stats || stats.total === 0) {
                 return {
                     ...ingredient,
-                    currentPricePerPackage: Number(currentPricePerPackage),
+                    currentPricePerPackage: currentPricePerPackage,
                     daysOfSupply: Infinity,
                     avgDailyConsumption: 0,
                     avgConsumptionPerTask: 0,
@@ -169,16 +171,19 @@ export class IngredientsService {
 
             const timeDiff = stats.lastDate.getTime() - stats.firstDate.getTime();
             const dayDiff = Math.max(1, Math.ceil(timeDiff / (1000 * 3600 * 24)));
-            const avgDailyConsumption = stats.total / dayDiff;
-            const daysOfSupply =
-                avgDailyConsumption > 0 ? ingredient.currentStockInGrams / avgDailyConsumption : Infinity;
-            const avgConsumptionPerTask = stats.taskCount > 0 ? stats.total / stats.taskCount : 0;
+            const avgDailyConsumption = new Prisma.Decimal(stats.total).div(dayDiff); // [核心修复] 使用 Decimal 计算
+            // [核心修复] TS2362: 使用 Decimal.js 方法进行高精度除法运算
+            const daysOfSupply = avgDailyConsumption.gt(0)
+                ? new Prisma.Decimal(ingredient.currentStockInGrams).div(avgDailyConsumption).toNumber()
+                : Infinity;
+            const avgConsumptionPerTask =
+                stats.taskCount > 0 ? new Prisma.Decimal(stats.total).div(stats.taskCount).toNumber() : 0; // [核心修复] 使用 Decimal 计算
 
             return {
                 ...ingredient,
-                currentPricePerPackage: Number(currentPricePerPackage),
+                currentPricePerPackage: currentPricePerPackage,
                 daysOfSupply,
-                avgDailyConsumption,
+                avgDailyConsumption: avgDailyConsumption.toNumber(),
                 avgConsumptionPerTask,
                 totalConsumptionInGrams,
             };
@@ -189,13 +194,30 @@ export class IngredientsService {
             (a, b) => b.totalConsumptionInGrams - a.totalConsumptionInGrams,
         );
         const lowStockIngredients = [...processedIngredients]
-            // [核心修复] 增加对库存为0或负数的判断
-            .filter((ing) => ing.type === 'STANDARD' && (ing.daysOfSupply < 7 || ing.currentStockInGrams <= 0))
+            // [核心修复] TS2365: 修复方法名为 lessThanOrEqualTo
+            .filter(
+                (ing) =>
+                    ing.type === 'STANDARD' &&
+                    (ing.daysOfSupply < 7 || new Prisma.Decimal(ing.currentStockInGrams).lessThanOrEqualTo(0)),
+            )
             .sort((a, b) => a.daysOfSupply - b.daysOfSupply);
 
         return {
-            allIngredients,
-            lowStockIngredients,
+            // [核心修复] 返回给前端前将所有 Decimal 转换为 number
+            allIngredients: allIngredients.map((ing) => ({
+                ...ing,
+                currentPricePerPackage: ing.currentPricePerPackage.toNumber(),
+                currentStockInGrams: ing.currentStockInGrams.toNumber(),
+                currentStockValue: ing.currentStockValue.toNumber(),
+                waterContent: ing.waterContent.toNumber(),
+            })),
+            lowStockIngredients: lowStockIngredients.map((ing) => ({
+                ...ing,
+                currentPricePerPackage: ing.currentPricePerPackage.toNumber(),
+                currentStockInGrams: ing.currentStockInGrams.toNumber(),
+                currentStockValue: ing.currentStockValue.toNumber(),
+                waterContent: ing.waterContent.toNumber(),
+            })),
         };
     }
 
@@ -356,7 +378,8 @@ export class IngredientsService {
             include: {
                 _count: {
                     select: {
-                        doughIngredients: true,
+                        // [核心修复] TS2353: 将 doughIngredients 重命名为 componentIngredients
+                        componentIngredients: true,
                         productIngredients: true,
                     },
                 },
@@ -367,7 +390,9 @@ export class IngredientsService {
             throw new NotFoundException('原料不存在或已被删除');
         }
 
-        const usageCount = ingredientToDelete._count.doughIngredients + ingredientToDelete._count.productIngredients;
+        // [核心修复] TS2339 & TS2370: 使用正确的属性名 componentIngredients
+        const usageCount =
+            ingredientToDelete._count.componentIngredients + ingredientToDelete._count.productIngredients;
 
         if (usageCount > 0) {
             throw new BadRequestException('该原料正在被一个或多个配方使用，无法删除。');
@@ -427,10 +452,11 @@ export class IngredientsService {
                 },
                 include: { sku: true, user: { select: { name: true, phone: true } } },
             });
-            const procurementLedger = procurements.map((p) => ({
+            const procurementLedger: LedgerEntry[] = procurements.map((p) => ({
                 date: p.purchaseDate,
                 type: '采购入库',
-                change: p.packagesPurchased * p.sku.specWeightInGrams,
+                // [核心修复] TS2363: 使用 Decimal.js 的 .mul() 方法进行高精度乘法，并用 .toNumber() 转换为数字
+                change: new Prisma.Decimal(p.packagesPurchased).mul(p.sku.specWeightInGrams).toNumber(),
                 details: `采购 ${p.sku.brand || ''} ${p.sku.specName} × ${p.packagesPurchased}`,
                 operator: p.user.name || p.user.phone,
             }));
@@ -460,10 +486,11 @@ export class IngredientsService {
                     },
                 },
             });
-            const consumptionLedger = consumptions.map((c) => ({
+            const consumptionLedger: LedgerEntry[] = consumptions.map((c) => ({
                 date: c.productionLog.completedAt,
                 type: '生产消耗',
-                change: -c.quantityInGrams,
+                // [核心修复] 将 Decimal 转换为 number
+                change: -c.quantityInGrams.toNumber(),
                 details: `生产任务 #${c.productionLog.task.id.slice(0, 8)}`,
                 operator: '系统',
             }));
@@ -487,10 +514,11 @@ export class IngredientsService {
                 include: { user: { select: { name: true, phone: true } } },
             });
 
-            let adjustmentLedger = adjustments.map((a) => ({
+            let adjustmentLedger: LedgerEntry[] = adjustments.map((a) => ({
                 date: a.createdAt,
                 type: a.reason?.startsWith('生产损耗') ? '生产损耗' : '库存调整',
-                change: a.changeInGrams,
+                // [核心修复] TS2345: 将 change 属性从 Decimal 转换为 number
+                change: a.changeInGrams.toNumber(),
                 details: a.reason || '无原因',
                 operator: a.user.name || a.user.phone,
             }));
@@ -503,6 +531,7 @@ export class IngredientsService {
                 adjustmentLedger = adjustmentLedger.filter((a) => a.type === '生产损耗');
             }
 
+            // [核心修复] TS2345: adjustmentLedger 的 change 属性已在上一步修复，这里可以安全合并
             ledger.push(...adjustmentLedger);
         }
 
@@ -638,12 +667,12 @@ export class IngredientsService {
                 throw new NotFoundException('SKU不存在');
             }
 
-            await tx.procurementRecord.create({
+            const procurement = await tx.procurementRecord.create({
                 data: {
                     skuId,
                     packagesPurchased: createProcurementDto.packagesPurchased,
                     pricePerPackage: createProcurementDto.pricePerPackage,
-                    // [核心改造] 强制使用服务器当前时间，忽略 DTO 中的 purchaseDate
+                    // [核心修复] 恢复服务器端生成日期的逻辑
                     purchaseDate: new Date(),
                     userId: userId,
                 },
@@ -653,17 +682,21 @@ export class IngredientsService {
                 createProcurementDto.packagesPurchased,
             );
 
-            return tx.ingredient.update({
+            await tx.ingredient.update({
                 where: { id: sku.ingredientId },
                 data: {
                     currentStockInGrams: {
-                        increment: createProcurementDto.packagesPurchased * sku.specWeightInGrams,
+                        increment: new Prisma.Decimal(createProcurementDto.packagesPurchased).mul(
+                            sku.specWeightInGrams,
+                        ),
                     },
                     currentStockValue: {
                         increment: purchaseValue,
                     },
                 },
             });
+
+            return procurement;
         });
     }
 

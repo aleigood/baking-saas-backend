@@ -43,7 +43,7 @@ export interface PrepTask {
     items: CalculatedRecipeDetails[];
 }
 
-// [核心修复] 更新类型定义，使其与 findOne 中的 Prisma 查询完全匹配，特别是对 linkedPreDough 的深度嵌套
+// [核心修复] 更新类型定义，使其与 findOne 中的 Prisma 查询完全匹配
 const taskWithDetailsInclude = {
     items: {
         include: {
@@ -52,7 +52,8 @@ const taskWithDetailsInclude = {
                     recipeVersion: {
                         include: {
                             family: true,
-                            doughs: {
+                            components: {
+                                // [核心重命名]
                                 include: {
                                     ingredients: {
                                         include: {
@@ -62,7 +63,8 @@ const taskWithDetailsInclude = {
                                                     versions: {
                                                         where: { isActive: true },
                                                         include: {
-                                                            doughs: {
+                                                            components: {
+                                                                // [核心重命名]
                                                                 include: {
                                                                     ingredients: {
                                                                         include: {
@@ -91,13 +93,11 @@ const taskWithDetailsInclude = {
             },
         },
     },
-    // [核心修正] 将关联字段名从 productionLog 改为 log，以匹配 schema.prisma 定义
     log: {
         select: {
             recipeSnapshot: true,
         },
     },
-    // [核心新增] 在查询任务时，预加载创建者的信息
     createdBy: {
         select: {
             name: true,
@@ -112,11 +112,11 @@ type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
 
 type TaskItemWithDetails = TaskWithDetails['items'][0];
 type ProductWithDetails = TaskItemWithDetails['product'];
-type DoughWithRecursiveIngredients = ProductWithDetails['recipeVersion']['doughs'][0];
+type ComponentWithRecursiveIngredients = ProductWithDetails['recipeVersion']['components'][0]; // [核心重命名]
 
 // [核心修复] 为 prepare task 中的对象定义明确的类型，以消除 'any' 警告
 type PrepItemFamily = RecipeFamily;
-type RequiredPrepItem = { family: PrepItemFamily; totalWeight: number };
+type RequiredPrepItem = { family: PrepItemFamily; totalWeight: Prisma.Decimal }; // [核心修改] totalWeight to Decimal
 
 // [核心修复] 为扁平化后的原料对象定义明确的类型
 type FlattenedIngredient = {
@@ -128,9 +128,9 @@ type FlattenedIngredient = {
     recipeType?: RecipeType;
     recipeFamily?: PrepItemFamily;
     type?: ProductIngredientType;
-    ratio?: number;
-    weightInGrams?: number;
-    waterContent?: number; // [核心修改] 新增含水量字段，用于精确计算总水量
+    ratio?: Prisma.Decimal;
+    weightInGrams?: Prisma.Decimal;
+    waterContent?: Prisma.Decimal;
 };
 
 @Injectable()
@@ -149,27 +149,16 @@ export class ProductionTasksService {
             return 0;
         }
         const ice = (totalWater * (initialWaterTemp - targetWaterTemp)) / (initialWaterTemp + 80);
-        // [FIX] 移除 Math.round()，保留计算精度，避免将小于0.5的数值归零
         return ice;
     }
 
-    /**
-     * [核心新增] 反向计算当所有水都换成冰块时，其他液体原料需要达到的温度
-     * (New: Reverse calculate the required temperature for other liquid ingredients when all water is replaced by ice)
-     * @param targetWaterTemp 目标水温 (摄氏度)
-     * @param totalRecipeWater 配方总水量 (克)
-     * @param availableWaterToReplace 可用于替换成冰的水量 (克)
-     * @returns 其他液体原料需要达到的温度 (摄氏度)
-     */
     private _calculateRequiredWetIngredientTemp(
         targetWaterTemp: number,
         totalRecipeWater: number,
         availableWaterToReplace: number,
     ): number {
-        // 公式 T_required = (-TotalWater * T_targetWater - 80 * AllAvailableWater) / (AllAvailableWater - TotalWater)
-        // 该公式确保即使总水量为0，也不会出现除以0的错误
         if (availableWaterToReplace - totalRecipeWater === 0) {
-            return 0; // 或者一个合理的默认值
+            return 0;
         }
         return (
             (-totalRecipeWater * targetWaterTemp - 80 * availableWaterToReplace) /
@@ -177,23 +166,87 @@ export class ProductionTasksService {
         );
     }
 
+    // [核心重构] 实现递归的前置任务解析
     private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<PrepTask | null> {
         if (!task || !task.items || task.items.length === 0) {
             return null;
         }
 
         const requiredPrepItems = new Map<string, RequiredPrepItem>();
+        const visitedRecipes = new Set<string>(); // 用于防止无限递归
 
+        // 递归函数，用于解析单个配方的所有依赖
+        const resolveDependencies = async (familyId: string, requiredWeight: Prisma.Decimal) => {
+            if (visitedRecipes.has(familyId)) return; // 防止循环依赖导致的死循环
+            visitedRecipes.add(familyId);
+
+            const recipeFamily = await this.prisma.recipeFamily.findFirst({
+                where: { id: familyId, tenantId, deletedAt: null },
+                include: {
+                    versions: {
+                        where: { isActive: true },
+                        include: {
+                            components: {
+                                include: {
+                                    ingredients: {
+                                        include: {
+                                            ingredient: true,
+                                            linkedPreDough: true,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            if (!recipeFamily || !recipeFamily.versions[0]?.components[0]) return;
+
+            const activeVersion = recipeFamily.versions[0];
+            const mainComponent = activeVersion.components[0];
+
+            const totalRatio = mainComponent.ingredients.reduce(
+                (sum, ing) => sum.add(new Prisma.Decimal(ing.ratio ?? 0)),
+                new Prisma.Decimal(0),
+            );
+
+            if (totalRatio.isZero()) return;
+
+            const weightPerRatioPoint = requiredWeight.div(totalRatio);
+
+            for (const ing of mainComponent.ingredients) {
+                const weight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
+
+                // 如果原料本身是另一个配方 (PRE_DOUGH or EXTRA)，则递归解析
+                if (ing.linkedPreDough) {
+                    const existing = requiredPrepItems.get(ing.linkedPreDough.id);
+                    if (existing) {
+                        existing.totalWeight = existing.totalWeight.add(weight);
+                    } else {
+                        requiredPrepItems.set(ing.linkedPreDough.id, {
+                            family: ing.linkedPreDough,
+                            totalWeight: weight,
+                        });
+                    }
+                    // 递归深入
+                    await resolveDependencies(ing.linkedPreDough.id, weight);
+                }
+            }
+        };
+
+        // 遍历任务中的所有产品，启动第一层依赖解析
         for (const item of task.items) {
             const product = item.product;
             if (!product) continue;
 
             const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
-            for (const dough of product.recipeVersion.doughs) {
-                for (const ing of dough.ingredients) {
+            // 解析配方组件中的子配方
+            for (const component of product.recipeVersion.components) {
+                for (const ing of component.ingredients) {
                     if (ing.linkedPreDough && ing.flourRatio) {
-                        const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.doughs[0];
+                        const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.components[0];
                         if (preDoughRecipe) {
                             const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
                                 (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
@@ -202,40 +255,42 @@ export class ProductionTasksService {
                             const weight = totalFlourWeight
                                 .mul(ing.flourRatio)
                                 .mul(preDoughTotalRatio)
-                                .mul(item.quantity)
-                                .toNumber();
+                                .mul(item.quantity);
 
                             const existing = requiredPrepItems.get(ing.linkedPreDough.id);
                             if (existing) {
-                                existing.totalWeight += weight;
+                                existing.totalWeight = existing.totalWeight.add(weight);
                             } else {
                                 requiredPrepItems.set(ing.linkedPreDough.id, {
                                     family: ing.linkedPreDough,
                                     totalWeight: weight,
                                 });
                             }
+                            await resolveDependencies(ing.linkedPreDough.id, weight);
                         }
                     }
                 }
             }
 
+            // 解析产品附加原料中的子配方
             for (const pIng of product.ingredients) {
                 if (pIng.linkedExtra) {
-                    let weight = 0;
+                    let weight = new Prisma.Decimal(0);
                     if (pIng.weightInGrams) {
-                        weight = pIng.weightInGrams * item.quantity;
+                        weight = new Prisma.Decimal(pIng.weightInGrams).mul(item.quantity);
                     } else if (pIng.ratio && pIng.type === 'MIX_IN') {
-                        weight = totalFlourWeight.mul(pIng.ratio).mul(item.quantity).toNumber();
+                        weight = totalFlourWeight.mul(pIng.ratio).mul(item.quantity);
                     }
                     const existing = requiredPrepItems.get(pIng.linkedExtra.id);
                     if (existing) {
-                        existing.totalWeight += weight;
+                        existing.totalWeight = existing.totalWeight.add(weight);
                     } else {
                         requiredPrepItems.set(pIng.linkedExtra.id, {
                             family: pIng.linkedExtra,
                             totalWeight: weight,
                         });
                     }
+                    await resolveDependencies(pIng.linkedExtra.id, weight);
                 }
             }
         }
@@ -246,7 +301,11 @@ export class ProductionTasksService {
 
         const prepTaskItems: CalculatedRecipeDetails[] = [];
         for (const [id, data] of requiredPrepItems.entries()) {
-            const details = await this.costingService.getCalculatedRecipeDetails(tenantId, id, data.totalWeight);
+            const details = await this.costingService.getCalculatedRecipeDetails(
+                tenantId,
+                id,
+                data.totalWeight.toNumber(),
+            );
             prepTaskItems.push(details);
         }
 
@@ -262,9 +321,6 @@ export class ProductionTasksService {
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
-            // [核心修复] 调整了日期验证逻辑，以兼容小程序可能传来的无效日期字符串
-            // 如果解析出的日期无效（例如，当 date 是 ''、'undefined' 或 'null' 时），
-            // 则静默地回退到使用当前日期，而不是抛出错误，从而提高接口的容错性。
             if (isNaN(targetDate.getTime())) {
                 targetDate = new Date();
             }
@@ -272,7 +328,6 @@ export class ProductionTasksService {
             targetDate = new Date();
         }
 
-        // [核心修复] 创建新的Date对象，避免对 targetDate 的重复修改
         const startOfDay = new Date(targetDate);
         startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(targetDate);
@@ -293,83 +348,19 @@ export class ProductionTasksService {
             return null;
         }
 
-        const requiredPrepItems = new Map<string, RequiredPrepItem>();
+        const combinedPrepTask = await this._getPrepItemsForTask(tenantId, {
+            ...activeTasks[0], // Use a base task structure
+            items: activeTasks.flatMap((task) => task.items), // Combine all items from all tasks
+        });
 
-        for (const task of activeTasks) {
-            for (const item of task.items) {
-                const product = item.product;
-                const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
-
-                for (const dough of product.recipeVersion.doughs) {
-                    for (const ing of dough.ingredients) {
-                        if (ing.linkedPreDough && ing.flourRatio) {
-                            const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.doughs[0];
-                            if (preDoughRecipe) {
-                                const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
-                                    (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
-                                    new Prisma.Decimal(0),
-                                );
-                                const weight = totalFlourWeight
-                                    .mul(ing.flourRatio)
-                                    .mul(preDoughTotalRatio)
-                                    .mul(item.quantity)
-                                    .toNumber();
-
-                                const existing = requiredPrepItems.get(ing.linkedPreDough.id);
-                                if (existing) {
-                                    existing.totalWeight += weight;
-                                } else {
-                                    requiredPrepItems.set(ing.linkedPreDough.id, {
-                                        family: ing.linkedPreDough,
-                                        totalWeight: weight,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-
-                for (const pIng of product.ingredients) {
-                    if (pIng.linkedExtra) {
-                        let weight = 0;
-                        if (pIng.weightInGrams) {
-                            weight = pIng.weightInGrams * item.quantity;
-                        } else if (pIng.ratio && pIng.type === 'MIX_IN') {
-                            weight = totalFlourWeight.mul(pIng.ratio).mul(item.quantity).toNumber();
-                        }
-                        const existing = requiredPrepItems.get(pIng.linkedExtra.id);
-                        if (existing) {
-                            existing.totalWeight += weight;
-                        } else {
-                            requiredPrepItems.set(pIng.linkedExtra.id, {
-                                family: pIng.linkedExtra,
-                                totalWeight: weight,
-                            });
-                        }
-                    }
-                }
-            }
+        if (combinedPrepTask) {
+            combinedPrepTask.id = 'prep-task-combined';
+            combinedPrepTask.title = '前置准备任务';
         }
 
-        if (requiredPrepItems.size === 0) {
-            return null;
-        }
-
-        const prepTaskItems: CalculatedRecipeDetails[] = [];
-        for (const [id, data] of requiredPrepItems.entries()) {
-            const details = await this.costingService.getCalculatedRecipeDetails(tenantId, id, data.totalWeight);
-            prepTaskItems.push(details);
-        }
-
-        return {
-            id: 'prep-task-01',
-            title: '前置准备任务',
-            details: `包含 ${prepTaskItems.length} 种预制件`,
-            items: prepTaskItems,
-        };
+        return combinedPrepTask;
     }
 
-    // [核心修正] 更新 create 方法的签名以接收 userId
     async create(tenantId: string, userId: string, createProductionTaskDto: CreateProductionTaskDto) {
         const { startDate, endDate, notes, products } = createProductionTaskDto;
 
@@ -429,7 +420,7 @@ export class ProductionTasksService {
 
             for (const consumption of finalConsumptions) {
                 const ingredient = ingredientStockMap.get(consumption.ingredientId);
-                if (ingredient && ingredient.currentStockInGrams < consumption.totalConsumed) {
+                if (ingredient && new Prisma.Decimal(ingredient.currentStockInGrams).lt(consumption.totalConsumed)) {
                     insufficientIngredients.push(ingredient.name);
                 }
             }
@@ -445,7 +436,7 @@ export class ProductionTasksService {
                 endDate,
                 notes,
                 tenantId,
-                createdById: userId, // [核心修正] 关联创建任务的用户
+                createdById: userId,
                 items: {
                     create: products.map((p) => ({
                         productId: p.productId,
@@ -459,7 +450,6 @@ export class ProductionTasksService {
                         product: true,
                     },
                 },
-                // [核心新增] 返回创建者信息以便前端立即显示
                 createdBy: {
                     select: {
                         name: true,
@@ -473,7 +463,6 @@ export class ProductionTasksService {
     }
 
     async findActive(tenantId: string, date?: string) {
-        // [核心修改] 将对 getTodaysPendingStats 的调用改为 getPendingStatsForDate，并传入日期
         const [tasksForDate, dateStats] = await Promise.all([
             this.findTasksForDate(tenantId, date),
             this.getPendingStatsForDate(tenantId, date),
@@ -481,46 +470,30 @@ export class ProductionTasksService {
 
         const prepTask = await this._getPrepTask(tenantId, date);
 
-        // [核心重构] 在后端对常规任务进行排序
         const inProgressTasks = tasksForDate.filter((task) => task.status === 'IN_PROGRESS');
         const pendingTasks = tasksForDate.filter((task) => task.status === 'PENDING');
 
-        // 进行中任务按开始日期降序
         inProgressTasks.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
-        // 待开始任务按开始日期升序
         pendingTasks.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
 
         const sortedRegularTasks = [...inProgressTasks, ...pendingTasks];
 
-        // [核心重构] 在后端合并任务列表
         const combinedTasks: (ProductionTask | (PrepTask & { status: 'PREP' }))[] = [...sortedRegularTasks];
         if (prepTask) {
-            // 将 prepTask 转换为与 ProductionTaskDto 兼容的结构并插入到列表开头
             combinedTasks.unshift({ ...prepTask, status: 'PREP' });
         }
 
         return {
-            stats: dateStats, // [核心修改] 返回新的统计数据
-            // [核心修改] tasks 字段现在是包含 prepTask (如果存在) 并已排序的完整列表
+            stats: dateStats,
             tasks: combinedTasks,
-            // [核心修改] prepTask 字段不再单独返回，将其设为 null 以保持 API 结构一致性
             prepTask: null,
         };
     }
 
-    /**
-     * @description [核心新增] 这是一个内部辅助函数，用于查询指定日期的任务
-     * @param tenantId 租户ID
-     * @param date 日期字符串
-     * @returns 返回任务列表
-     */
     private async findTasksForDate(tenantId: string, date?: string) {
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
-            // [核心修复] 调整了日期验证逻辑，以兼容小程序可能传来的无效日期字符串
-            // 如果解析出的日期无效（例如，当 date 是 ''、'undefined' 或 'null' 时），
-            // 则静默地回退到使用当前日期，而不是抛出错误，从而提高接口的容错性。
             if (isNaN(targetDate.getTime())) {
                 targetDate = new Date();
             }
@@ -528,7 +501,6 @@ export class ProductionTasksService {
             targetDate = new Date();
         }
 
-        // [核心修复] 创建新的Date对象副本进行修改，避免污染原始的targetDate对象
         const startOfDay = new Date(targetDate);
         startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(targetDate);
@@ -569,7 +541,6 @@ export class ProductionTasksService {
                         },
                     },
                 },
-                // [核心新增] 在查询任务列表时也一并返回创建者信息
                 createdBy: {
                     select: {
                         name: true,
@@ -583,14 +554,7 @@ export class ProductionTasksService {
         });
     }
 
-    /**
-     * @description [核心修改] 此函数现在根据传入的日期计算待完成任务总数
-     * @param tenantId 租户ID
-     * @param date 'YYYY-MM-DD' 格式的日期字符串 (可选)
-     * @returns 返回包含指定日期待完成数量的对象
-     */
     private async getPendingStatsForDate(tenantId: string, date?: string) {
-        // [核心修改] 使用与 findTasksForDate 相同的逻辑来确定目标日期
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
@@ -619,7 +583,6 @@ export class ProductionTasksService {
                     in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
                 },
                 deletedAt: null,
-                // [核心修改] 使用目标日期的开始和结束时间进行过滤
                 startDate: {
                     lte: endOfDay,
                 },
@@ -644,22 +607,15 @@ export class ProductionTasksService {
         }, 0);
 
         return {
-            // [核心改造] 将 todayPendingCount 重命名为 pendingCount
             pendingCount: pendingCount,
         };
     }
 
-    /**
-     * [新增] 获取所有任务的日期
-     * @param tenantId
-     * @returns
-     */
     async getTaskDates(tenantId: string) {
         const tasks = await this.prisma.productionTask.findMany({
             where: {
                 tenantId,
                 deletedAt: null,
-                // [核心修复] 同时排除已完成和已取消的任务
                 status: {
                     in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
                 },
@@ -672,11 +628,9 @@ export class ProductionTasksService {
 
         const dates = new Set<string>();
         tasks.forEach((task) => {
-            // [修改] 将 let 改为 const 以修复 eslint 警告
             const current = new Date(task.startDate);
             const end = task.endDate ? new Date(task.endDate) : new Date(task.startDate);
 
-            // 确保我们将日期设置为午夜，以避免时区问题
             current.setUTCHours(0, 0, 0, 0);
             end.setUTCHours(0, 0, 0, 0);
 
@@ -689,7 +643,6 @@ export class ProductionTasksService {
         return Array.from(dates);
     }
 
-    // [核心新增] 获取损耗阶段列表
     getSpoilageStages() {
         return spoilageStages;
     }
@@ -721,7 +674,6 @@ export class ProductionTasksService {
                         },
                     },
                 },
-                // [核心新增] 在查询历史任务时也一并返回创建者信息
                 createdBy: {
                     select: {
                         name: true,
@@ -729,7 +681,6 @@ export class ProductionTasksService {
                     },
                 },
             },
-            // [核心修改] 将排序字段从 startDate 改为 updatedAt，以反映真实的完成/取消时间
             orderBy: {
                 updatedAt: 'desc',
             },
@@ -737,23 +688,18 @@ export class ProductionTasksService {
             take: limitNum,
         });
 
-        // [核心重构] 在服务端完成分组逻辑
-        const groupedTasks = tasks.reduce(
-            (acc: Record<string, ProductionTask[]>, task) => {
-                // [核心修改] 分组的日期依据也改为 updatedAt
-                const date = new Date(task.updatedAt).toLocaleDateString('zh-CN', {
-                    month: 'long',
-                    day: 'numeric',
-                    weekday: 'long',
-                });
-                if (!acc[date]) {
-                    acc[date] = [];
-                }
-                acc[date].push(task);
-                return acc;
-            },
-            {}, // 初始值为空对象
-        );
+        const groupedTasks = tasks.reduce((acc: Record<string, ProductionTask[]>, task) => {
+            const date = new Date(task.updatedAt).toLocaleDateString('zh-CN', {
+                month: 'long',
+                day: 'numeric',
+                weekday: 'long',
+            });
+            if (!acc[date]) {
+                acc[date] = [];
+            }
+            acc[date].push(task);
+            return acc;
+        }, {});
 
         const totalTasks = await this.prisma.productionTask.count({ where });
 
@@ -769,7 +715,6 @@ export class ProductionTasksService {
         };
     }
 
-    // [核心重构] 将 findOne 拆分为多个更小的、可管理的私有方法
     async findOne(tenantId: string, id: string, query: QueryTaskDetailDto): Promise<TaskDetailResponseDto> {
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
@@ -780,16 +725,12 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
-        // [核心改造] 如果是已完成任务且有快照，则使用快照数据；否则使用实时数据
-        // [核心修正] 将关联字段名从 task.productionLog 改为 task.log，以匹配 schema.prisma 定义
         const isCompletedWithSnapshot = task.status === 'COMPLETED' && task.log?.recipeSnapshot;
 
         const taskDataForCalc = isCompletedWithSnapshot
-            ? // [核心修正] 使用非空断言(!)来告诉TypeScript，在此上下文中task.log必然存在
-              (task.log!.recipeSnapshot as unknown as TaskWithDetails)
+            ? (task.log!.recipeSnapshot as unknown as TaskWithDetails)
             : task;
 
-        // [核心改造] 将用于计算的数据源 (实时或快照) 传递给计算函数
         const doughGroups = this._calculateDoughGroups(taskDataForCalc, query, task.items);
         const { stockWarning } = await this._calculateStockWarning(tenantId, task);
 
@@ -798,7 +739,7 @@ export class ProductionTasksService {
             status: task.status,
             notes: task.notes,
             stockWarning,
-            prepTask: await this._getPrepItemsForTask(tenantId, task), // 备料任务总是基于实时数据
+            prepTask: await this._getPrepItemsForTask(tenantId, task),
             doughGroups,
             items: task.items.map((item) => ({
                 id: item.product.id,
@@ -808,12 +749,6 @@ export class ProductionTasksService {
         };
     }
 
-    /**
-     * @description [核心重构] 恢复并优化了递归逻辑，以正确展示面种及其原料
-     * @param task [核心改造] 此参数现在可以是实时的任务数据，也可以是历史快照数据
-     * @param query 查询参数
-     * @param originalItems [核心新增] 总是传入原始的任务项以获取正确的计划生产数量
-     */
     private _calculateDoughGroups(
         task: TaskWithDetails,
         query: QueryTaskDetailDto,
@@ -823,11 +758,9 @@ export class ProductionTasksService {
         const canCalculateIce =
             mixerType !== undefined && envTemp !== undefined && flourTemp !== undefined && waterTemp !== undefined;
 
-        // [核心改造] 创建一个从 productId 到原始任务项的映射，以便随时获取计划数量
         const originalItemsMap = new Map(originalItems.map((item) => [item.productId, item]));
 
         const doughsMap = new Map<string, { familyName: string; items: TaskItemWithDetails[] }>();
-        // [核心改造] 这里的 task.items 可能来自快照，也可能来自实时数据
         task.items.forEach((item) => {
             const familyId = item.product.recipeVersion.family.id;
             if (!doughsMap.has(familyId)) {
@@ -842,42 +775,35 @@ export class ProductionTasksService {
         const doughGroups: DoughGroup[] = [];
         for (const [familyId, data] of doughsMap.entries()) {
             const firstItem = data.items[0];
-            const mainDoughInfo = firstItem.product.recipeVersion.doughs[0];
+            const mainDoughInfo = firstItem.product.recipeVersion.components[0];
             const mainDoughIngredientsMap = new Map<string, TaskIngredientDetail>();
             let totalDoughWeight = new Prisma.Decimal(0);
 
-            // [核心新增] 为后加水逻辑计算面团家族的总面粉量
             let totalFlourForFamily = new Prisma.Decimal(0);
             for (const item of data.items) {
                 const originalItem = originalItemsMap.get(item.productId);
-                const quantity = originalItem?.quantity ?? 0; // [核心改造] 使用原始计划数量
+                const quantity = originalItem?.quantity ?? 0;
                 const flourPerUnit = this._calculateTotalFlourWeightForProduct(item.product);
                 totalFlourForFamily = totalFlourForFamily.add(flourPerUnit.mul(quantity));
             }
 
-            // [核心修改] 采用与 cal.js 一致的精确总水量计算逻辑
             let totalWaterForFamily = new Prisma.Decimal(0);
-            // [核心新增] 定义一个变量来存储水的 ingredientId，以便后续更新
             let waterIngredientId: string | null = null;
             for (const item of data.items) {
                 const originalItem = originalItemsMap.get(item.productId);
-                const quantity = originalItem?.quantity ?? 0; // [核心改造] 使用原始计划数量
+                const quantity = originalItem?.quantity ?? 0;
                 const flattened = this._flattenIngredientsForProduct(item.product);
                 for (const [, ingData] of flattened.entries()) {
-                    // 检查原料是否定义了含水量，并且大于0
-                    if (ingData.waterContent && ingData.waterContent > 0) {
-                        // 计算该原料的实际水重（原料总重 * 含水比例）
-                        const waterWeight = ingData.weight.mul(new Prisma.Decimal(ingData.waterContent));
-                        // 累加到家族总水量中，并乘以产品数量
+                    if (ingData.waterContent && ingData.waterContent.gt(0)) {
+                        const waterWeight = ingData.weight.mul(ingData.waterContent);
                         totalWaterForFamily = totalWaterForFamily.add(waterWeight.mul(quantity));
                     }
                 }
             }
 
-            // [核心恢复] 遍历原始配方结构以建立包含面种的原料列表
             for (const item of data.items) {
                 const originalItem = originalItemsMap.get(item.productId);
-                const quantity = originalItem?.quantity ?? 0; // [核心改造] 使用原始计划数量
+                const quantity = originalItem?.quantity ?? 0;
                 const totalFlour = this._calculateTotalFlourWeightForProduct(item.product);
                 for (const ing of mainDoughInfo.ingredients) {
                     let weight: Prisma.Decimal;
@@ -887,7 +813,7 @@ export class ProductionTasksService {
                     let isRecipe = false;
 
                     if (ing.linkedPreDough && ing.flourRatio) {
-                        const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.doughs[0];
+                        const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.components[0];
                         if (!preDoughRecipe) continue;
 
                         const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
@@ -898,14 +824,13 @@ export class ProductionTasksService {
                         id = ing.linkedPreDough.id;
                         name = ing.linkedPreDough.name;
                         isRecipe = true;
-                        brand = '自制面种'; // [核心修改] 为自制面种设置品牌
+                        brand = '自制面种';
                     } else if (ing.ingredient && ing.ratio) {
                         weight = totalFlour.mul(ing.ratio);
                         id = ing.ingredient.id;
                         name = ing.ingredient.name;
                         brand = ing.ingredient.activeSku?.brand || null;
 
-                        // [核心新增] 如果是水，记录其ID
                         if (name === '水') {
                             waterIngredientId = id;
                         }
@@ -932,29 +857,23 @@ export class ProductionTasksService {
                 }
             }
 
-            // [核心重构] 将用冰量和后加水计算逻辑移至所有产品遍历之后，以确保基于整个面团家族的总量进行一次性精确计算
             if (canCalculateIce && mainDoughInfo.targetTemp && waterIngredientId) {
                 const waterIngredient = mainDoughIngredientsMap.get(waterIngredientId);
                 if (waterIngredient) {
                     const extraInfoParts: string[] = [];
                     const targetWaterTemp = this._calculateWaterTemp(
-                        mainDoughInfo.targetTemp,
+                        mainDoughInfo.targetTemp.toNumber(),
                         mixerType,
                         flourTemp,
                         envTemp,
                     );
-                    const iceWeight = this._calculateIce(
-                        targetWaterTemp,
-                        totalWaterForFamily.toNumber(), // 使用精确计算的家族总水量
-                        waterTemp,
-                    );
+                    const iceWeight = this._calculateIce(targetWaterTemp, totalWaterForFamily.toNumber(), waterTemp);
 
-                    // [核心修复] 比较总用冰量和家族总水量
                     if (iceWeight > totalWaterForFamily.toNumber()) {
                         const requiredTemp = this._calculateRequiredWetIngredientTemp(
                             targetWaterTemp,
                             totalWaterForFamily.toNumber(),
-                            totalWaterForFamily.toNumber(), // 可用于替换的水就是全部的水
+                            totalWaterForFamily.toNumber(),
                         );
                         extraInfoParts.push(
                             `需将所有水换成冰块，且其他液体原料需冷却至 ${new Prisma.Decimal(requiredTemp)
@@ -965,14 +884,11 @@ export class ProductionTasksService {
                         extraInfoParts.push(`需要替换 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰`);
                     }
 
-                    // 后加水逻辑
                     if (!totalFlourForFamily.isZero()) {
                         const trueHydrationRatio = totalWaterForFamily.div(totalFlourForFamily);
-                        // [核心修改] 仅在总含水量严格大于65%时才提示后加水
                         if (trueHydrationRatio.gt(0.65)) {
                             const holdBackWater = totalWaterForFamily.sub(totalFlourForFamily.mul(0.65));
-                            const holdBackWaterDisplay = holdBackWater.toDP(1); // 四舍五入到一位小数
-                            // [核心修改] 仅在需要后加的水量大于0时才显示提示，避免显示“后加水0.0g”
+                            const holdBackWaterDisplay = holdBackWater.toDP(1);
                             if (holdBackWaterDisplay.gt(0)) {
                                 extraInfoParts.push(`需要保留 ${holdBackWaterDisplay.toNumber()}g 水在搅拌过程中加入`);
                             }
@@ -989,21 +905,19 @@ export class ProductionTasksService {
             const productDetails: ProductDetails[] = [];
             data.items.forEach((item) => {
                 const originalItem = originalItemsMap.get(item.productId);
-                const quantity = originalItem?.quantity ?? 0; // [核心改造] 使用原始计划数量
-                if (quantity === 0) return; // 如果计划数量为0，则跳过
+                const quantity = originalItem?.quantity ?? 0;
+                if (quantity === 0) return;
 
                 const { product } = item;
                 const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
                 const flattenedProductIngredients = this._flattenIngredientsForProduct(product, false);
 
-                // [核心回滚] 按照用户的澄清，恢复原始的计算逻辑
-                // MIX_IN 使用 ratio 计算，而 FILLING 和 TOPPING 只使用固定的 weightInGrams
                 const mixIns: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
                     .filter((ing) => ing.type === 'MIX_IN')
                     .map((ing) => ({
                         id: ing.id,
                         name: ing.name,
-                        brand: ing.isRecipe ? '自制原料' : ing.brand, // [核心修改] 为自制原料设置品牌
+                        brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
                         weightInGrams: totalFlourWeight.mul(ing.ratio ?? 0).toNumber(),
                     }));
@@ -1013,9 +927,9 @@ export class ProductionTasksService {
                     .map((ing) => ({
                         id: ing.id,
                         name: ing.name,
-                        brand: ing.isRecipe ? '自制原料' : ing.brand, // [核心修改] 为自制原料设置品牌
+                        brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
-                        weightInGrams: ing.weightInGrams ?? 0,
+                        weightInGrams: ing.weightInGrams?.toNumber() ?? 0,
                     }));
 
                 const toppings: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
@@ -1023,9 +937,9 @@ export class ProductionTasksService {
                     .map((ing) => ({
                         id: ing.id,
                         name: ing.name,
-                        brand: ing.isRecipe ? '自制原料' : ing.brand, // [核心修改] 为自制原料设置品牌
+                        brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
-                        weightInGrams: ing.weightInGrams ?? 0,
+                        weightInGrams: ing.weightInGrams?.toNumber() ?? 0,
                     }));
 
                 const mixInWeightPerUnit = mixIns.reduce((sum, i) => sum.add(i.weightInGrams), new Prisma.Decimal(0));
@@ -1041,7 +955,7 @@ export class ProductionTasksService {
                     id: product.id,
                     name: product.name,
                     quantity: quantity,
-                    totalBaseDoughWeight: product.baseDoughWeight * quantity,
+                    totalBaseDoughWeight: new Prisma.Decimal(product.baseDoughWeight).mul(quantity).toNumber(),
                     divisionWeight: correctedDivisionWeight.toNumber(),
                 });
 
@@ -1066,7 +980,6 @@ export class ProductionTasksService {
                     })
                     .join(', '),
                 totalDoughWeight: totalDoughWeight.toNumber(),
-                // [核心改造] 对主面团原料进行排序，将面种类（isRecipe: true）的原料置于列表顶部
                 mainDoughIngredients: Array.from(mainDoughIngredientsMap.values()).sort(
                     (a, b) => (b.isRecipe ? 1 : 0) - (a.isRecipe ? 1 : 0),
                 ),
@@ -1086,24 +999,21 @@ export class ProductionTasksService {
         const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
         if (includeDough) {
-            const processDough = (dough: DoughWithRecursiveIngredients, flourWeightRef: Prisma.Decimal) => {
+            const processDough = (dough: ComponentWithRecursiveIngredients, flourWeightRef: Prisma.Decimal) => {
                 for (const ing of dough.ingredients) {
                     if (ing.linkedPreDough && ing.flourRatio) {
-                        const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.doughs[0];
+                        const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.components[0];
                         if (preDoughRecipe) {
                             const flourForPreDough = flourWeightRef.mul(new Prisma.Decimal(ing.flourRatio));
-                            processDough(preDoughRecipe as DoughWithRecursiveIngredients, flourForPreDough);
+                            processDough(preDoughRecipe as ComponentWithRecursiveIngredients, flourForPreDough);
                         }
                     } else if (ing.ingredient && ing.ratio) {
                         const weight = flourWeightRef.mul(new Prisma.Decimal(ing.ratio));
 
-                        // [核心修复] 从“覆盖”逻辑改为“累加”逻辑
                         const existing = flattened.get(ing.ingredient.id);
                         if (existing) {
-                            // 如果原料已存在于列表中（例如，在主面团和面种中都存在），则累加其重量
                             existing.weight = existing.weight.add(weight);
                         } else {
-                            // 如果是第一次遇到该原料，则将其添加到列表
                             flattened.set(ing.ingredient.id, {
                                 id: ing.ingredient.id,
                                 name: ing.ingredient.name,
@@ -1116,12 +1026,11 @@ export class ProductionTasksService {
                     }
                 }
             };
-            processDough(product.recipeVersion.doughs[0], totalFlourWeight);
+            processDough(product.recipeVersion.components[0], totalFlourWeight);
         }
 
         for (const pIng of product.ingredients) {
             if (pIng.ingredient) {
-                // [核心修复] 使用 `原料ID-类型` 作为唯一键，防止当同一原料被用作不同类型（如辅料和馅料）时发生数据覆盖
                 const uniqueKey = `${pIng.ingredient.id}-${pIng.type}`;
                 flattened.set(uniqueKey, {
                     id: pIng.ingredient.id,
@@ -1135,7 +1044,6 @@ export class ProductionTasksService {
                     waterContent: pIng.ingredient.waterContent,
                 });
             } else if (pIng.linkedExtra) {
-                // [核心修复] 同样，对附加配方也使用复合键
                 const uniqueKey = `${pIng.linkedExtra.id}-${pIng.type}`;
                 flattened.set(uniqueKey, {
                     id: pIng.linkedExtra.id,
@@ -1156,7 +1064,7 @@ export class ProductionTasksService {
     }
 
     private _calculateTotalFlourWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
-        const mainDough = product.recipeVersion.doughs[0];
+        const mainDough = product.recipeVersion.components[0];
         if (!mainDough) return new Prisma.Decimal(0);
 
         const lossRatio = new Prisma.Decimal(mainDough.lossRatio || 0);
@@ -1164,10 +1072,10 @@ export class ProductionTasksService {
         if (divisor.isZero() || divisor.isNegative()) return new Prisma.Decimal(0);
         const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
 
-        const calculateTotalRatio = (dough: DoughWithRecursiveIngredients): Prisma.Decimal => {
+        const calculateTotalRatio = (dough: ComponentWithRecursiveIngredients): Prisma.Decimal => {
             return dough.ingredients.reduce((sum, i) => {
                 if (i.linkedPreDough && i.flourRatio) {
-                    const preDough = i.linkedPreDough.versions.find((v) => v.isActive)?.doughs[0];
+                    const preDough = i.linkedPreDough.versions.find((v) => v.isActive)?.components[0];
                     if (preDough) {
                         const preDoughTotalRatio = preDough.ingredients.reduce(
                             (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
@@ -1222,7 +1130,7 @@ export class ProductionTasksService {
 
             for (const [ingredientId, data] of totalIngredientsMap.entries()) {
                 const ingredient = ingredientStockMap.get(ingredientId);
-                if (ingredient && ingredient.currentStockInGrams < data.totalWeight) {
+                if (ingredient && new Prisma.Decimal(ingredient.currentStockInGrams).lt(data.totalWeight)) {
                     insufficientIngredients.push(ingredient.name);
                 }
             }
@@ -1234,10 +1142,8 @@ export class ProductionTasksService {
         return { stockWarning };
     }
 
-    // [核心新增] 新增方法，用于修改未开始的任务详情
     async updateTaskDetails(tenantId: string, id: string, updateDto: UpdateTaskDetailsDto) {
         return this.prisma.$transaction(async (tx) => {
-            // 1. 查找任务并验证状态
             const task = await tx.productionTask.findFirst({
                 where: {
                     id,
@@ -1260,12 +1166,10 @@ export class ProductionTasksService {
                 throw new BadRequestException('一个生产任务至少需要包含一个产品。');
             }
 
-            // 2. 删除旧的产品项
             await tx.productionTaskItem.deleteMany({
                 where: { taskId: id },
             });
 
-            // 3. 验证新产品项并更新任务
             const productIds = products.map((p) => p.productId);
             const existingProducts = await tx.product.findMany({
                 where: {
@@ -1310,7 +1214,6 @@ export class ProductionTasksService {
     }
 
     async update(tenantId: string, id: string, updateProductionTaskDto: UpdateProductionTaskDto) {
-        // [核心修复] 修复此方法，使其不再依赖于复杂的 findOne 方法
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
         });
@@ -1335,9 +1238,7 @@ export class ProductionTasksService {
         });
     }
 
-    // [核心重构] complete 方法的整体逻辑
     async complete(tenantId: string, userId: string, id: string, completeDto: CompleteProductionTaskDto) {
-        // [核心改造] 查询任务时，使用包含完整配方数据的 taskWithDetailsInclude
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
             include: taskWithDetailsInclude,
@@ -1350,11 +1251,8 @@ export class ProductionTasksService {
 
         const { notes, completedItems } = completeDto;
 
-        // [核心新增] 开始：在所有操作之前进行严格的库存检查
-        // 1. 计算本次完成所有产品所需的原料总量
         const totalConsumptionNeeded = new Map<string, { name: string; totalConsumed: number }>();
         for (const item of completedItems) {
-            // 只计算实际生产了的产品
             if (item.completedQuantity > 0) {
                 const consumptions = await this.costingService.calculateProductConsumptions(
                     tenantId,
@@ -1377,28 +1275,24 @@ export class ProductionTasksService {
 
         const neededIngredientIds = Array.from(totalConsumptionNeeded.keys());
         if (neededIngredientIds.length > 0) {
-            // 2. 获取这些原料的当前库存
             const ingredientsInStock = await this.prisma.ingredient.findMany({
-                where: { id: { in: neededIngredientIds }, type: IngredientType.STANDARD }, // 只检查需要追踪的原料
+                where: { id: { in: neededIngredientIds }, type: IngredientType.STANDARD },
                 select: { id: true, currentStockInGrams: true },
             });
             const stockMap = new Map(ingredientsInStock.map((i) => [i.id, i.currentStockInGrams]));
 
-            // 3. 比较需求量和库存量，找出所有库存不足的原料
             const insufficientIngredients: string[] = [];
             for (const [id, needed] of totalConsumptionNeeded.entries()) {
-                const currentStock = stockMap.get(id) ?? 0;
-                if (currentStock < needed.totalConsumed) {
+                const currentStock = stockMap.get(id) ?? new Prisma.Decimal(0);
+                if (new Prisma.Decimal(currentStock).lt(needed.totalConsumed)) {
                     insufficientIngredients.push(needed.name);
                 }
             }
 
-            // 4. 如果有任何原料不足，则抛出异常，终止操作
             if (insufficientIngredients.length > 0) {
                 throw new BadRequestException(`操作失败：原料库存不足 (${insufficientIngredients.join(', ')})`);
             }
         }
-        // [核心新增] 结束：库存检查完毕
 
         const plannedQuantities = new Map(task.items.map((item) => [item.productId, item.quantity]));
 
@@ -1408,20 +1302,17 @@ export class ProductionTasksService {
                 data: { status: ProductionTaskStatus.COMPLETED },
             });
 
-            // [核心改造] 在创建生产日志时，生成并存入配方快照
             const recipeSnapshot = this._buildRecipeSnapshot(task);
             const productionLog = await tx.productionLog.create({
                 data: {
                     taskId: id,
                     notes,
-                    recipeSnapshot, // 存入快照
+                    recipeSnapshot,
                 },
             });
 
-            // [核心修改] totalSuccessfulConsumption 现在可以直接使用上面库存检查时计算好的 totalConsumptionNeeded
             const totalSuccessfulConsumption = new Map<string, { totalConsumed: number; activeSkuId: string | null }>();
             for (const [ingId, data] of totalConsumptionNeeded.entries()) {
-                // 需要补充 activeSkuId
                 const ingredientInfo = await tx.ingredient.findUnique({
                     where: { id: ingId },
                     select: { activeSkuId: true },
@@ -1514,11 +1405,10 @@ export class ProductionTasksService {
 
                     const ingredient = ingredientDataMap.get(ingId);
                     if (ingredient) {
-                        // 因为已经在前面检查过库存，这里的扣减是安全的
-                        const decrementAmount = cons.totalConsumed;
+                        const decrementAmount = new Prisma.Decimal(cons.totalConsumed);
                         const currentStockValue = new Prisma.Decimal(ingredient.currentStockValue.toString());
                         let valueToDecrement = new Prisma.Decimal(0);
-                        if (ingredient.currentStockInGrams > 0) {
+                        if (new Prisma.Decimal(ingredient.currentStockInGrams).gt(0)) {
                             const avgPricePerGram = currentStockValue.div(ingredient.currentStockInGrams);
                             valueToDecrement = avgPricePerGram.mul(decrementAmount);
                         }
@@ -1538,20 +1428,11 @@ export class ProductionTasksService {
         });
     }
 
-    /**
-     * [核心新增] 根据完整的任务数据构建一个用于归档的配方快照
-     * @param task 从数据库中查询到的，包含了完整 recipeVersion 信息的任务对象
-     * @returns 一个 JSON 对象，其结构与 TaskWithDetails 兼容
-     */
     private _buildRecipeSnapshot(task: TaskWithDetails): Prisma.JsonObject {
-        // 创建一个深拷贝，移除不必要的循环引用或敏感信息
-        // 在这个场景下，task 对象已经是从数据库获取的纯数据，可以直接使用
-        // 我们只保留 items 数组，因为其他任务信息 (id, status, notes) 已经存储在任务表本身
         const snapshot = {
             items: task.items,
         };
 
-        // Prisma.JsonObject 要求返回一个可以被 JSON.stringify 的对象
         return snapshot as unknown as Prisma.JsonObject;
     }
 }

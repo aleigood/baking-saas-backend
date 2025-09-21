@@ -2,8 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
     Prisma,
-    Dough,
-    DoughIngredient,
+    RecipeComponent, // [核心重命名] Dough -> RecipeComponent
+    ComponentIngredient, // [核心重命名] DoughIngredient -> ComponentIngredient
     Ingredient,
     Product,
     ProductIngredient,
@@ -71,13 +71,15 @@ export interface CalculatedRecipeDetails {
     ingredients: CalculatedRecipeIngredient[];
 }
 
-type FullDoughIngredient = DoughIngredient & {
+// [核心重命名] FullDoughIngredient -> FullComponentIngredient
+type FullComponentIngredient = ComponentIngredient & {
     ingredient: Ingredient | null;
     linkedPreDough:
         | (RecipeFamily & {
               versions: (RecipeVersion & {
-                  doughs: (Dough & {
-                      ingredients: (DoughIngredient & {
+                  components: (RecipeComponent & {
+                      // [核心重命名] doughs -> components
+                      ingredients: (ComponentIngredient & {
                           ingredient: Ingredient | null;
                       })[];
                   })[];
@@ -91,9 +93,11 @@ type FullProductIngredient = ProductIngredient & {
     linkedExtra: RecipeFamily | null;
 };
 
+// [核心重命名] FullRecipeVersion 的内部结构
 type FullRecipeVersion = RecipeVersion & {
-    doughs: (Dough & {
-        ingredients: FullDoughIngredient[];
+    components: (RecipeComponent & {
+        // [核心重命名] doughs -> components
+        ingredients: FullComponentIngredient[];
     })[];
 };
 
@@ -119,7 +123,8 @@ export class CostingService {
                 versions: {
                     where: { isActive: true },
                     include: {
-                        doughs: {
+                        components: {
+                            // [核心重命名] doughs -> components
                             include: {
                                 ingredients: {
                                     include: {
@@ -139,15 +144,16 @@ export class CostingService {
             },
         });
 
-        if (!recipeFamily || !recipeFamily.versions[0]?.doughs[0]) {
+        if (!recipeFamily || !recipeFamily.versions[0]?.components[0]) {
+            // [核心重命名] doughs -> components
             throw new NotFoundException('配方或其激活的版本不存在');
         }
 
         const activeVersion = recipeFamily.versions[0];
-        const mainDough = activeVersion.doughs[0];
+        const mainComponent = activeVersion.components[0]; // [核心重命名] mainDough -> mainComponent
 
         // [核心修复] 增加对 null 值的处理，使用 '?? 0'
-        const totalRatio = mainDough.ingredients.reduce(
+        const totalRatio = mainComponent.ingredients.reduce(
             (sum, ing) => sum.add(new Prisma.Decimal(ing.ratio ?? 0)),
             new Prisma.Decimal(0),
         );
@@ -157,7 +163,7 @@ export class CostingService {
                 name: recipeFamily.name,
                 type: recipeFamily.type, // [核心修改] 增加 type 字段
                 totalWeight,
-                procedure: mainDough.procedure,
+                procedure: mainComponent.procedure,
                 ingredients: [],
             };
         }
@@ -165,7 +171,7 @@ export class CostingService {
         const weightPerRatioPoint = new Prisma.Decimal(totalWeight).div(totalRatio);
 
         // [核心修改] 更新原料计算逻辑以区分普通原料和自制配方原料
-        const calculatedIngredients = mainDough.ingredients
+        const calculatedIngredients = mainComponent.ingredients
             .map((ing) => {
                 // [核心修复] 增加对 null 值的处理，使用 '?? 0'
                 const weight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
@@ -197,7 +203,7 @@ export class CostingService {
             name: recipeFamily.name,
             type: recipeFamily.type, // [核心修改] 增加 type 字段
             totalWeight,
-            procedure: mainDough.procedure,
+            procedure: mainComponent.procedure,
             ingredients: calculatedIngredients,
         };
     }
@@ -348,7 +354,7 @@ export class CostingService {
             },
         });
 
-        return consumptionLogs.map((log) => ({ cost: log.quantityInGrams })).reverse();
+        return consumptionLogs.map((log) => ({ cost: log.quantityInGrams.toNumber() })).reverse(); // [核心修改] .toNumber()
     }
 
     /**
@@ -360,14 +366,15 @@ export class CostingService {
         const flattenedIngredients = new Map<string, { weight: Prisma.Decimal; ingredient: Ingredient }>();
 
         // 递归函数，用于处理面团及其嵌套的预制面团
-        const processDough = (dough: FullRecipeVersion['doughs'][0], flourWeightRef: Prisma.Decimal) => {
+        const processDough = (dough: FullRecipeVersion['components'][0], flourWeightRef: Prisma.Decimal) => {
+            // [核心重命名] doughs -> components
             for (const ing of dough.ingredients) {
                 // 如果是预制面团，则递归处理
                 if (ing.linkedPreDough && ing.flourRatio) {
-                    const preDough = ing.linkedPreDough.versions?.[0]?.doughs?.[0];
+                    const preDough = ing.linkedPreDough.versions?.[0]?.components?.[0]; // [核心重命名] doughs -> components
                     if (preDough) {
                         const flourForPreDough = flourWeightRef.mul(new Prisma.Decimal(ing.flourRatio));
-                        processDough(preDough as FullRecipeVersion['doughs'][0], flourForPreDough);
+                        processDough(preDough as FullRecipeVersion['components'][0], flourForPreDough); // [核心重命名] doughs -> components
                     }
                 }
                 // 如果是普通原料，则累加其重量
@@ -386,7 +393,7 @@ export class CostingService {
             }
         };
 
-        const mainDough = product.recipeVersion.doughs[0];
+        const mainDough = product.recipeVersion.components[0]; // [核心重命名] doughs -> components
         if (!mainDough) return new Prisma.Decimal(0);
 
         // 与 _getFlattenedIngredients 类似，计算出作为基准的总面粉重量
@@ -396,10 +403,11 @@ export class CostingService {
             ? new Prisma.Decimal(product.baseDoughWeight).div(mainDoughDivisor)
             : new Prisma.Decimal(0);
 
-        const calculateTotalRatio = (dough: FullRecipeVersion['doughs'][0]): Prisma.Decimal => {
+        const calculateTotalRatio = (dough: FullRecipeVersion['components'][0]): Prisma.Decimal => {
+            // [核心重命名] doughs -> components
             return dough.ingredients.reduce((sum, i) => {
                 if (i.flourRatio && i.linkedPreDough) {
-                    const preDough = i.linkedPreDough.versions?.[0]?.doughs?.[0];
+                    const preDough = i.linkedPreDough.versions?.[0]?.components?.[0]; // [核心重命名] doughs -> components
                     if (preDough) {
                         const preDoughTotalRatio = preDough.ingredients.reduce(
                             (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
@@ -428,7 +436,8 @@ export class CostingService {
             if (data.ingredient.isFlour) {
                 totalFlourWeight = totalFlourWeight.add(data.weight);
             }
-            if (data.ingredient.waterContent > 0) {
+            if (data.ingredient.waterContent.gt(0)) {
+                // [核心修改] Decimal比较
                 const waterInIngredient = data.weight.mul(new Prisma.Decimal(data.ingredient.waterContent));
                 totalWaterWeight = totalWaterWeight.add(waterInIngredient);
             }
@@ -481,7 +490,7 @@ export class CostingService {
 
         // [核心修改] 增加 parentConversionFactor 参数，用于在递归时计算正确的有效比例
         const processDough = (
-            dough: FullRecipeVersion['doughs'][0],
+            dough: FullRecipeVersion['components'][0], // [核心重命名] doughs -> components
             doughWeight: Prisma.Decimal, // [核心重构] 改为 Decimal
             parentConversionFactor: Prisma.Decimal,
             isMainDough: boolean, // 新增一个标志来识别是否是主面团
@@ -520,7 +529,7 @@ export class CostingService {
                 // [核心重构] 完全基于意图(flourRatio)进行动态计算
                 let weight: Prisma.Decimal;
                 if (preDough && ingredient.flourRatio) {
-                    const preDoughRecipe = preDough.doughs[0];
+                    const preDoughRecipe = preDough.components[0]; // [核心重命名] doughs -> components
                     const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
                         (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
                         new Prisma.Decimal(0),
@@ -531,10 +540,12 @@ export class CostingService {
                     weight = currentFlourWeight.mul(new Prisma.Decimal(ingredient.ratio ?? 0));
                 }
 
-                if (preDough && preDough.doughs[0]) {
-                    const preDoughRecipe = preDough.doughs[0];
+                if (preDough && preDough.components[0]) {
+                    // [核心重命名] doughs -> components
+                    const preDoughRecipe = preDough.components[0]; // [核心重命名] doughs -> components
                     let newConversionFactor: Prisma.Decimal;
-                    if (ingredient.flourRatio && ingredient.flourRatio > 0) {
+                    if (ingredient.flourRatio && new Prisma.Decimal(ingredient.flourRatio).gt(0)) {
+                        // [核心修改] Decimal比较
                         newConversionFactor = parentConversionFactor.mul(new Prisma.Decimal(ingredient.flourRatio));
                     } else {
                         const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
@@ -549,7 +560,7 @@ export class CostingService {
                     }
 
                     const preDoughGroup = processDough(
-                        preDoughRecipe as FullRecipeVersion['doughs'][0],
+                        preDoughRecipe as FullRecipeVersion['components'][0], // [核心重命名] doughs -> components
                         weight,
                         newConversionFactor,
                         false,
@@ -584,11 +595,12 @@ export class CostingService {
             return group;
         };
 
-        const mainDough = product.recipeVersion.doughs[0];
-        const calculateTotalRatioForMain = (dough: FullRecipeVersion['doughs'][0]): Prisma.Decimal => {
+        const mainDough = product.recipeVersion.components[0]; // [核心重命名] doughs -> components
+        const calculateTotalRatioForMain = (dough: FullRecipeVersion['components'][0]): Prisma.Decimal => {
+            // [核心重命名] doughs -> components
             return dough.ingredients.reduce((sum, i) => {
                 if (i.flourRatio && i.linkedPreDough) {
-                    const preDough = i.linkedPreDough.versions?.[0]?.doughs?.[0];
+                    const preDough = i.linkedPreDough.versions?.[0]?.components?.[0]; // [核心重命名] doughs -> components
                     if (preDough) {
                         const preDoughTotalRatio = preDough.ingredients.reduce(
                             (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
@@ -650,7 +662,7 @@ export class CostingService {
                 type: getProductIngredientTypeName(ing.type),
                 cost: cost.toDP(2).toNumber(),
                 weightInGrams: finalWeightInGrams.toNumber(),
-                ratio: ing.ratio ?? undefined,
+                ratio: ing.ratio ? ing.ratio.toNumber() : undefined, // [核心修改] .toNumber()
             };
         });
 
@@ -660,7 +672,7 @@ export class CostingService {
                 name: '基础面团',
                 type: '面团',
                 cost: doughGroups.reduce((sum, g) => sum + g.totalCost, 0),
-                weightInGrams: product.baseDoughWeight,
+                weightInGrams: product.baseDoughWeight.toNumber(), // [核心修改] .toNumber()
             },
             ...extraIngredients,
         ];
@@ -761,7 +773,8 @@ export class CostingService {
                 recipeVersion: {
                     include: {
                         family: true,
-                        doughs: {
+                        components: {
+                            // [核心重命名] doughs -> components
                             include: {
                                 ingredients: {
                                     include: {
@@ -771,7 +784,8 @@ export class CostingService {
                                                 versions: {
                                                     where: { isActive: true },
                                                     include: {
-                                                        doughs: {
+                                                        components: {
+                                                            // [核心重命名] doughs -> components
                                                             include: {
                                                                 ingredients: {
                                                                     include: {
@@ -803,7 +817,7 @@ export class CostingService {
     private async _getFlattenedIngredients(product: FullProduct): Promise<Map<string, Prisma.Decimal>> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>(); // [核心重构] 改为 Decimal
 
-        const mainDough = product.recipeVersion.doughs[0];
+        const mainDough = product.recipeVersion.components[0]; // [核心重命名] doughs -> components
         if (!mainDough) return flattenedIngredients;
 
         const mainDoughLossRatio = new Prisma.Decimal(mainDough.lossRatio || 0);
@@ -812,10 +826,11 @@ export class CostingService {
             ? new Prisma.Decimal(product.baseDoughWeight).div(mainDoughDivisor)
             : new Prisma.Decimal(0);
 
-        const calculateTotalRatio = (dough: FullRecipeVersion['doughs'][0]): Prisma.Decimal => {
+        const calculateTotalRatio = (dough: FullRecipeVersion['components'][0]): Prisma.Decimal => {
+            // [核心重命名] doughs -> components
             return dough.ingredients.reduce((sum, i) => {
                 if (i.flourRatio && i.linkedPreDough) {
-                    const preDough = i.linkedPreDough.versions?.[0]?.doughs?.[0];
+                    const preDough = i.linkedPreDough.versions?.[0]?.components?.[0]; // [核心重命名] doughs -> components
                     if (preDough) {
                         const preDoughTotalRatio = preDough.ingredients.reduce(
                             (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
@@ -833,13 +848,14 @@ export class CostingService {
             ? adjustedMainDoughWeight.div(mainDoughTotalRatio)
             : new Prisma.Decimal(0);
 
-        const processDough = (dough: FullRecipeVersion['doughs'][0], flourRef: Prisma.Decimal) => {
+        const processDough = (dough: FullRecipeVersion['components'][0], flourRef: Prisma.Decimal) => {
+            // [核心重命名] doughs -> components
             for (const ing of dough.ingredients) {
                 if (ing.linkedPreDough && ing.flourRatio) {
-                    const preDough = ing.linkedPreDough.versions?.[0]?.doughs?.[0];
+                    const preDough = ing.linkedPreDough.versions?.[0]?.components?.[0]; // [核心重命名] doughs -> components
                     if (preDough) {
                         const flourForPreDough = flourRef.mul(new Prisma.Decimal(ing.flourRatio));
-                        processDough(preDough as FullRecipeVersion['doughs'][0], flourForPreDough);
+                        processDough(preDough as FullRecipeVersion['components'][0], flourForPreDough); // [核心重命名] doughs -> components
                     }
                 } else if (ing.ingredientId && ing.ratio) {
                     const ingredientWeight = flourRef.mul(new Prisma.Decimal(ing.ratio));

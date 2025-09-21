@@ -1,4 +1,7 @@
 -- CreateEnum
+CREATE TYPE "RecipeCategory" AS ENUM ('BREAD', 'PASTRY', 'DESSERT', 'DRINK', 'OTHER');
+
+-- CreateEnum
 CREATE TYPE "Role" AS ENUM ('OWNER', 'ADMIN', 'MEMBER', 'SUPER_ADMIN');
 
 -- CreateEnum
@@ -81,6 +84,7 @@ CREATE TABLE "RecipeFamily" (
     "name" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
     "type" "RecipeType" NOT NULL,
+    "category" "RecipeCategory" NOT NULL DEFAULT 'BREAD',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
@@ -102,27 +106,27 @@ CREATE TABLE "RecipeVersion" (
 );
 
 -- CreateTable
-CREATE TABLE "Dough" (
+CREATE TABLE "RecipeComponent" (
     "id" TEXT NOT NULL,
     "recipeVersionId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "targetTemp" DOUBLE PRECISION,
-    "lossRatio" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "targetTemp" DECIMAL(65,30),
+    "lossRatio" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "procedure" TEXT[],
 
-    CONSTRAINT "Dough_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "RecipeComponent_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "DoughIngredient" (
+CREATE TABLE "ComponentIngredient" (
     "id" TEXT NOT NULL,
-    "doughId" TEXT NOT NULL,
-    "ratio" DOUBLE PRECISION,
-    "flourRatio" DOUBLE PRECISION,
+    "componentId" TEXT NOT NULL,
+    "ratio" DECIMAL(65,30),
+    "flourRatio" DECIMAL(65,30),
     "ingredientId" TEXT,
     "linkedPreDoughId" TEXT,
 
-    CONSTRAINT "DoughIngredient_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "ComponentIngredient_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -130,7 +134,7 @@ CREATE TABLE "Product" (
     "id" TEXT NOT NULL,
     "recipeVersionId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "baseDoughWeight" DOUBLE PRECISION NOT NULL,
+    "baseDoughWeight" DECIMAL(65,30) NOT NULL,
     "procedure" TEXT[],
 
     CONSTRAINT "Product_pkey" PRIMARY KEY ("id")
@@ -142,8 +146,8 @@ CREATE TABLE "ProductIngredient" (
     "productId" TEXT NOT NULL,
     "type" "ProductIngredientType" NOT NULL,
     "ingredientId" TEXT,
-    "ratio" DOUBLE PRECISION,
-    "weightInGrams" DOUBLE PRECISION,
+    "ratio" DECIMAL(65,30),
+    "weightInGrams" DECIMAL(65,30),
     "linkedExtraId" TEXT,
 
     CONSTRAINT "ProductIngredient_pkey" PRIMARY KEY ("id")
@@ -156,9 +160,9 @@ CREATE TABLE "Ingredient" (
     "name" TEXT NOT NULL,
     "type" "IngredientType" NOT NULL DEFAULT 'STANDARD',
     "isFlour" BOOLEAN NOT NULL DEFAULT false,
-    "waterContent" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "waterContent" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "activeSkuId" TEXT,
-    "currentStockInGrams" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "currentStockInGrams" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "currentStockValue" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -172,7 +176,7 @@ CREATE TABLE "IngredientSKU" (
     "id" TEXT NOT NULL,
     "brand" TEXT,
     "specName" TEXT NOT NULL,
-    "specWeightInGrams" DOUBLE PRECISION NOT NULL,
+    "specWeightInGrams" DECIMAL(65,30) NOT NULL,
     "ingredientId" TEXT NOT NULL,
     "status" "SkuStatus" NOT NULL DEFAULT 'INACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -198,7 +202,7 @@ CREATE TABLE "IngredientStockAdjustment" (
     "id" TEXT NOT NULL,
     "ingredientId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
-    "changeInGrams" DOUBLE PRECISION NOT NULL,
+    "changeInGrams" DECIMAL(65,30) NOT NULL,
     "reason" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -272,7 +276,7 @@ CREATE TABLE "IngredientConsumptionLog" (
     "productionLogId" TEXT NOT NULL,
     "ingredientId" TEXT NOT NULL,
     "skuId" TEXT,
-    "quantityInGrams" DOUBLE PRECISION NOT NULL,
+    "quantityInGrams" DECIMAL(65,30) NOT NULL,
 
     CONSTRAINT "IngredientConsumptionLog_pkey" PRIMARY KEY ("id")
 );
@@ -296,16 +300,16 @@ CREATE INDEX "RecipeVersion_familyId_idx" ON "RecipeVersion"("familyId");
 CREATE UNIQUE INDEX "RecipeVersion_familyId_version_key" ON "RecipeVersion"("familyId", "version");
 
 -- CreateIndex
-CREATE INDEX "Dough_recipeVersionId_idx" ON "Dough"("recipeVersionId");
+CREATE INDEX "RecipeComponent_recipeVersionId_idx" ON "RecipeComponent"("recipeVersionId");
 
 -- CreateIndex
-CREATE INDEX "DoughIngredient_doughId_idx" ON "DoughIngredient"("doughId");
+CREATE INDEX "ComponentIngredient_componentId_idx" ON "ComponentIngredient"("componentId");
 
 -- CreateIndex
-CREATE INDEX "DoughIngredient_linkedPreDoughId_idx" ON "DoughIngredient"("linkedPreDoughId");
+CREATE INDEX "ComponentIngredient_linkedPreDoughId_idx" ON "ComponentIngredient"("linkedPreDoughId");
 
 -- CreateIndex
-CREATE INDEX "DoughIngredient_ingredientId_idx" ON "DoughIngredient"("ingredientId");
+CREATE INDEX "ComponentIngredient_ingredientId_idx" ON "ComponentIngredient"("ingredientId");
 
 -- CreateIndex
 CREATE INDEX "Product_recipeVersionId_idx" ON "Product"("recipeVersionId");
@@ -386,16 +390,16 @@ ALTER TABLE "RecipeFamily" ADD CONSTRAINT "RecipeFamily_tenantId_fkey" FOREIGN K
 ALTER TABLE "RecipeVersion" ADD CONSTRAINT "RecipeVersion_familyId_fkey" FOREIGN KEY ("familyId") REFERENCES "RecipeFamily"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Dough" ADD CONSTRAINT "Dough_recipeVersionId_fkey" FOREIGN KEY ("recipeVersionId") REFERENCES "RecipeVersion"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "RecipeComponent" ADD CONSTRAINT "RecipeComponent_recipeVersionId_fkey" FOREIGN KEY ("recipeVersionId") REFERENCES "RecipeVersion"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "DoughIngredient" ADD CONSTRAINT "DoughIngredient_ingredientId_fkey" FOREIGN KEY ("ingredientId") REFERENCES "Ingredient"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_ingredientId_fkey" FOREIGN KEY ("ingredientId") REFERENCES "Ingredient"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "DoughIngredient" ADD CONSTRAINT "DoughIngredient_doughId_fkey" FOREIGN KEY ("doughId") REFERENCES "Dough"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_componentId_fkey" FOREIGN KEY ("componentId") REFERENCES "RecipeComponent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "DoughIngredient" ADD CONSTRAINT "DoughIngredient_linkedPreDoughId_fkey" FOREIGN KEY ("linkedPreDoughId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_linkedPreDoughId_fkey" FOREIGN KEY ("linkedPreDoughId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Product" ADD CONSTRAINT "Product_recipeVersionId_fkey" FOREIGN KEY ("recipeVersionId") REFERENCES "RecipeVersion"("id") ON DELETE CASCADE ON UPDATE CASCADE;
