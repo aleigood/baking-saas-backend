@@ -74,13 +74,13 @@ export class ProductDto {
     procedure?: string[]; // 制作流程
 }
 
-// 用于面团中原料的DTO
-export class DoughIngredientDto {
+// [核心重命名] DoughIngredientDto -> ComponentIngredientDto
+// 用于配方组件中原料的DTO
+export class ComponentIngredientDto {
     @IsString()
     @IsNotEmpty()
     name: string; // name 字段用于创建新原料或关联预制/附加配方
 
-    // [核心修改] ratio 现在应为小数形式 (例如: 92% 应传入 0.92)
     // 对于预制面团，此字段将由后端计算，前端无需提供。
     @IsNumber()
     @IsOptional()
@@ -95,7 +95,6 @@ export class DoughIngredientDto {
     @IsOptional()
     isFlour?: boolean;
 
-    // [核心修改] waterContent 现在应为小数形式 (例如: 75% 应传入 0.75)
     @IsNumber()
     @IsOptional()
     waterContent?: number;
@@ -128,15 +127,14 @@ export class CreateRecipeDto {
     @IsOptional()
     targetTemp?: number;
 
-    // [核心修改] lossRatio 应为小数形式 (例如: 2% 应传入 0.02)
     @IsNumber()
     @IsOptional()
     lossRatio?: number;
 
     @IsArray()
     @ValidateNested({ each: true })
-    @Type(() => DoughIngredientDto)
-    ingredients: DoughIngredientDto[];
+    @Type(() => ComponentIngredientDto) // [核心重命名] DoughIngredientDto -> ComponentIngredientDto
+    ingredients: ComponentIngredientDto[];
 
     @IsArray()
     @ValidateNested({ each: true })

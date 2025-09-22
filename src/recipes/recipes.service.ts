@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateRecipeDto, DoughIngredientDto, ProductDto } from './dto/create-recipe.dto';
+// [核心重命名] 导入 ComponentIngredientDto
+import { CreateRecipeDto, ComponentIngredientDto, ProductDto } from './dto/create-recipe.dto';
 import {
     Prisma,
     RecipeFamily,
@@ -13,8 +14,8 @@ import {
     Product,
     RecipeCategory,
 } from '@prisma/client';
-import { RecipeFormTemplateDto } from './dto/recipe-form-template.dto';
-import type { DoughTemplate } from './dto/recipe-form-template.dto';
+// [核心重命名] 导入 ComponentTemplate
+import { RecipeFormTemplateDto, ComponentTemplate } from './dto/recipe-form-template.dto';
 
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
 
@@ -137,7 +138,6 @@ export class RecipesService {
             for (const ingredientDto of ingredients) {
                 const linkedPreDough = preDoughFamilies.get(ingredientDto.name);
 
-                // [核心修复] 在保存到数据库之前，将 number 显式转换为 Prisma.Decimal 类型
                 const ratioForDb =
                     linkedPreDough || ingredientDto.ratio === null || ingredientDto.ratio === undefined
                         ? null
@@ -264,7 +264,6 @@ export class RecipesService {
                 },
             });
 
-            // [核心修复] 对所有 number 类型的 Decimal 字段进行转换
             const ratioForDb =
                 pIngredientDto.ratio === null || pIngredientDto.ratio === undefined
                     ? undefined
@@ -368,7 +367,6 @@ export class RecipesService {
             data: { notes: recipeDto.notes },
         });
 
-        // [核心修复] 对所有 number 类型的 Decimal 字段进行转换
         const targetTempForDb =
             targetTemp === null || targetTemp === undefined ? undefined : new Prisma.Decimal(targetTemp);
         const lossRatioForDb =
@@ -387,7 +385,6 @@ export class RecipesService {
         for (const ingredientDto of ingredients) {
             const linkedPreDough = preDoughFamilies.get(ingredientDto.name);
 
-            // [核心修复] 对所有 number 类型的 Decimal 字段进行转换
             const ratioForDb =
                 linkedPreDough || ingredientDto.ratio === null || ingredientDto.ratio === undefined
                     ? null
@@ -415,7 +412,7 @@ export class RecipesService {
                     data: {
                         recipeVersionId: versionId,
                         name: productDto.name,
-                        baseDoughWeight: productDto.weight, // Prisma DMMF schema shows this is Decimal
+                        baseDoughWeight: productDto.weight,
                         procedure: productDto.procedure,
                     },
                 });
@@ -490,7 +487,6 @@ export class RecipesService {
             if (!existingIngredient) {
                 const isWater = ing.name === '水';
 
-                // [核心修复] 对所有 number 类型的 Decimal 字段进行转换
                 const waterContentForDb = isWater ? 1 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0;
 
                 existingIngredient = await tx.ingredient.create({
@@ -714,6 +710,7 @@ export class RecipesService {
         return family;
     }
 
+    // [核心重构] getRecipeVersionFormTemplate 方法
     async getRecipeVersionFormTemplate(
         tenantId: string,
         familyId: string,
@@ -772,45 +769,49 @@ export class RecipesService {
             return parseFloat(decimal.mul(100).toString());
         };
 
-        if (version.family.type === 'PRE_DOUGH' || version.family.type === 'EXTRA') {
+        // [核心逻辑] 根据品类和类型来构建统一的响应结构
+        const isBreadRecipe =
+            version.family.category === RecipeCategory.BREAD && version.family.type === RecipeType.MAIN;
+
+        // [场景1] 非面包类产品 或 预制/附加配方
+        if (!isBreadRecipe) {
             const componentSource = version.components[0];
             if (!componentSource) {
                 throw new NotFoundException('源配方数据不完整: 缺少组件');
             }
-
+            const baseComponent: ComponentTemplate = {
+                id: componentSource.id,
+                name: componentSource.name,
+                type: 'BASE_COMPONENT',
+                lossRatio: toCleanPercent(componentSource.lossRatio) ?? undefined,
+                ingredients: componentSource.ingredients.map((ing) => ({
+                    id: ing.ingredient!.id,
+                    name: ing.ingredient!.name,
+                    ratio: toCleanPercent(ing.ratio),
+                    isRecipe: false,
+                    isFlour: ing.ingredient!.isFlour,
+                    waterContent: ing.ingredient!.waterContent.toNumber(),
+                })),
+                procedure: componentSource.procedure || [],
+            };
             return {
                 name: version.family.name,
                 type: version.family.type,
                 category: version.family.category,
                 notes: version.notes || '',
-                ingredients: componentSource.ingredients
-                    .filter((ing) => ing.ingredient && ing.ratio !== null)
-                    .map((ing) => ({
-                        id: ing.ingredient!.id,
-                        name: ing.ingredient!.name,
-                        ratio: toCleanPercent(ing.ratio),
-                        isRecipe: false,
-                        isFlour: ing.ingredient!.isFlour,
-                        waterContent: ing.ingredient!.waterContent.toNumber(),
-                    })),
-                procedure: componentSource.procedure || [],
+                components: [baseComponent],
+                products: [],
             };
         }
 
-        const mainComponentSource = version.components.find((d) => d.name === version.family.name);
+        // [场景2] 面包类产品
+        const mainComponentSource = version.components.find((c) => c.name === version.family.name);
         if (!mainComponentSource) {
             throw new NotFoundException('源配方数据不完整: 缺少主组件');
         }
 
-        const mainComponentIngredientsForForm: {
-            id: string | null;
-            name: string;
-            ratio: number | null;
-            isRecipe: boolean;
-            isFlour?: boolean;
-            waterContent?: number;
-        }[] = [];
-        const preDoughObjectsForForm: DoughTemplate[] = [];
+        const mainComponentIngredientsForForm: ComponentTemplate['ingredients'] = [];
+        const preDoughComponentsForForm: ComponentTemplate[] = [];
 
         for (const ing of mainComponentSource.ingredients) {
             if (ing.linkedPreDough) {
@@ -822,7 +823,6 @@ export class RecipesService {
                     const flourRatioInMainDough = ing.flourRatio
                         ? new Prisma.Decimal(ing.flourRatio)
                         : new Prisma.Decimal(0);
-
                     const ingredientsForTemplate = preDoughRecipe.ingredients
                         .filter((i) => i.ingredient !== null && i.ratio !== null)
                         .map((i) => ({
@@ -834,7 +834,7 @@ export class RecipesService {
                             waterContent: i.ingredient!.waterContent.toNumber(),
                         }));
 
-                    preDoughObjectsForForm.push({
+                    preDoughComponentsForForm.push({
                         id: preDoughFamily.id,
                         name: preDoughFamily.name,
                         type: 'PRE_DOUGH',
@@ -855,10 +855,10 @@ export class RecipesService {
             }
         }
 
-        const mainDoughObjectForForm: DoughTemplate = {
+        const mainComponentForForm: ComponentTemplate = {
             id: `main_${Date.now()}`,
             name: '主面团',
-            type: 'MAIN_DOUGH' as const,
+            type: 'MAIN_DOUGH',
             lossRatio: toCleanPercent(mainComponentSource.lossRatio) ?? undefined,
             ingredients: mainComponentIngredientsForForm,
             procedure: mainComponentSource.procedure || [],
@@ -870,7 +870,7 @@ export class RecipesService {
             category: version.family.category,
             notes: version.notes || '',
             targetTemp: mainComponentSource.targetTemp?.toNumber() ?? undefined,
-            doughs: [mainDoughObjectForForm, ...preDoughObjectsForForm],
+            components: [mainComponentForForm, ...preDoughComponentsForForm],
             products: version.products.map((p) => {
                 const processIngredients = (type: ProductIngredientType) => {
                     return p.ingredients
@@ -1054,7 +1054,7 @@ export class RecipesService {
 
     private async preloadPreDoughFamilies(
         tenantId: string,
-        ingredients: DoughIngredientDto[],
+        ingredients: ComponentIngredientDto[],
         tx: Prisma.TransactionClient,
     ): Promise<Map<string, PreloadedRecipeFamily>> {
         const preDoughNames = ingredients
@@ -1084,7 +1084,7 @@ export class RecipesService {
     }
 
     private calculatePreDoughTotalRatio(
-        ingredients: DoughIngredientDto[],
+        ingredients: ComponentIngredientDto[],
         preDoughFamilies: Map<string, PreloadedRecipeFamily>,
     ) {
         for (const ing of ingredients) {
@@ -1113,7 +1113,7 @@ export class RecipesService {
     private _validateBakerPercentage(
         type: RecipeType,
         category: RecipeCategory | undefined,
-        ingredients: DoughIngredientDto[],
+        ingredients: ComponentIngredientDto[],
     ) {
         if (category !== RecipeCategory.BREAD && type !== RecipeType.PRE_DOUGH) {
             return;

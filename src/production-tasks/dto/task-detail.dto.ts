@@ -1,8 +1,8 @@
 /**
  * 文件路径: src/production-tasks/dto/task-detail.dto.ts
- * 文件描述: [新增] 定义任务详情接口返回的专用数据结构。
+ * 文件描述: [核心重构] 将与“面团”相关的命名更新为通用的“组件”。
  */
-import { ProductionTaskStatus } from '@prisma/client';
+import { ProductionTaskStatus, RecipeCategory } from '@prisma/client'; // [核心新增] 导入 RecipeCategory
 import { PrepTask } from '../production-tasks.service';
 
 // 定义原料详情的数据结构
@@ -11,17 +11,18 @@ export interface TaskIngredientDetail {
     name: string;
     brand: string | null;
     weightInGrams: number;
-    isRecipe: boolean; // [核心新增] 新增字段，用于标识该原料是否为另一个配方
-    extraInfo?: string | null; // [核心新增] 新增字段，用于存储原料的附加说明，如用冰量
+    isRecipe: boolean;
+    extraInfo?: string | null;
 }
 
-// 定义面团汇总中每个产品的数据结构
-export interface DoughProductSummary {
+// [核心重命名] DoughProductSummary -> ProductComponentSummary
+// 定义组件汇总中每个产品的数据结构
+export interface ProductComponentSummary {
     id: string;
     name: string;
     quantity: number;
-    totalBaseDoughWeight: number;
-    divisionWeight: number; // 分割重量
+    totalBaseComponentWeight: number; // [核心重命名] totalBaseDoughWeight -> totalBaseComponentWeight
+    divisionWeight: number;
 }
 
 // 定义单个产品的详细信息（如辅料、馅料等）
@@ -30,19 +31,21 @@ export interface ProductDetails {
     name: string;
     mixIns: TaskIngredientDetail[];
     fillings: TaskIngredientDetail[];
-    toppings: TaskIngredientDetail[]; // [核心新增] 增加表面装饰字段
+    toppings: TaskIngredientDetail[];
     procedure: string[];
 }
 
-// 定义按面团类型分组的数据结构
-export interface DoughGroup {
+// [核心重命名] DoughGroup -> ComponentGroup
+// 定义按组件类型分组的数据结构
+export interface ComponentGroup {
     familyId: string;
     familyName: string;
+    category: RecipeCategory; // [核心新增] 增加品类字段，用于驱动前端UI
     productsDescription: string;
-    totalDoughWeight: number;
-    mainDoughIngredients: TaskIngredientDetail[];
-    mainDoughProcedure: string[];
-    products: DoughProductSummary[];
+    totalComponentWeight: number; // [核心重命名] totalDoughWeight -> totalComponentWeight
+    baseComponentIngredients: TaskIngredientDetail[]; // [核心重命名] mainDoughIngredients -> baseComponentIngredients
+    baseComponentProcedure: string[]; // [核心重命名] mainDoughProcedure -> baseComponentProcedure
+    products: ProductComponentSummary[];
     productDetails: ProductDetails[];
 }
 
@@ -53,13 +56,13 @@ export interface TaskCompletionItem {
     plannedQuantity: number;
 }
 
-// 最终的任务详情接口响应体
+// [核心重构] 最终的任务详情接口响应体
 export interface TaskDetailResponseDto {
     id: string;
     status: ProductionTaskStatus;
     notes: string | null;
     stockWarning: string | null;
     prepTask: PrepTask | null;
-    doughGroups: DoughGroup[];
+    componentGroups: ComponentGroup[]; // [核心重命名] doughGroups -> componentGroups
     items: TaskCompletionItem[];
 }

@@ -9,6 +9,7 @@ import {
     ProductIngredientType,
     ProductionTask,
     ProductionTaskStatus,
+    RecipeCategory, // [核心新增] 导入 RecipeCategory
     RecipeFamily,
     RecipeType,
 } from '@prisma/client';
@@ -16,8 +17,8 @@ import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
 import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
 import {
-    DoughGroup,
-    DoughProductSummary,
+    ComponentGroup, // [核心重命名]
+    ProductComponentSummary, // [核心重命名]
     ProductDetails,
     TaskDetailResponseDto,
     TaskIngredientDetail,
@@ -734,7 +735,7 @@ export class ProductionTasksService {
             ? (task.log!.recipeSnapshot as unknown as TaskWithDetails)
             : task;
 
-        const doughGroups = this._calculateDoughGroups(taskDataForCalc, query, task.items);
+        const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, task.items); // [核心重命名]
         const { stockWarning } = await this._calculateStockWarning(tenantId, task);
 
         return {
@@ -743,7 +744,7 @@ export class ProductionTasksService {
             notes: task.notes,
             stockWarning,
             prepTask: await this._getPrepItemsForTask(tenantId, task),
-            doughGroups,
+            componentGroups, // [核心重命名]
             items: task.items.map((item) => ({
                 id: item.product.id,
                 name: item.product.name,
@@ -752,35 +753,40 @@ export class ProductionTasksService {
         };
     }
 
-    private _calculateDoughGroups(
+    // [核心重命名] _calculateDoughGroups -> _calculateComponentGroups
+    private _calculateComponentGroups(
         task: TaskWithDetails,
         query: QueryTaskDetailDto,
         originalItems: TaskItemWithDetails[],
-    ): DoughGroup[] {
+    ): ComponentGroup[] {
         const { mixerType, envTemp, flourTemp, waterTemp } = query;
         const canCalculateIce =
             mixerType !== undefined && envTemp !== undefined && flourTemp !== undefined && waterTemp !== undefined;
 
         const originalItemsMap = new Map(originalItems.map((item) => [item.productId, item]));
 
-        const doughsMap = new Map<string, { familyName: string; items: TaskItemWithDetails[] }>();
+        const componentsMap = new Map<
+            string,
+            { familyName: string; category: RecipeCategory; items: TaskItemWithDetails[] }
+        >(); // [核心重命名]
         task.items.forEach((item) => {
-            const familyId = item.product.recipeVersion.family.id;
-            if (!doughsMap.has(familyId)) {
-                doughsMap.set(familyId, {
-                    familyName: item.product.recipeVersion.family.name,
+            const family = item.product.recipeVersion.family;
+            if (!componentsMap.has(family.id)) {
+                componentsMap.set(family.id, {
+                    familyName: family.name,
+                    category: family.category, // [核心新增] 存储品类
                     items: [],
                 });
             }
-            doughsMap.get(familyId)!.items.push(item);
+            componentsMap.get(family.id)!.items.push(item);
         });
 
-        const doughGroups: DoughGroup[] = [];
-        for (const [familyId, data] of doughsMap.entries()) {
+        const componentGroups: ComponentGroup[] = []; // [核心重命名]
+        for (const [familyId, data] of componentsMap.entries()) {
             const firstItem = data.items[0];
-            const mainDoughInfo = firstItem.product.recipeVersion.components[0];
-            const mainDoughIngredientsMap = new Map<string, TaskIngredientDetail>();
-            let totalDoughWeight = new Prisma.Decimal(0);
+            const baseComponentInfo = firstItem.product.recipeVersion.components[0];
+            const baseComponentIngredientsMap = new Map<string, TaskIngredientDetail>();
+            let totalComponentWeight = new Prisma.Decimal(0); // [核心重命名]
 
             let totalFlourForFamily = new Prisma.Decimal(0);
             for (const item of data.items) {
@@ -808,7 +814,7 @@ export class ProductionTasksService {
                 const originalItem = originalItemsMap.get(item.productId);
                 const quantity = originalItem?.quantity ?? 0;
                 const totalFlour = this._calculateTotalFlourWeightForProduct(item.product);
-                for (const ing of mainDoughInfo.ingredients) {
+                for (const ing of baseComponentInfo.ingredients) {
                     let weight: Prisma.Decimal;
                     let id: string;
                     let name: string;
@@ -842,9 +848,9 @@ export class ProductionTasksService {
                     }
 
                     const currentTotalWeight = weight.mul(quantity);
-                    totalDoughWeight = totalDoughWeight.add(currentTotalWeight);
+                    totalComponentWeight = totalComponentWeight.add(currentTotalWeight);
 
-                    const existing = mainDoughIngredientsMap.get(id);
+                    const existing = baseComponentIngredientsMap.get(id);
                     if (existing) {
                         existing.weightInGrams += currentTotalWeight.toNumber();
                     } else {
@@ -855,17 +861,17 @@ export class ProductionTasksService {
                             weightInGrams: currentTotalWeight.toNumber(),
                             isRecipe,
                         };
-                        mainDoughIngredientsMap.set(id, newIngredient);
+                        baseComponentIngredientsMap.set(id, newIngredient);
                     }
                 }
             }
 
-            if (canCalculateIce && mainDoughInfo.targetTemp && waterIngredientId) {
-                const waterIngredient = mainDoughIngredientsMap.get(waterIngredientId);
+            if (canCalculateIce && baseComponentInfo.targetTemp && waterIngredientId) {
+                const waterIngredient = baseComponentIngredientsMap.get(waterIngredientId);
                 if (waterIngredient) {
                     const extraInfoParts: string[] = [];
                     const targetWaterTemp = this._calculateWaterTemp(
-                        mainDoughInfo.targetTemp.toNumber(),
+                        baseComponentInfo.targetTemp.toNumber(),
                         mixerType,
                         flourTemp,
                         envTemp,
@@ -904,7 +910,7 @@ export class ProductionTasksService {
                 }
             }
 
-            const products: DoughProductSummary[] = [];
+            const products: ProductComponentSummary[] = []; // [核心重命名]
             const productDetails: ProductDetails[] = [];
             data.items.forEach((item) => {
                 const originalItem = originalItemsMap.get(item.productId);
@@ -947,18 +953,18 @@ export class ProductionTasksService {
 
                 const mixInWeightPerUnit = mixIns.reduce((sum, i) => sum.add(i.weightInGrams), new Prisma.Decimal(0));
 
-                const lossRatio = new Prisma.Decimal(mainDoughInfo?.lossRatio || 0);
+                const lossRatio = new Prisma.Decimal(baseComponentInfo?.lossRatio || 0);
                 const divisor = new Prisma.Decimal(1).sub(lossRatio);
-                const adjustedBaseDoughWeight = !divisor.isZero()
+                const adjustedBaseComponentWeight = !divisor.isZero() // [核心重命名]
                     ? new Prisma.Decimal(product.baseDoughWeight).div(divisor)
                     : new Prisma.Decimal(product.baseDoughWeight);
-                const correctedDivisionWeight = adjustedBaseDoughWeight.add(mixInWeightPerUnit);
+                const correctedDivisionWeight = adjustedBaseComponentWeight.add(mixInWeightPerUnit);
 
                 products.push({
                     id: product.id,
                     name: product.name,
                     quantity: quantity,
-                    totalBaseDoughWeight: new Prisma.Decimal(product.baseDoughWeight).mul(quantity).toNumber(),
+                    totalBaseComponentWeight: new Prisma.Decimal(product.baseDoughWeight).mul(quantity).toNumber(), // [核心重命名]
                     divisionWeight: correctedDivisionWeight.toNumber(),
                 });
 
@@ -972,9 +978,11 @@ export class ProductionTasksService {
                 });
             });
 
-            doughGroups.push({
+            componentGroups.push({
+                // [核心重命名]
                 familyId,
                 familyName: data.familyName,
+                category: data.category, // [核心新增]
                 productsDescription: data.items
                     .map((i) => {
                         const originalItem = originalItemsMap.get(i.productId);
@@ -982,16 +990,17 @@ export class ProductionTasksService {
                         return `${i.product.name} x${quantity}`;
                     })
                     .join(', '),
-                totalDoughWeight: totalDoughWeight.toNumber(),
-                mainDoughIngredients: Array.from(mainDoughIngredientsMap.values()).sort(
+                totalComponentWeight: totalComponentWeight.toNumber(), // [核心重命名]
+                baseComponentIngredients: Array.from(baseComponentIngredientsMap.values()).sort(
+                    // [核心重命名]
                     (a, b) => (b.isRecipe ? 1 : 0) - (a.isRecipe ? 1 : 0),
                 ),
-                mainDoughProcedure: mainDoughInfo.procedure || [],
+                baseComponentProcedure: baseComponentInfo.procedure || [], // [核心重命名]
                 products,
                 productDetails,
             });
         }
-        return doughGroups;
+        return componentGroups;
     }
 
     private _flattenIngredientsForProduct(
@@ -1370,7 +1379,7 @@ export class ProductionTasksService {
                             data: {
                                 ingredientId: cons.ingredientId,
                                 userId: userId,
-                                changeInGrams: new Prisma.Decimal(-cons.totalConsumed), // [核心修复] 转换为 Decimal
+                                changeInGrams: new Prisma.Decimal(-cons.totalConsumed),
                                 reason: `生产损耗: ${productName}`,
                             },
                         });
@@ -1402,7 +1411,7 @@ export class ProductionTasksService {
                             productionLogId: productionLog.id,
                             ingredientId: ingId,
                             skuId: cons.activeSkuId,
-                            quantityInGrams: new Prisma.Decimal(cons.totalConsumed), // [核心修复] 转换为 Decimal
+                            quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
                         },
                     });
 
