@@ -122,7 +122,6 @@ export class RecipesService {
             const preDoughFamilies = await this.preloadPreDoughFamilies(tenantId, ingredients, tx);
             this.calculatePreDoughTotalRatio(ingredients, preDoughFamilies);
 
-            // [核心改造] 传递 type 和 category 进行验证
             this._validateBakerPercentage(type, category, ingredients);
 
             const component = await tx.recipeComponent.create({
@@ -137,11 +136,23 @@ export class RecipesService {
 
             for (const ingredientDto of ingredients) {
                 const linkedPreDough = preDoughFamilies.get(ingredientDto.name);
+
+                // [核心修复] 在保存到数据库之前，将 number 显式转换为 Prisma.Decimal 类型
+                const ratioForDb =
+                    linkedPreDough || ingredientDto.ratio === null || ingredientDto.ratio === undefined
+                        ? null
+                        : new Prisma.Decimal(ingredientDto.ratio);
+
+                const flourRatioForDb =
+                    ingredientDto.flourRatio === null || ingredientDto.flourRatio === undefined
+                        ? null
+                        : new Prisma.Decimal(ingredientDto.flourRatio);
+
                 await tx.componentIngredient.create({
                     data: {
                         componentId: component.id,
-                        ratio: linkedPreDough ? null : ingredientDto.ratio,
-                        flourRatio: ingredientDto.flourRatio,
+                        ratio: ratioForDb,
+                        flourRatio: flourRatioForDb,
                         ingredientId: linkedPreDough ? null : ingredientDto.ingredientId,
                         linkedPreDoughId: linkedPreDough?.id,
                     },
@@ -252,12 +263,23 @@ export class RecipesService {
                     deletedAt: null,
                 },
             });
+
+            // [核心修复] 对所有 number 类型的 Decimal 字段进行转换
+            const ratioForDb =
+                pIngredientDto.ratio === null || pIngredientDto.ratio === undefined
+                    ? undefined
+                    : new Prisma.Decimal(pIngredientDto.ratio);
+            const weightInGramsForDb =
+                pIngredientDto.weightInGrams === null || pIngredientDto.weightInGrams === undefined
+                    ? undefined
+                    : new Prisma.Decimal(pIngredientDto.weightInGrams);
+
             await tx.productIngredient.create({
                 data: {
                     productId: productId,
                     type: pIngredientDto.type,
-                    ratio: pIngredientDto.ratio,
-                    weightInGrams: pIngredientDto.weightInGrams,
+                    ratio: ratioForDb,
+                    weightInGrams: weightInGramsForDb,
                     ingredientId: linkedExtra ? null : pIngredientDto.ingredientId,
                     linkedExtraId: linkedExtra?.id,
                 },
@@ -268,7 +290,6 @@ export class RecipesService {
     private async createVersionInternal(tenantId: string, familyId: string | null, createRecipeDto: CreateRecipeDto) {
         const { name, type = 'MAIN', category } = createRecipeDto;
 
-        // [核心改造] 根据最终方案，为组件配方强制设置品类为 OTHER
         const finalCategory = type === 'MAIN' ? category : 'OTHER';
         if (type === 'MAIN' && !finalCategory) {
             throw new BadRequestException('产品配方必须指定一个品类。');
@@ -340,7 +361,6 @@ export class RecipesService {
 
         const preDoughFamilies = await this.preloadPreDoughFamilies(tenantId, ingredients, tx);
         this.calculatePreDoughTotalRatio(ingredients, preDoughFamilies);
-        // [核心改造] 传递 type 和 category 进行验证
         this._validateBakerPercentage(type, category, ingredients);
 
         await tx.recipeVersion.update({
@@ -348,23 +368,41 @@ export class RecipesService {
             data: { notes: recipeDto.notes },
         });
 
+        // [核心修复] 对所有 number 类型的 Decimal 字段进行转换
+        const targetTempForDb =
+            targetTemp === null || targetTemp === undefined ? undefined : new Prisma.Decimal(targetTemp);
+        const lossRatioForDb =
+            lossRatio === null || lossRatio === undefined ? undefined : new Prisma.Decimal(lossRatio);
+
         const component = await tx.recipeComponent.create({
             data: {
                 recipeVersionId: versionId,
                 name: name,
-                targetTemp: type === 'MAIN' ? targetTemp : undefined,
-                lossRatio: lossRatio,
+                targetTemp: type === 'MAIN' ? targetTempForDb : undefined,
+                lossRatio: lossRatioForDb,
                 procedure: procedure,
             },
         });
 
         for (const ingredientDto of ingredients) {
             const linkedPreDough = preDoughFamilies.get(ingredientDto.name);
+
+            // [核心修复] 对所有 number 类型的 Decimal 字段进行转换
+            const ratioForDb =
+                linkedPreDough || ingredientDto.ratio === null || ingredientDto.ratio === undefined
+                    ? null
+                    : new Prisma.Decimal(ingredientDto.ratio);
+
+            const flourRatioForDb =
+                ingredientDto.flourRatio === null || ingredientDto.flourRatio === undefined
+                    ? null
+                    : new Prisma.Decimal(ingredientDto.flourRatio);
+
             await tx.componentIngredient.create({
                 data: {
                     componentId: component.id,
-                    ratio: linkedPreDough ? null : ingredientDto.ratio,
-                    flourRatio: ingredientDto.flourRatio,
+                    ratio: ratioForDb,
+                    flourRatio: flourRatioForDb,
                     ingredientId: linkedPreDough ? null : ingredientDto.ingredientId,
                     linkedPreDoughId: linkedPreDough?.id,
                 },
@@ -377,7 +415,7 @@ export class RecipesService {
                     data: {
                         recipeVersionId: versionId,
                         name: productDto.name,
-                        baseDoughWeight: productDto.weight,
+                        baseDoughWeight: productDto.weight, // Prisma DMMF schema shows this is Decimal
                         procedure: productDto.procedure,
                     },
                 });
@@ -451,13 +489,17 @@ export class RecipesService {
 
             if (!existingIngredient) {
                 const isWater = ing.name === '水';
+
+                // [核心修复] 对所有 number 类型的 Decimal 字段进行转换
+                const waterContentForDb = isWater ? 1 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0;
+
                 existingIngredient = await tx.ingredient.create({
                     data: {
                         tenantId,
                         name: ing.name,
                         type: isWater ? IngredientType.UNTRACKED : IngredientType.STANDARD,
                         isFlour: isWater ? false : 'isFlour' in ing ? (ing.isFlour ?? false) : false,
-                        waterContent: isWater ? 1 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0,
+                        waterContent: new Prisma.Decimal(waterContentForDb),
                     },
                 });
             }
@@ -537,14 +579,12 @@ export class RecipesService {
         };
     }
 
-    // [核心改造] 重构 findProductsForTasks 方法，使其返回按品类分组的产品
     async findProductsForTasks(tenantId: string) {
         const recipeFamilies = await this.prisma.recipeFamily.findMany({
             where: {
                 tenantId,
                 type: 'MAIN',
                 deletedAt: null,
-                // [核心新增] 只查询那些拥有至少一个产品的配方
                 versions: {
                     some: {
                         isActive: true,
@@ -592,7 +632,6 @@ export class RecipesService {
 
         familiesWithProductionCount.sort((a, b) => b.productionTaskCount - a.productionTaskCount);
 
-        // [核心修复] 为累加器提供明确的类型定义，以解决所有 ESLint unsafe 错误
         const groupedByCategory: Record<string, Record<string, { id: string; name: string }[]>> = {};
 
         familiesWithProductionCount.forEach((family) => {
@@ -728,6 +767,11 @@ export class RecipesService {
             throw new NotFoundException('指定的配方版本不存在');
         }
 
+        const toCleanPercent = (decimal: Prisma.Decimal | null | undefined): number | null => {
+            if (decimal === null || decimal === undefined) return null;
+            return parseFloat(decimal.mul(100).toString());
+        };
+
         if (version.family.type === 'PRE_DOUGH' || version.family.type === 'EXTRA') {
             const componentSource = version.components[0];
             if (!componentSource) {
@@ -744,7 +788,7 @@ export class RecipesService {
                     .map((ing) => ({
                         id: ing.ingredient!.id,
                         name: ing.ingredient!.name,
-                        ratio: new Prisma.Decimal(ing.ratio!).mul(100).toNumber(),
+                        ratio: toCleanPercent(ing.ratio),
                         isRecipe: false,
                         isFlour: ing.ingredient!.isFlour,
                         waterContent: ing.ingredient!.waterContent.toNumber(),
@@ -784,7 +828,7 @@ export class RecipesService {
                         .map((i) => ({
                             id: i.ingredient!.id,
                             name: i.ingredient!.name,
-                            ratio: flourRatioInMainDough.mul(i.ratio!).mul(100).toNumber(),
+                            ratio: toCleanPercent(flourRatioInMainDough.mul(i.ratio!)),
                             isRecipe: false,
                             isFlour: i.ingredient!.isFlour,
                             waterContent: i.ingredient!.waterContent.toNumber(),
@@ -794,7 +838,7 @@ export class RecipesService {
                         id: preDoughFamily.id,
                         name: preDoughFamily.name,
                         type: 'PRE_DOUGH',
-                        flourRatioInMainDough: flourRatioInMainDough.mul(100).toNumber(),
+                        flourRatioInMainDough: toCleanPercent(flourRatioInMainDough) ?? undefined,
                         ingredients: ingredientsForTemplate,
                         procedure: preDoughRecipe.procedure,
                     });
@@ -803,7 +847,7 @@ export class RecipesService {
                 mainComponentIngredientsForForm.push({
                     id: ing.ingredient.id,
                     name: ing.ingredient.name,
-                    ratio: new Prisma.Decimal(ing.ratio).mul(100).toNumber(),
+                    ratio: toCleanPercent(ing.ratio),
                     isRecipe: false,
                     isFlour: ing.ingredient.isFlour,
                     waterContent: ing.ingredient.waterContent.toNumber(),
@@ -815,9 +859,7 @@ export class RecipesService {
             id: `main_${Date.now()}`,
             name: '主面团',
             type: 'MAIN_DOUGH' as const,
-            lossRatio: mainComponentSource.lossRatio
-                ? new Prisma.Decimal(mainComponentSource.lossRatio).mul(100).toNumber()
-                : 0,
+            lossRatio: toCleanPercent(mainComponentSource.lossRatio) ?? undefined,
             ingredients: mainComponentIngredientsForForm,
             procedure: mainComponentSource.procedure || [],
         };
@@ -836,7 +878,7 @@ export class RecipesService {
                         .map((ing) => ({
                             id: ing.ingredient?.id || ing.linkedExtra?.id || null,
                             name: ing.ingredient?.name || ing.linkedExtra?.name || '',
-                            ratio: ing.ratio ? new Prisma.Decimal(ing.ratio).mul(100).toNumber() : null,
+                            ratio: toCleanPercent(ing.ratio),
                             weightInGrams: ing.weightInGrams?.toNumber(),
                             isRecipe: !!ing.linkedExtra,
                             isFlour: ing.ingredient?.isFlour ?? false,
@@ -1068,13 +1110,11 @@ export class RecipesService {
         }
     }
 
-    // [核心改造] 更新烘焙百分比验证逻辑
     private _validateBakerPercentage(
         type: RecipeType,
         category: RecipeCategory | undefined,
         ingredients: DoughIngredientDto[],
     ) {
-        // [核心逻辑] 当品类为面包，或者类型为面种时，执行验证
         if (category !== RecipeCategory.BREAD && type !== RecipeType.PRE_DOUGH) {
             return;
         }

@@ -158,7 +158,6 @@ export class ProductionTasksService {
         );
     }
 
-    // [核心改造] 在 create 方法中增加品类验证
     async create(tenantId: string, userId: string, createProductionTaskDto: CreateProductionTaskDto) {
         const { startDate, endDate, notes, products } = createProductionTaskDto;
 
@@ -172,7 +171,6 @@ export class ProductionTasksService {
                 id: { in: productIds },
                 recipeVersion: { family: { tenantId } },
             },
-            // [核心新增] 在查询时，连同产品的配方品类一起查出来
             include: {
                 recipeVersion: {
                     include: {
@@ -190,7 +188,6 @@ export class ProductionTasksService {
             throw new NotFoundException('一个或多个目标产品不存在或不属于该店铺。');
         }
 
-        // [核心新增] 验证所有产品的品类是否一致
         const firstCategory = existingProducts[0].recipeVersion.family.category;
         const allSameCategory = existingProducts.every((p) => p.recipeVersion.family.category === firstCategory);
 
@@ -280,19 +277,16 @@ export class ProductionTasksService {
         return { task: createdTask, warning: stockWarning };
     }
 
-    // ... [其他所有方法保持不变，此处省略以遵守修改原则]
-
     private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<PrepTask | null> {
         if (!task || !task.items || task.items.length === 0) {
             return null;
         }
 
         const requiredPrepItems = new Map<string, RequiredPrepItem>();
-        const visitedRecipes = new Set<string>(); // 用于防止无限递归
+        const visitedRecipes = new Set<string>();
 
-        // 递归函数，用于解析单个配方的所有依赖
         const resolveDependencies = async (familyId: string, requiredWeight: Prisma.Decimal) => {
-            if (visitedRecipes.has(familyId)) return; // 防止循环依赖导致的死循环
+            if (visitedRecipes.has(familyId)) return;
             visitedRecipes.add(familyId);
 
             const recipeFamily = await this.prisma.recipeFamily.findFirst({
@@ -333,7 +327,6 @@ export class ProductionTasksService {
             for (const ing of mainComponent.ingredients) {
                 const weight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
 
-                // 如果原料本身是另一个配方 (PRE_DOUGH or EXTRA)，则递归解析
                 if (ing.linkedPreDough) {
                     const existing = requiredPrepItems.get(ing.linkedPreDough.id);
                     if (existing) {
@@ -344,20 +337,17 @@ export class ProductionTasksService {
                             totalWeight: weight,
                         });
                     }
-                    // 递归深入
                     await resolveDependencies(ing.linkedPreDough.id, weight);
                 }
             }
         };
 
-        // 遍历任务中的所有产品，启动第一层依赖解析
         for (const item of task.items) {
             const product = item.product;
             if (!product) continue;
 
             const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
-            // 解析配方组件中的子配方
             for (const component of product.recipeVersion.components) {
                 for (const ing of component.ingredients) {
                     if (ing.linkedPreDough && ing.flourRatio) {
@@ -387,7 +377,6 @@ export class ProductionTasksService {
                 }
             }
 
-            // 解析产品附加原料中的子配方
             for (const pIng of product.ingredients) {
                 if (pIng.linkedExtra) {
                     let weight = new Prisma.Decimal(0);
@@ -464,8 +453,8 @@ export class ProductionTasksService {
         }
 
         const combinedPrepTask = await this._getPrepItemsForTask(tenantId, {
-            ...activeTasks[0], // Use a base task structure
-            items: activeTasks.flatMap((task) => task.items), // Combine all items from all tasks
+            ...activeTasks[0],
+            items: activeTasks.flatMap((task) => task.items),
         });
 
         if (combinedPrepTask) {
@@ -1381,7 +1370,7 @@ export class ProductionTasksService {
                             data: {
                                 ingredientId: cons.ingredientId,
                                 userId: userId,
-                                changeInGrams: -cons.totalConsumed,
+                                changeInGrams: new Prisma.Decimal(-cons.totalConsumed), // [核心修复] 转换为 Decimal
                                 reason: `生产损耗: ${productName}`,
                             },
                         });
@@ -1413,7 +1402,7 @@ export class ProductionTasksService {
                             productionLogId: productionLog.id,
                             ingredientId: ingId,
                             skuId: cons.activeSkuId,
-                            quantityInGrams: cons.totalConsumed,
+                            quantityInGrams: new Prisma.Decimal(cons.totalConsumed), // [核心修复] 转换为 Decimal
                         },
                     });
 
