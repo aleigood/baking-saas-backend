@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-// [核心重命名] 导入 ComponentIngredientDto
 import { CreateRecipeDto, ComponentIngredientDto, ProductDto } from './dto/create-recipe.dto';
 import {
     Prisma,
@@ -14,7 +13,6 @@ import {
     Product,
     RecipeCategory,
 } from '@prisma/client';
-// [核心重命名] 导入 ComponentTemplate
 import { RecipeFormTemplateDto, ComponentTemplate } from './dto/recipe-form-template.dto';
 
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
@@ -222,7 +220,7 @@ export class RecipesService {
                 await tx.product.update({
                     where: { id: existingProduct.id },
                     data: {
-                        baseDoughWeight: productDto.weight,
+                        baseDoughWeight: new Prisma.Decimal(productDto.weight), // [核心修复]
                         procedure: productDto.procedure,
                     },
                 });
@@ -233,7 +231,7 @@ export class RecipesService {
                     data: {
                         recipeVersionId: versionId,
                         name: productDto.name,
-                        baseDoughWeight: productDto.weight,
+                        baseDoughWeight: new Prisma.Decimal(productDto.weight), // [核心修复]
                         procedure: productDto.procedure,
                     },
                 });
@@ -412,7 +410,7 @@ export class RecipesService {
                     data: {
                         recipeVersionId: versionId,
                         name: productDto.name,
-                        baseDoughWeight: productDto.weight,
+                        baseDoughWeight: new Prisma.Decimal(productDto.weight),
                         procedure: productDto.procedure,
                     },
                 });
@@ -710,7 +708,6 @@ export class RecipesService {
         return family;
     }
 
-    // [核心重构] getRecipeVersionFormTemplate 方法
     async getRecipeVersionFormTemplate(
         tenantId: string,
         familyId: string,
@@ -769,12 +766,7 @@ export class RecipesService {
             return parseFloat(decimal.mul(100).toString());
         };
 
-        // [核心逻辑] 根据品类和类型来构建统一的响应结构
-        const isBreadRecipe =
-            version.family.category === RecipeCategory.BREAD && version.family.type === RecipeType.MAIN;
-
-        // [场景1] 非面包类产品 或 预制/附加配方
-        if (!isBreadRecipe) {
+        if (version.family.type === 'PRE_DOUGH' || version.family.type === 'EXTRA') {
             const componentSource = version.components[0];
             if (!componentSource) {
                 throw new NotFoundException('源配方数据不完整: 缺少组件');
@@ -804,73 +796,98 @@ export class RecipesService {
             };
         }
 
-        // [场景2] 面包类产品
-        const mainComponentSource = version.components.find((c) => c.name === version.family.name);
-        if (!mainComponentSource) {
-            throw new NotFoundException('源配方数据不完整: 缺少主组件');
-        }
+        let componentsForForm: ComponentTemplate[] = [];
 
-        const mainComponentIngredientsForForm: ComponentTemplate['ingredients'] = [];
-        const preDoughComponentsForForm: ComponentTemplate[] = [];
+        if (version.family.category === RecipeCategory.BREAD) {
+            const mainComponentSource = version.components.find((c) => c.name === version.family.name);
+            if (!mainComponentSource) {
+                throw new NotFoundException('源配方数据不完整: 缺少主组件');
+            }
 
-        for (const ing of mainComponentSource.ingredients) {
-            if (ing.linkedPreDough) {
-                const preDoughFamily = ing.linkedPreDough;
-                const preDoughActiveVersion = preDoughFamily.versions.find((v) => v.isActive);
-                const preDoughRecipe = preDoughActiveVersion?.components?.[0];
+            const mainComponentIngredientsForForm: ComponentTemplate['ingredients'] = [];
+            const preDoughComponentsForForm: ComponentTemplate[] = [];
 
-                if (preDoughRecipe) {
-                    const flourRatioInMainDough = ing.flourRatio
-                        ? new Prisma.Decimal(ing.flourRatio)
-                        : new Prisma.Decimal(0);
-                    const ingredientsForTemplate = preDoughRecipe.ingredients
-                        .filter((i) => i.ingredient !== null && i.ratio !== null)
-                        .map((i) => ({
-                            id: i.ingredient!.id,
-                            name: i.ingredient!.name,
-                            ratio: toCleanPercent(flourRatioInMainDough.mul(i.ratio!)),
-                            isRecipe: false,
-                            isFlour: i.ingredient!.isFlour,
-                            waterContent: i.ingredient!.waterContent.toNumber(),
-                        }));
+            for (const ing of mainComponentSource.ingredients) {
+                if (ing.linkedPreDough) {
+                    const preDoughFamily = ing.linkedPreDough;
+                    const preDoughActiveVersion = preDoughFamily.versions.find((v) => v.isActive);
+                    const preDoughRecipe = preDoughActiveVersion?.components?.[0];
 
-                    preDoughComponentsForForm.push({
-                        id: preDoughFamily.id,
-                        name: preDoughFamily.name,
-                        type: 'PRE_DOUGH',
-                        flourRatioInMainDough: toCleanPercent(flourRatioInMainDough) ?? undefined,
-                        ingredients: ingredientsForTemplate,
-                        procedure: preDoughRecipe.procedure,
+                    if (preDoughRecipe) {
+                        const flourRatioInMainDough = ing.flourRatio
+                            ? new Prisma.Decimal(ing.flourRatio)
+                            : new Prisma.Decimal(0);
+                        const ingredientsForTemplate = preDoughRecipe.ingredients
+                            .filter((i) => i.ingredient !== null && i.ratio !== null)
+                            .map((i) => ({
+                                id: i.ingredient!.id,
+                                name: i.ingredient!.name,
+                                ratio: toCleanPercent(flourRatioInMainDough.mul(i.ratio!)),
+                                isRecipe: false,
+                                isFlour: i.ingredient!.isFlour,
+                                waterContent: i.ingredient!.waterContent.toNumber(),
+                            }));
+
+                        preDoughComponentsForForm.push({
+                            id: preDoughFamily.id,
+                            name: preDoughFamily.name,
+                            type: 'PRE_DOUGH',
+                            flourRatioInMainDough: toCleanPercent(flourRatioInMainDough) ?? undefined,
+                            ingredients: ingredientsForTemplate,
+                            procedure: preDoughRecipe.procedure,
+                        });
+                    }
+                } else if (ing.ingredient && ing.ratio) {
+                    mainComponentIngredientsForForm.push({
+                        id: ing.ingredient.id,
+                        name: ing.ingredient.name,
+                        ratio: toCleanPercent(ing.ratio),
+                        isRecipe: false,
+                        isFlour: ing.ingredient.isFlour,
+                        waterContent: ing.ingredient.waterContent.toNumber(),
                     });
                 }
-            } else if (ing.ingredient && ing.ratio) {
-                mainComponentIngredientsForForm.push({
-                    id: ing.ingredient.id,
-                    name: ing.ingredient.name,
+            }
+
+            const mainComponentForForm: ComponentTemplate = {
+                id: `main_${Date.now()}`,
+                name: '主面团',
+                type: 'MAIN_DOUGH',
+                lossRatio: toCleanPercent(mainComponentSource.lossRatio) ?? undefined,
+                ingredients: mainComponentIngredientsForForm,
+                procedure: mainComponentSource.procedure || [],
+            };
+            componentsForForm = [mainComponentForForm, ...preDoughComponentsForForm];
+        } else {
+            const componentSource = version.components[0];
+            if (!componentSource) {
+                throw new NotFoundException('源配方数据不完整: 缺少组件');
+            }
+            const baseComponent: ComponentTemplate = {
+                id: componentSource.id,
+                name: componentSource.name,
+                type: 'BASE_COMPONENT',
+                lossRatio: toCleanPercent(componentSource.lossRatio) ?? undefined,
+                ingredients: componentSource.ingredients.map((ing) => ({
+                    id: ing.ingredient!.id,
+                    name: ing.ingredient!.name,
                     ratio: toCleanPercent(ing.ratio),
                     isRecipe: false,
-                    isFlour: ing.ingredient.isFlour,
-                    waterContent: ing.ingredient.waterContent.toNumber(),
-                });
-            }
+                    isFlour: ing.ingredient!.isFlour,
+                    waterContent: ing.ingredient!.waterContent.toNumber(),
+                })),
+                procedure: componentSource.procedure || [],
+            };
+            componentsForForm = [baseComponent];
         }
-
-        const mainComponentForForm: ComponentTemplate = {
-            id: `main_${Date.now()}`,
-            name: '主面团',
-            type: 'MAIN_DOUGH',
-            lossRatio: toCleanPercent(mainComponentSource.lossRatio) ?? undefined,
-            ingredients: mainComponentIngredientsForForm,
-            procedure: mainComponentSource.procedure || [],
-        };
 
         const formTemplate: RecipeFormTemplateDto = {
             name: version.family.name,
-            type: 'MAIN',
+            type: version.family.type,
             category: version.family.category,
             notes: version.notes || '',
-            targetTemp: mainComponentSource.targetTemp?.toNumber() ?? undefined,
-            components: [mainComponentForForm, ...preDoughComponentsForForm],
+            targetTemp: version.components[0]?.targetTemp?.toNumber() ?? undefined,
+            components: componentsForForm,
             products: version.products.map((p) => {
                 const processIngredients = (type: ProductIngredientType) => {
                     return p.ingredients

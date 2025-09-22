@@ -630,12 +630,12 @@ export class CostingService {
             };
         });
 
-        const summaryRowName = product.recipeVersion.family.category === RecipeCategory.BREAD ? '基础面团' : '基础组件';
+        const summaryRowName = product.recipeVersion.family.category === RecipeCategory.BREAD ? '基础面团' : '底料';
         const allExtraIngredients = [
             {
                 id: 'component-summary',
                 name: summaryRowName,
-                type: '组件',
+                type: '原料',
                 cost: componentGroups.reduce((sum, g) => sum + g.totalCost, 0),
                 weightInGrams: product.baseDoughWeight.toNumber(),
             },
