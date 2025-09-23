@@ -705,7 +705,63 @@ export class RecipesService {
         if (!family) {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
-        return family;
+
+        // [核心修复] 使用类型安全的方式来处理数据并附加 extraInfo
+        const processedFamily = {
+            ...family,
+            versions: family.versions.map((version) => {
+                return {
+                    ...version,
+                    components: version.components.map((component) => {
+                        const ingredientNotes = new Map<string, string>();
+                        const noteRegex = /@(?:\[)?(.*?)(?:\])?\((.*?)\)/g;
+                        const onlyNotesRegex = /^(?:\s*@(?:\[)?(?:.*?)(?:\])?\((?:.*?)\)\s*)+$/;
+
+                        // 过滤掉只包含附加说明的制作步骤
+                        const cleanedProcedure = component.procedure
+                            .map((step) => {
+                                const stepMatches = [...step.matchAll(noteRegex)];
+                                for (const match of stepMatches) {
+                                    const [, ingredientName, note] = match;
+                                    if (ingredientName && note) {
+                                        ingredientNotes.set(ingredientName.trim(), note.trim());
+                                    }
+                                }
+
+                                if (onlyNotesRegex.test(step)) {
+                                    return null;
+                                }
+
+                                return step.replace(noteRegex, (_match, ingredientName: string) => {
+                                    return ingredientName.trim();
+                                });
+                            })
+                            .filter((step): step is string => step !== null);
+
+                        return {
+                            ...component,
+                            procedure: cleanedProcedure,
+                            ingredients: component.ingredients.map((ing) => {
+                                if (ing.ingredient) {
+                                    const extraInfo = ingredientNotes.get(ing.ingredient.name);
+                                    // 创建一个新的 ingredient 对象来附加属性，而不是直接修改
+                                    return {
+                                        ...ing,
+                                        ingredient: {
+                                            ...ing.ingredient,
+                                            extraInfo: extraInfo || undefined,
+                                        },
+                                    };
+                                }
+                                return ing;
+                            }),
+                        };
+                    }),
+                };
+            }),
+        };
+
+        return processedFamily;
     }
 
     async getRecipeVersionFormTemplate(
@@ -771,6 +827,7 @@ export class RecipesService {
             if (!componentSource) {
                 throw new NotFoundException('源配方数据不完整: 缺少组件');
             }
+
             const baseComponent: ComponentTemplate = {
                 id: componentSource.id,
                 name: componentSource.name,
@@ -892,15 +949,18 @@ export class RecipesService {
                 const processIngredients = (type: ProductIngredientType) => {
                     return p.ingredients
                         .filter((ing) => ing.type === type && (ing.ingredient || ing.linkedExtra))
-                        .map((ing) => ({
-                            id: ing.ingredient?.id || ing.linkedExtra?.id || null,
-                            name: ing.ingredient?.name || ing.linkedExtra?.name || '',
-                            ratio: toCleanPercent(ing.ratio),
-                            weightInGrams: ing.weightInGrams?.toNumber(),
-                            isRecipe: !!ing.linkedExtra,
-                            isFlour: ing.ingredient?.isFlour ?? false,
-                            waterContent: ing.ingredient?.waterContent.toNumber() ?? 0,
-                        }));
+                        .map((ing) => {
+                            const name = ing.ingredient?.name || ing.linkedExtra?.name || '';
+                            return {
+                                id: ing.ingredient?.id || ing.linkedExtra?.id || null,
+                                name,
+                                ratio: toCleanPercent(ing.ratio),
+                                weightInGrams: ing.weightInGrams?.toNumber(),
+                                isRecipe: !!ing.linkedExtra,
+                                isFlour: ing.ingredient?.isFlour ?? false,
+                                waterContent: ing.ingredient?.waterContent.toNumber() ?? 0,
+                            };
+                        });
                 };
                 return {
                     name: p.name,

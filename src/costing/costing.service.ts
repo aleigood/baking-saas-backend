@@ -45,6 +45,7 @@ export interface CalculatedExtraIngredientInfo {
     cost: number;
     weightInGrams: number;
     ratio?: number;
+    extraInfo?: string; // [核心新增] 为附加原料增加 extraInfo 字段
 }
 
 // [核心重命名] CalculatedProductCostDetails.doughGroups -> componentGroups
@@ -422,6 +423,39 @@ export class CostingService {
         return totalWaterWeight.div(totalFlourWeight);
     }
 
+    private _parseProcedureForNotes(
+        procedure: string[] | undefined | null,
+        ingredientNotes: Map<string, string>,
+    ): string[] {
+        if (!procedure) {
+            return [];
+        }
+        const noteRegex = /@(?:\[)?(.*?)(?:\])?\((.*?)\)/g;
+        const onlyNotesRegex = /^(?:\s*@(?:\[)?(?:.*?)(?:\])?\((?:.*?)\)\s*)+$/;
+
+        const cleanedProcedure = procedure
+            .map((step) => {
+                const stepMatches = [...step.matchAll(noteRegex)];
+                for (const match of stepMatches) {
+                    const [, ingredientName, note] = match;
+                    if (ingredientName && note) {
+                        ingredientNotes.set(ingredientName.trim(), note.trim());
+                    }
+                }
+
+                if (onlyNotesRegex.test(step)) {
+                    return null;
+                }
+
+                return step.replace(noteRegex, (_match, ingredientName: string) => {
+                    return ingredientName.trim();
+                });
+            })
+            .filter((step): step is string => step !== null);
+
+        return cleanedProcedure;
+    }
+
     async getCalculatedProductDetails(tenantId: string, productId: string): Promise<CalculatedProductCostDetails> {
         const product = await this.getFullProduct(tenantId, productId);
         if (!product) {
@@ -462,10 +496,13 @@ export class CostingService {
             isBaseComponent: boolean,
             flourWeightReference: Prisma.Decimal,
         ): CalculatedComponentGroup => {
+            const ingredientNotes = new Map<string, string>();
+            const cleanedProcedure = this._parseProcedureForNotes(component.procedure, ingredientNotes);
+
             const group: CalculatedComponentGroup = {
                 name: isBaseComponent ? '基础组件' : component.name,
                 ingredients: [],
-                procedure: component.procedure,
+                procedure: cleanedProcedure,
                 totalCost: 0,
             };
 
@@ -533,13 +570,19 @@ export class CostingService {
 
                     const effectiveRatio = new Prisma.Decimal(ingredient.ratio ?? 0).mul(parentConversionFactor);
 
-                    let extraInfo: string | undefined = undefined;
+                    const extraInfoParts: string[] = [];
+                    const procedureNote = ingredientNotes.get(ingredient.ingredient.name);
+                    if (procedureNote) {
+                        extraInfoParts.push(procedureNote);
+                    }
+
                     if (
                         isBaseComponent &&
                         ingredient.ingredient.name === '水' &&
                         product.recipeVersion.family.category === RecipeCategory.BREAD
                     ) {
-                        extraInfo = `总水量: ${trueHydration.mul(100).toDP(1).toNumber()}%`;
+                        const waterNote = `总水量: ${trueHydration.mul(100).toDP(1).toNumber()}%`;
+                        extraInfoParts.push(waterNote);
                     }
 
                     group.ingredients.push({
@@ -548,7 +591,7 @@ export class CostingService {
                         weightInGrams: weight.toNumber(),
                         pricePerKg: pricePerKg,
                         cost: cost.toDP(2).toNumber(),
-                        extraInfo,
+                        extraInfo: extraInfoParts.length > 0 ? extraInfoParts.join('\n') : undefined,
                     });
                     group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
                 }
@@ -627,11 +670,12 @@ export class CostingService {
                 cost: cost.toDP(2).toNumber(),
                 weightInGrams: finalWeightInGrams.toNumber(),
                 ratio: ing.ratio ? ing.ratio.toNumber() : undefined,
+                extraInfo: undefined,
             };
         });
 
         const summaryRowName = product.recipeVersion.family.category === RecipeCategory.BREAD ? '基础面团' : '底料';
-        const allExtraIngredients = [
+        const allExtraIngredients: CalculatedExtraIngredientInfo[] = [
             {
                 id: 'component-summary',
                 name: summaryRowName,
@@ -645,7 +689,9 @@ export class CostingService {
         const groupedExtraIngredients = allExtraIngredients.reduce(
             (acc, ing) => {
                 const typeKey = ing.type || '其他';
-                if (!acc[typeKey]) acc[typeKey] = [];
+                if (!acc[typeKey]) {
+                    acc[typeKey] = [];
+                }
                 acc[typeKey].push(ing);
                 return acc;
             },

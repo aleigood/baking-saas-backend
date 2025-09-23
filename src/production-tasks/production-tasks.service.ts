@@ -735,7 +735,7 @@ export class ProductionTasksService {
             ? (task.log!.recipeSnapshot as unknown as TaskWithDetails)
             : task;
 
-        const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, task.items); // [核心重命名]
+        const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, task.items);
         const { stockWarning } = await this._calculateStockWarning(tenantId, task);
 
         return {
@@ -744,7 +744,7 @@ export class ProductionTasksService {
             notes: task.notes,
             stockWarning,
             prepTask: await this._getPrepItemsForTask(tenantId, task),
-            componentGroups, // [核心重命名]
+            componentGroups,
             items: task.items.map((item) => ({
                 id: item.product.id,
                 name: item.product.name,
@@ -753,7 +753,39 @@ export class ProductionTasksService {
         };
     }
 
-    // [核心重命名] _calculateDoughGroups -> _calculateComponentGroups
+    private _parseProcedureForNotes(
+        procedure: string[] | undefined | null,
+        ingredientNotes: Map<string, string>,
+    ): string[] {
+        if (!procedure) {
+            return [];
+        }
+        const noteRegex = /@(?:\[)?(.*?)(?:\])?\((.*?)\)/g;
+        const onlyNotesRegex = /^(?:\s*@(?:\[)?(?:.*?)(?:\])?\((?:.*?)\)\s*)+$/;
+
+        const cleanedProcedure = procedure
+            .map((step) => {
+                const stepMatches = [...step.matchAll(noteRegex)];
+                for (const match of stepMatches) {
+                    const [, ingredientName, note] = match;
+                    if (ingredientName && note) {
+                        ingredientNotes.set(ingredientName.trim(), note.trim());
+                    }
+                }
+
+                if (onlyNotesRegex.test(step)) {
+                    return null;
+                }
+
+                return step.replace(noteRegex, (_match, ingredientName: string) => {
+                    return ingredientName.trim();
+                });
+            })
+            .filter((step): step is string => step !== null);
+
+        return cleanedProcedure;
+    }
+
     private _calculateComponentGroups(
         task: TaskWithDetails,
         query: QueryTaskDetailDto,
@@ -768,25 +800,28 @@ export class ProductionTasksService {
         const componentsMap = new Map<
             string,
             { familyName: string; category: RecipeCategory; items: TaskItemWithDetails[] }
-        >(); // [核心重命名]
+        >();
         task.items.forEach((item) => {
             const family = item.product.recipeVersion.family;
             if (!componentsMap.has(family.id)) {
                 componentsMap.set(family.id, {
                     familyName: family.name,
-                    category: family.category, // [核心新增] 存储品类
+                    category: family.category,
                     items: [],
                 });
             }
             componentsMap.get(family.id)!.items.push(item);
         });
 
-        const componentGroups: ComponentGroup[] = []; // [核心重命名]
+        const componentGroups: ComponentGroup[] = [];
         for (const [familyId, data] of componentsMap.entries()) {
             const firstItem = data.items[0];
             const baseComponentInfo = firstItem.product.recipeVersion.components[0];
+            const ingredientNotes = new Map<string, string>();
+            const cleanedProcedure = this._parseProcedureForNotes(baseComponentInfo.procedure, ingredientNotes);
+
             const baseComponentIngredientsMap = new Map<string, TaskIngredientDetail>();
-            let totalComponentWeight = new Prisma.Decimal(0); // [核心重命名]
+            let totalComponentWeight = new Prisma.Decimal(0);
 
             let totalFlourForFamily = new Prisma.Decimal(0);
             for (const item of data.items) {
@@ -860,6 +895,7 @@ export class ProductionTasksService {
                             brand,
                             weightInGrams: currentTotalWeight.toNumber(),
                             isRecipe,
+                            extraInfo: ingredientNotes.get(name) || null,
                         };
                         baseComponentIngredientsMap.set(id, newIngredient);
                     }
@@ -869,7 +905,7 @@ export class ProductionTasksService {
             if (canCalculateIce && baseComponentInfo.targetTemp && waterIngredientId) {
                 const waterIngredient = baseComponentIngredientsMap.get(waterIngredientId);
                 if (waterIngredient) {
-                    const extraInfoParts: string[] = [];
+                    const autoCalculatedParts: string[] = [];
                     const targetWaterTemp = this._calculateWaterTemp(
                         baseComponentInfo.targetTemp.toNumber(),
                         mixerType,
@@ -884,13 +920,13 @@ export class ProductionTasksService {
                             totalWaterForFamily.toNumber(),
                             totalWaterForFamily.toNumber(),
                         );
-                        extraInfoParts.push(
+                        autoCalculatedParts.push(
                             `需将所有水换成冰块，且其他液体原料需冷却至 ${new Prisma.Decimal(requiredTemp)
                                 .toDP(1)
                                 .toNumber()}°C`,
                         );
                     } else if (iceWeight > 0) {
-                        extraInfoParts.push(`需要替换 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰`);
+                        autoCalculatedParts.push(`需要替换 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰`);
                     }
 
                     if (!totalFlourForFamily.isZero()) {
@@ -899,18 +935,29 @@ export class ProductionTasksService {
                             const holdBackWater = totalWaterForFamily.sub(totalFlourForFamily.mul(0.65));
                             const holdBackWaterDisplay = holdBackWater.toDP(1);
                             if (holdBackWaterDisplay.gt(0)) {
-                                extraInfoParts.push(`需要保留 ${holdBackWaterDisplay.toNumber()}g 水在搅拌过程中加入`);
+                                autoCalculatedParts.push(
+                                    `需要保留 ${holdBackWaterDisplay.toNumber()}g 水在搅拌过程中加入`,
+                                );
                             }
                         }
                     }
 
-                    if (extraInfoParts.length > 0) {
-                        waterIngredient.extraInfo = extraInfoParts.join('\n');
+                    const finalInfoParts: string[] = [];
+                    if (autoCalculatedParts.length > 0) {
+                        finalInfoParts.push(...autoCalculatedParts);
+                    }
+
+                    if (waterIngredient.extraInfo) {
+                        finalInfoParts.push(waterIngredient.extraInfo);
+                    }
+
+                    if (finalInfoParts.length > 0) {
+                        waterIngredient.extraInfo = finalInfoParts.join('\n');
                     }
                 }
             }
 
-            const products: ProductComponentSummary[] = []; // [核心重命名]
+            const products: ProductComponentSummary[] = [];
             const productDetails: ProductDetails[] = [];
             data.items.forEach((item) => {
                 const originalItem = originalItemsMap.get(item.productId);
@@ -955,7 +1002,7 @@ export class ProductionTasksService {
 
                 const lossRatio = new Prisma.Decimal(baseComponentInfo?.lossRatio || 0);
                 const divisor = new Prisma.Decimal(1).sub(lossRatio);
-                const adjustedBaseComponentWeight = !divisor.isZero() // [核心重命名]
+                const adjustedBaseComponentWeight = !divisor.isZero()
                     ? new Prisma.Decimal(product.baseDoughWeight).div(divisor)
                     : new Prisma.Decimal(product.baseDoughWeight);
                 const correctedDivisionWeight = adjustedBaseComponentWeight.add(mixInWeightPerUnit);
@@ -964,7 +1011,7 @@ export class ProductionTasksService {
                     id: product.id,
                     name: product.name,
                     quantity: quantity,
-                    totalBaseComponentWeight: new Prisma.Decimal(product.baseDoughWeight).mul(quantity).toNumber(), // [核心重命名]
+                    totalBaseComponentWeight: new Prisma.Decimal(product.baseDoughWeight).mul(quantity).toNumber(),
                     divisionWeight: correctedDivisionWeight.toNumber(),
                 });
 
@@ -979,10 +1026,9 @@ export class ProductionTasksService {
             });
 
             componentGroups.push({
-                // [核心重命名]
                 familyId,
                 familyName: data.familyName,
-                category: data.category, // [核心新增]
+                category: data.category,
                 productsDescription: data.items
                     .map((i) => {
                         const originalItem = originalItemsMap.get(i.productId);
@@ -990,12 +1036,11 @@ export class ProductionTasksService {
                         return `${i.product.name} x${quantity}`;
                     })
                     .join(', '),
-                totalComponentWeight: totalComponentWeight.toNumber(), // [核心重命名]
+                totalComponentWeight: totalComponentWeight.toNumber(),
                 baseComponentIngredients: Array.from(baseComponentIngredientsMap.values()).sort(
-                    // [核心重命名]
                     (a, b) => (b.isRecipe ? 1 : 0) - (a.isRecipe ? 1 : 0),
                 ),
-                baseComponentProcedure: baseComponentInfo.procedure || [], // [核心重命名]
+                baseComponentProcedure: cleanedProcedure,
                 products,
                 productDetails,
             });
