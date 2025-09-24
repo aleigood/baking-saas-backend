@@ -714,28 +714,33 @@ export class RecipesService {
                     ...version,
                     components: version.components.map((component) => {
                         const ingredientNotes = new Map<string, string>();
-                        const noteRegex = /@(?:\[)?(.*?)(?:\])?\((.*?)\)/g;
-                        const onlyNotesRegex = /^(?:\s*@(?:\[)?(?:.*?)(?:\])?\((?:.*?)\)\s*)+$/;
+                        // [核心修改] 移除正则表达式中不必要的转义字符
+                        const noteRegex = /@(?:\[)?(.*?)(?:\])?[(（](.*?)[)）]/g;
 
-                        // 过滤掉只包含附加说明的制作步骤
+                        // [核心修改] 过滤和清理制作步骤
                         const cleanedProcedure = component.procedure
                             .map((step) => {
+                                // 首先，提取所有附加说明，存入 map
                                 const stepMatches = [...step.matchAll(noteRegex)];
                                 for (const match of stepMatches) {
+                                    // match[1] 是原料名, match[2] 是括号内的说明
                                     const [, ingredientName, note] = match;
                                     if (ingredientName && note) {
                                         ingredientNotes.set(ingredientName.trim(), note.trim());
                                     }
                                 }
 
-                                if (onlyNotesRegex.test(step)) {
+                                // 将所有"@原料(说明)"格式的文本块替换为空字符串，并去除前后空格
+                                const cleanedStep = step.replace(noteRegex, '').trim();
+
+                                // 如果清理后的步骤为空字符串，则返回 null，后续将被过滤掉
+                                if (cleanedStep === '') {
                                     return null;
                                 }
 
-                                return step.replace(noteRegex, (_match, ingredientName: string) => {
-                                    return ingredientName.trim();
-                                });
+                                return cleanedStep;
                             })
+                            // 过滤掉所有 null 值的步骤
                             .filter((step): step is string => step !== null);
 
                         return {
