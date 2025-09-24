@@ -679,7 +679,7 @@ export class CostingService {
             };
         });
 
-        const summaryRowName = product.recipeVersion.family.category === RecipeCategory.BREAD ? '基础面团' : '底料';
+        const summaryRowName = product.recipeVersion.family.category === RecipeCategory.BREAD ? '基础面团' : '基础原料';
         const allExtraIngredients: CalculatedExtraIngredientInfo[] = [
             {
                 id: 'component-summary',
