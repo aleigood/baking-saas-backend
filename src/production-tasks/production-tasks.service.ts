@@ -1005,12 +1005,11 @@ export class ProductionTasksService {
 
                 const mixInWeightPerUnit = mixIns.reduce((sum, i) => sum.add(i.weightInGrams), new Prisma.Decimal(0));
 
-                const lossRatio = new Prisma.Decimal(baseComponentInfo?.lossRatio || 0);
-                const divisor = new Prisma.Decimal(1).sub(lossRatio);
-                const adjustedBaseComponentWeight = !divisor.isZero()
-                    ? new Prisma.Decimal(product.baseDoughWeight).div(divisor)
-                    : new Prisma.Decimal(product.baseDoughWeight);
-                const correctedDivisionWeight = adjustedBaseComponentWeight.add(mixInWeightPerUnit);
+                // [中文注释] 修正分割重量的计算。
+                // 分割重量应该是产品定义的基础面团克重，加上需要额外搅拌进去的原料（mixIns）的克重。
+                // 损耗率（lossRatio）已经在此前的总原料计算中（通过_calculateTotalFlourWeightForProduct）考虑，
+                // 不应影响单个产品的分割克重，否则就失去了设置损耗率来弥补操作损耗的意义。
+                const correctedDivisionWeight = new Prisma.Decimal(product.baseDoughWeight).add(mixInWeightPerUnit);
 
                 products.push({
                     id: product.id,
