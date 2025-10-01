@@ -66,8 +66,8 @@ export interface CalculatedRecipeDetails {
     id: string;
     name: string;
     type: RecipeType;
-    totalWeight: number; // 含义：原料投料总重 (Input)
-    targetWeight?: number; // [修改] 变为可选字段，仅在有损耗时提供
+    totalWeight: number;    // 含义：原料投料总重 (Input)
+    targetWeight?: number;  // 含义：目标产出重量 (Output)，可选
     procedure: string[];
     ingredients: CalculatedRecipeIngredient[];
 }
@@ -169,7 +169,6 @@ export class CostingService {
         );
 
         if (totalRatio.isZero()) {
-            // 如果没有原料，则直接返回，totalWeight 等于目标重量
             return {
                 id: recipeFamily.id,
                 name: recipeFamily.name,
@@ -205,10 +204,10 @@ export class CostingService {
             })
             .filter(Boolean) as CalculatedRecipeIngredient[];
 
-        const finalInputWeight = adjustedTotalWeight.toDP(1).toNumber();
-        const finalOutputWeight = new Prisma.Decimal(outputWeightTarget).toDP(1).toNumber();
+        // [核心修改] 将小数位数从 1 位修正为 2 位，与原料保持一致
+        const finalInputWeight = adjustedTotalWeight.toDP(2).toNumber();
+        const finalOutputWeight = new Prisma.Decimal(outputWeightTarget).toDP(2).toNumber();
 
-        // [核心修改] 构建基础返回对象
         const response: CalculatedRecipeDetails = {
             id: recipeFamily.id,
             name: recipeFamily.name,
@@ -218,7 +217,6 @@ export class CostingService {
             ingredients: calculatedIngredients,
         };
 
-        // [核心修改] 只有当两个重量不相等（即有损耗）时，才添加 targetWeight 字段
         if (finalInputWeight !== finalOutputWeight) {
             response.targetWeight = finalOutputWeight;
         }
@@ -807,7 +805,6 @@ export class CostingService {
     }
 
     private async getFullProduct(tenantId: string, productId: string): Promise<FullProduct | null> {
-        // [核心修改] 扩展 Prisma 查询，使其能够深入查询 linkedExtra (附加项) 的完整配方信息，以便进行损耗计算
         return this.prisma.product.findFirst({
             where: { id: productId, recipeVersion: { family: { tenantId } } },
             include: {
@@ -927,7 +924,6 @@ export class CostingService {
             }
         }
 
-        // [核心修改] 迭代产品的附加原料，并处理其损耗
         for (const pIng of product.ingredients || []) {
             let requiredOutputWeight = new Prisma.Decimal(0);
             if (pIng.weightInGrams) {
@@ -939,7 +935,6 @@ export class CostingService {
             if (requiredOutputWeight.isZero() || requiredOutputWeight.isNegative()) continue;
 
             if (pIng.linkedExtra) {
-                // [核心修改] 如果附加项是另一个配方 (如卡仕达酱)，则递归处理它
                 const extraComponent = pIng.linkedExtra.versions?.[0]?.components?.[0];
                 if (extraComponent) {
                     processComponentRecursively(
@@ -948,7 +943,6 @@ export class CostingService {
                     );
                 }
             } else if (pIng.ingredientId) {
-                // 如果附加项是普通原料，则直接累加
                 const currentWeight = flattenedIngredients.get(pIng.ingredientId) || new Prisma.Decimal(0);
                 flattenedIngredients.set(pIng.ingredientId, currentWeight.add(requiredOutputWeight));
             }
