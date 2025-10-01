@@ -66,8 +66,8 @@ export interface CalculatedRecipeDetails {
     id: string;
     name: string;
     type: RecipeType;
-    totalWeight: number;    // 含义：原料投料总重 (Input)
-    targetWeight?: number;  // 含义：目标产出重量 (Output)，可选
+    totalWeight: number; // 含义：原料投料总重 (Input)
+    targetWeight?: number; // 含义：目标产出重量 (Output)，可选
     procedure: string[];
     ingredients: CalculatedRecipeIngredient[];
 }
