@@ -1,4 +1,4 @@
-import { PrismaClient, Role, RecipeType, ProductIngredientType, RecipeCategory } from '@prisma/client'; // [核心修改] 导入 RecipeCategory
+import { PrismaClient, Role, RecipeType, ProductIngredientType, RecipeCategory, Prisma } from '@prisma/client'; // [核心修改] 导入 Prisma 以使用 Decimal
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -595,12 +595,16 @@ async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[])
                         where: { tenantId, name: ing.name, type: 'PRE_DOUGH', deletedAt: null },
                     });
 
+                    // [核心修复] 使用 new Prisma.Decimal 包装所有 ratio 和 flourRatio，确保精度
+                    const ratioForDb = linkedPreDough || ing.ratio === undefined ? null : new Prisma.Decimal(ing.ratio);
+                    const flourRatioForDb = ing.flourRatio === undefined ? null : new Prisma.Decimal(ing.flourRatio);
+
                     await tx.componentIngredient.create({
                         // [核心重命名] doughIngredient -> componentIngredient
                         data: {
                             componentId: component.id, // [核心重命名] doughId -> componentId
-                            ratio: linkedPreDough ? null : ing.ratio,
-                            flourRatio: ing.flourRatio,
+                            ratio: ratioForDb,
+                            flourRatio: flourRatioForDb,
                             ingredientId: linkedIngredient ? linkedIngredient.id : null,
                             linkedPreDoughId: linkedPreDough ? linkedPreDough.id : null,
                         },
@@ -615,7 +619,7 @@ async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[])
                         data: {
                             recipeVersionId: recipeVersion.id,
                             name: p.name,
-                            baseDoughWeight: p.weight,
+                            baseDoughWeight: p.weight, // [核心修复] baseDoughWeight 字段需要是 Decimal 类型
                             procedure: p.procedure,
                         },
                     });
@@ -630,12 +634,20 @@ async function seedRecipesForTenant(tenantId: string, recipes: RecipeSeedData[])
                             where: { tenantId, name: pi.name, type: 'EXTRA', deletedAt: null },
                         });
 
+                        // [核心修复] 对产品原料中的 ratio 和 weightInGrams 也使用 Prisma.Decimal 确保精度
+                        const ratioForDb =
+                            'ratio' in pi && pi.ratio !== undefined ? new Prisma.Decimal(pi.ratio) : undefined;
+                        const weightInGramsForDb =
+                            'weightInGrams' in pi && pi.weightInGrams !== undefined
+                                ? new Prisma.Decimal(pi.weightInGrams)
+                                : undefined;
+
                         await tx.productIngredient.create({
                             data: {
                                 productId: product.id,
                                 type: pi.type,
-                                ratio: 'ratio' in pi ? pi.ratio : undefined,
-                                weightInGrams: 'weightInGrams' in pi ? pi.weightInGrams : undefined,
+                                ratio: ratioForDb,
+                                weightInGrams: weightInGramsForDb,
                                 ingredientId: linkedIngredient ? linkedIngredient.id : null,
                                 linkedExtraId: linkedExtra ? linkedExtra.id : null,
                             },
