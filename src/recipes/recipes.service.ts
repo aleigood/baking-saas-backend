@@ -520,6 +520,13 @@ export class RecipesService {
                         },
                     },
                 },
+                // 新增: 计算每种配方被引用的次数
+                _count: {
+                    select: {
+                        usedInComponents: true, // 作为 PRE_DOUGH 被引用的次数
+                        usedInProducts: true, // 作为 EXTRA 被引用的次数
+                    },
+                },
             },
         });
 
@@ -533,8 +540,18 @@ export class RecipesService {
                         0,
                     ) || 0;
 
+                // 新增: 合并计算总的引用次数
+                const usageCount = (family._count?.usedInComponents || 0) + (family._count?.usedInProducts || 0);
+
+                if (family.type !== 'MAIN') {
+                    // 对于面种和馅料，直接返回所需信息，生产任务数为0
+                    // 新增: 加上 productionTaskCount: 0 修复类型错误
+                    return { ...family, ingredientCount, usageCount, productionTaskCount: 0 };
+                }
+
+                // 以下逻辑仅针对主配方
                 if (!activeVersion || activeVersion.products.length === 0) {
-                    return { ...family, productCount, ingredientCount, productionTaskCount: 0 };
+                    return { ...family, productCount, ingredientCount, productionTaskCount: 0, usageCount };
                 }
 
                 const productIds = activeVersion.products.map((p) => p.id);
@@ -555,6 +572,7 @@ export class RecipesService {
                     productCount,
                     ingredientCount,
                     productionTaskCount: distinctTasks.length,
+                    usageCount,
                 };
             }),
         );
@@ -563,13 +581,20 @@ export class RecipesService {
             .filter((family) => family.type === 'MAIN')
             .sort((a, b) => (b.productionTaskCount || 0) - (a.productionTaskCount || 0));
 
-        const otherRecipes = familiesWithCounts
-            .filter((family) => family.type === 'PRE_DOUGH' || family.type === 'EXTRA')
+        // 修改: 将 otherRecipes 按类型（PRE_DOUGH, EXTRA）分组
+        const preDoughs = familiesWithCounts
+            .filter((family) => family.type === 'PRE_DOUGH')
             .sort((a, b) => a.name.localeCompare(b.name));
 
+        const extras = familiesWithCounts
+            .filter((family) => family.type === 'EXTRA')
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+        // 修改: 更新返回的数据结构
         return {
             mainRecipes,
-            otherRecipes,
+            preDoughs,
+            extras,
         };
     }
 
