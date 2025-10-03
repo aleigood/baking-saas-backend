@@ -10,7 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthDto, RegisterDto, WechatLoginDto, LoginResponseDto } from './dto/auth.dto'; // [核心修正] 更新导入
 import * as bcrypt from 'bcrypt';
-import { Role } from '@prisma/client';
+import { Role, TenantStatus } from '@prisma/client'; // [核心新增] 导入 TenantStatus
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 // [核心删除] 不再需要单独导入 LoginResponseDto
 
@@ -62,6 +62,8 @@ export class AuthService {
             const newTenant = await tx.tenant.create({
                 data: {
                     name: tenantName,
+                    // 新注册的店铺默认为激活状态
+                    status: TenantStatus.ACTIVE,
                 },
             });
 
@@ -85,6 +87,10 @@ export class AuthService {
             where: { phone: loginDto.phone },
             include: {
                 tenants: {
+                    // [核心修改] 在查询时直接带出店铺信息
+                    include: {
+                        tenant: true,
+                    },
                     orderBy: { tenant: { createdAt: 'asc' } },
                 },
             },
@@ -102,6 +108,11 @@ export class AuthService {
         const firstTenantUser = user.tenants[0];
         if (!firstTenantUser) {
             throw new UnauthorizedException('用户不属于任何店铺，无法登录。');
+        }
+
+        // [核心新增] 检查首个店铺的状态
+        if (firstTenantUser.tenant.status === TenantStatus.INACTIVE) {
+            throw new UnauthorizedException('您所在的店铺已被停用，无法登录。');
         }
 
         const token = this.generateJwtToken(user.id, firstTenantUser.tenantId, firstTenantUser.role, user.role);
@@ -129,11 +140,17 @@ export class AuthService {
             where: {
                 userId_tenantId: { userId, tenantId },
             },
-            include: { user: true },
+            // [核心修改] 同时查询关联的店铺信息和用户信息
+            include: { user: true, tenant: true },
         });
 
         if (!tenantUser) {
             throw new UnauthorizedException('您不属于该租户，无法切换。');
+        }
+
+        // [核心新增] 切换店铺时检查目标店铺的状态
+        if (tenantUser.tenant.status === TenantStatus.INACTIVE) {
+            throw new UnauthorizedException('目标店铺已被停用，无法切换。');
         }
 
         return this.generateJwtToken(userId, tenantId, tenantUser.role, tenantUser.user.role);
@@ -151,7 +168,13 @@ export class AuthService {
                 status: true,
                 createdAt: true,
                 tenants: {
-                    where: { status: 'ACTIVE' },
+                    // [核心修改] 只返回状态为 ACTIVE 的店铺列表，避免用户看到已停用的
+                    where: {
+                        status: 'ACTIVE',
+                        tenant: {
+                            status: 'ACTIVE',
+                        },
+                    },
                     select: {
                         tenant: { select: { id: true, name: true } },
                         role: true,

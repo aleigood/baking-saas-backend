@@ -4,6 +4,7 @@ import { Strategy, ExtractJwt } from 'passport-jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { UserPayload } from './interfaces/user-payload.interface';
+import { Role, TenantStatus } from '@prisma/client'; // [核心新增] 导入 TenantStatus
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -21,6 +22,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
         if (!user) {
             throw new UnauthorizedException('用户不存在或令牌无效');
+        }
+
+        // [核心新增] 增加对店铺状态的校验
+        // 超级管理员不受店铺状态限制
+        if (payload.globalRole !== Role.SUPER_ADMIN && payload.tenantId) {
+            const tenant = await this.prisma.tenant.findUnique({
+                where: { id: payload.tenantId },
+                select: { status: true },
+            });
+
+            // 如果店铺不存在或已被停用，则拒绝访问
+            if (!tenant || tenant.status === TenantStatus.INACTIVE) {
+                throw new UnauthorizedException('该店铺已被停用，无法进行操作。');
+            }
         }
 
         // 返回的用户信息将附加到 Express 的 request.user 对象上
