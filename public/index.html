@@ -1,0 +1,1560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>离线配方编辑器</title>
+        <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+        <style>
+            :root {
+                --primary-color: #8c5a3b;
+                --accent-color: #d4a373;
+                --bg-color: #fdf8f2;
+                --card-bg: #ffffff;
+                --text-primary: #4a3f35;
+                --text-secondary: #a98467;
+                --danger-color: #e74c3c;
+                --border-color: #f3e9e3;
+                --sidebar-bg: #f7f4ef;
+            }
+
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+                background-color: var(--bg-color);
+                color: var(--text-primary);
+                margin: 0;
+                font-size: 16px;
+            }
+
+            #app {
+                display: flex;
+                height: 100vh;
+                overflow: hidden;
+                max-width: 1024px;
+                margin: 0 auto;
+                box-shadow: 0 0 30px rgba(0, 0, 0, 0.1);
+            }
+
+            /* --- Modal --- */
+            .modal-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: rgba(0, 0, 0, 0.5);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+            }
+            .modal-content {
+                background-color: white;
+                border-radius: 20px;
+                padding: 25px;
+                box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+                width: 90%;
+                max-width: 400px;
+                max-height: 80vh;
+                display: flex;
+                flex-direction: column;
+            }
+            .modal-header {
+                font-size: 18px;
+                font-weight: 600;
+                color: var(--text-primary);
+                margin-bottom: 20px;
+                text-align: center;
+            }
+            .modal-body {
+                overflow-y: auto;
+                flex-grow: 1;
+            }
+            .modal-body .selection-item {
+                padding: 12px;
+                border-radius: 10px;
+                margin-bottom: 8px;
+                cursor: pointer;
+                transition: background-color 0.2s;
+                text-align: center;
+                font-weight: 500;
+                border: 1px solid var(--border-color);
+            }
+            .modal-body .selection-item:hover {
+                background-color: var(--sidebar-bg);
+                border-color: var(--accent-color);
+            }
+
+            .modal-footer {
+                margin-top: 20px;
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+            }
+
+            /* --- 左侧栏 --- */
+            .sidebar {
+                width: 300px;
+                flex-shrink: 0;
+                background-color: var(--sidebar-bg);
+                display: flex;
+                flex-direction: column;
+                border-right: 1px solid var(--border-color);
+            }
+
+            .sidebar-header {
+                padding: 20px;
+                text-align: center;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .sidebar-header h1 {
+                font-size: 24px;
+                color: var(--primary-color);
+                margin: 0;
+            }
+
+            .sidebar-header p {
+                font-size: 13px;
+                color: var(--text-secondary);
+                margin-top: 5px;
+            }
+
+            .sidebar-tabs {
+                display: flex;
+                padding: 10px;
+                gap: 5px;
+                border-bottom: 1px solid var(--border-color);
+            }
+            .sidebar-tab {
+                flex: 1;
+                padding: 8px 5px;
+                text-align: center;
+                font-size: 14px;
+                color: var(--text-secondary);
+                border-radius: 10px;
+                cursor: pointer;
+                transition: background-color 0.2s, color 0.2s;
+                position: relative;
+            }
+            .sidebar-tab.active {
+                background-color: var(--primary-color);
+                color: white;
+                font-weight: 600;
+            }
+            .sidebar-tab .count-badge {
+                position: absolute;
+                top: -5px;
+                right: -5px;
+                background-color: var(--accent-color);
+                color: white;
+                font-size: 10px;
+                border-radius: 50%;
+                width: 18px;
+                height: 18px;
+                line-height: 18px;
+                text-align: center;
+            }
+
+            .recipe-list-container {
+                flex-grow: 1;
+                overflow-y: auto;
+                padding: 10px;
+            }
+
+            .recipe-list-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px;
+                border-radius: 10px;
+                margin-bottom: 8px;
+                cursor: pointer;
+                transition: background-color 0.2s, box-shadow 0.2s;
+            }
+
+            .recipe-list-item:hover {
+                background-color: var(--border-color);
+            }
+
+            .recipe-list-item.active {
+                background-color: var(--primary-color);
+                color: white;
+                box-shadow: 0 4px 12px rgba(140, 90, 59, 0.2);
+            }
+
+            .recipe-list-item.active .recipe-info span {
+                color: white !important;
+            }
+
+            .recipe-info {
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .recipe-info strong {
+                font-size: 15px;
+                font-weight: 600;
+            }
+
+            .btn-delete-recipe {
+                background: none;
+                color: var(--text-secondary);
+                border-radius: 50%;
+                width: 24px;
+                height: 24px;
+                border: none;
+                cursor: pointer;
+                flex-shrink: 0;
+                transition: all 0.2s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 5px;
+                visibility: hidden;
+                opacity: 0;
+            }
+            .recipe-list-item:hover .btn-delete-recipe,
+            .recipe-list-item.active .btn-delete-recipe {
+                visibility: visible;
+                opacity: 1;
+            }
+            .btn-delete-recipe:hover {
+                background: var(--danger-color);
+                color: white;
+            }
+
+            .btn-delete-recipe svg,
+            .btn-delete-dough svg,
+            .btn-remove svg {
+                width: 100%;
+                height: 100%;
+            }
+            .tab-delete-btn svg {
+                width: 10px;
+                height: 10px;
+            }
+
+            .sidebar-footer {
+                padding: 15px;
+                border-top: 1px solid var(--border-color);
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+            }
+
+            .card {
+                background: var(--card-bg);
+                padding: 20px;
+                border-radius: 20px;
+                margin-bottom: 20px;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+                position: relative;
+            }
+            .card-title-wrapper {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 0 5px;
+                margin-bottom: 20px;
+            }
+            .card-title {
+                font-size: 18px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .form-item {
+                margin-bottom: 20px;
+            }
+            .form-item-label {
+                display: block;
+                margin-bottom: 8px;
+                font-size: 14px;
+                color: #606266;
+            }
+            .input-field,
+            .picker {
+                width: 100%;
+                height: 44px;
+                line-height: 44px;
+                padding: 0 12px;
+                border: 1px solid var(--border-color);
+                border-radius: 10px;
+                font-size: 14px;
+                background-color: #f8f9fa;
+                box-sizing: border-box;
+                color: var(--text-primary);
+                transition: border-color 0.2s, box-shadow 0.2s;
+            }
+            .input-field.ratio-input {
+                width: 100px;
+                text-align: center;
+                flex-shrink: 0;
+            }
+
+            /* [新增] 为输入框和选择器添加焦点样式 */
+            .input-field:focus,
+            .picker:focus {
+                outline: none;
+                border-color: var(--primary-color);
+                box-shadow: 0 0 0 3px rgba(140, 90, 59, 0.15);
+            }
+
+            .btn {
+                display: inline-flex;
+                justify-content: center;
+                align-items: center;
+                padding: 10px 15px;
+                min-height: 54px;
+                box-sizing: border-box;
+                border-radius: 15px;
+                font-size: 16px;
+                font-weight: 500;
+                text-align: center;
+                cursor: pointer;
+                transition: transform 0.2s, box-shadow 0.28s;
+                border: none;
+            }
+            .btn:active {
+                transform: scale(0.97);
+            }
+            .btn-primary {
+                background-image: linear-gradient(135deg, var(--accent-color) 0%, var(--primary-color) 100%);
+                color: white;
+                box-shadow: 0 4px 15px rgba(140, 90, 59, 0.2);
+            }
+            .btn-secondary {
+                background-color: #f3e9e3;
+                color: var(--text-secondary);
+            }
+            .btn-full-width {
+                width: 100%;
+            }
+            .btn-dashed {
+                border: 1px dashed var(--primary-color);
+                color: var(--primary-color);
+                background: transparent;
+                min-height: 46px;
+            }
+            .btn-remove {
+                width: 40px;
+                height: 40px;
+                border: 1px dashed var(--border-color);
+                border-radius: 10px;
+                color: var(--danger-color);
+                background: transparent;
+                padding: 10px;
+                min-height: auto;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+            }
+            .ingredient-header {
+                display: flex;
+                align-items: center;
+                color: var(--text-secondary);
+                font-size: 13px;
+                padding: 0 5px;
+                margin-top: 15px;
+                margin-bottom: 8px;
+            }
+            .col-name {
+                flex: 1;
+            }
+            .col-ratio {
+                width: 100px;
+                text-align: center;
+                margin-left: 10px;
+            }
+            .col-action {
+                width: 40px;
+                text-align: right;
+            }
+            .ingredient-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 10px;
+            }
+            .self-made-tag {
+                position: absolute;
+                top: 50%;
+                right: 12px;
+                transform: translateY(-50%);
+                font-size: 10px;
+                background-color: var(--accent-color);
+                color: white;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-weight: 500;
+            }
+            .input-with-tag-wrapper {
+                position: relative;
+                flex-grow: 1;
+            }
+            .input-with-tag-wrapper .input-field {
+                padding-right: 50px;
+            }
+
+            .procedure-item {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 10px;
+            }
+            .procedure-notes .notes-title {
+                display: block;
+                margin-bottom: 8px;
+                font-size: 14px;
+                color: #606266;
+            }
+            .sub-group {
+                margin-top: 20px;
+                border-top: 1px solid var(--border-color);
+                padding-top: 20px;
+            }
+            .sub-group-title {
+                font-size: 14px;
+                font-weight: 500;
+                color: var(--text-primary);
+                margin-bottom: 15px;
+            }
+
+            .product-tabs-wrapper {
+                position: relative;
+                display: flex;
+                align-items: center;
+                margin-bottom: 20px;
+            }
+            .product-tabs {
+                display: flex;
+                gap: 10px;
+                border-bottom: 1px solid var(--border-color);
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                scrollbar-width: none;
+            }
+            .product-tabs::-webkit-scrollbar {
+                display: none;
+            }
+            .tab-item {
+                padding: 10px 15px;
+                cursor: pointer;
+                color: var(--text-secondary);
+                border-bottom: 3px solid transparent;
+                transition: color 0.3s, border-color 0.3s;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                white-space: nowrap;
+            }
+            .tab-item.active {
+                color: var(--primary-color);
+                border-bottom-color: var(--primary-color);
+                font-weight: 600;
+            }
+            .add-tab {
+                font-weight: bold;
+                color: var(--primary-color);
+            }
+            .tab-delete-btn {
+                background-color: var(--border-color);
+                border-radius: 50%;
+                border: none;
+                padding: 0;
+                margin: 0;
+                width: 18px;
+                height: 18px;
+                color: var(--text-secondary);
+                cursor: pointer;
+                transition: all 0.2s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                visibility: hidden;
+                opacity: 0;
+            }
+            .tab-item:hover .tab-delete-btn,
+            .tab-item.active .tab-delete-btn {
+                visibility: visible;
+                opacity: 1;
+            }
+            .tab-delete-btn:hover {
+                background-color: var(--danger-color);
+                color: white;
+            }
+            .tab-scroll-btn {
+                position: absolute;
+                top: 50%;
+                transform: translateY(-50%);
+                background-color: rgba(255, 255, 255, 0.8);
+                border: 1px solid var(--border-color);
+                border-radius: 50%;
+                width: 28px;
+                height: 28px;
+                z-index: 10;
+                cursor: pointer;
+                color: var(--text-secondary);
+                font-size: 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+            }
+            .tab-scroll-btn.left {
+                left: -14px;
+            }
+            .tab-scroll-btn.right {
+                right: -14px;
+            }
+            .tab-scroll-btn:hover {
+                color: var(--primary-color);
+            }
+
+            .main-content {
+                flex-grow: 1;
+                overflow-y: auto;
+                padding: 20px;
+                position: relative;
+            }
+            .editor-placeholder {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100%;
+                text-align: center;
+                color: var(--text-secondary);
+                font-size: 18px;
+            }
+            .btn-delete-dough {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                background: none;
+                border: none;
+                color: var(--primary-color);
+                cursor: pointer;
+                width: 24px;
+                height: 24px;
+                opacity: 0.8;
+                transition: opacity 0.2s;
+            }
+            .btn-delete-dough:hover {
+                opacity: 1;
+            }
+
+            .suggestion-box {
+                position: absolute;
+                background-color: var(--card-bg);
+                border: 1px solid var(--border-color);
+                border-radius: 10px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+                z-index: 100;
+                max-height: 200px;
+                overflow-y: auto;
+                list-style: none;
+                margin: 0;
+                padding: 5px;
+                box-sizing: border-box;
+            }
+            .suggestion-item {
+                padding: 8px 12px;
+                font-size: 14px;
+                cursor: pointer;
+                border-radius: 8px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            .suggestion-item:hover {
+                background-color: var(--sidebar-bg);
+            }
+            .suggestion-tag {
+                font-size: 10px;
+                background-color: var(--accent-color);
+                color: white;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-weight: 500;
+                margin-left: 8px;
+            }
+        </style>
+    </head>
+
+    <body>
+        <svg style="display: none">
+            <symbol id="icon-trash" viewBox="0 0 72 72">
+                <path
+                    style="fill: currentColor"
+                    d="M31.4,5.9c-1.3,0-2.6,0.5-3.6,1.4c-0.9,0.9-1.4,2.3-1.4,3.6v2.5H11.5v5H14v39.8c0,4.1,3.4,7.5,7.5,7.5h29.8 c4.1,0,7.5-3.4,7.5-7.5V18.3h2.5v-5H46.3v-2.5c0-1.3-0.5-2.6-1.4-3.6s-2.3-1.4-3.6-1.4H31.4z M31.4,10.9h9.9v2.5h-9.9V10.9z M18.9,18.3h34.8v39.8c0,1.4-1.1,2.5-2.5,2.5H21.4c-1.4,0-2.5-1.1-2.5-2.5V18.3z M23.9,25.8v27.3h5V25.8H23.9z M33.9,25.8v27.3h5 V25.8H33.9z M43.8,25.8v27.3h5V25.8H43.8z"
+                />
+            </symbol>
+            <symbol id="icon-close" viewBox="0 0 16 16">
+                <line fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" x1="14" y1="2" x2="2" y2="14" />
+                <line fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" x1="2" y1="2" x2="14" y2="14" />
+            </symbol>
+        </svg>
+
+        <div id="app">
+            <aside class="sidebar">
+                <header class="sidebar-header">
+                    <h1>配方工作区</h1>
+                    <p>管理并批量导入/导出配方</p>
+                </header>
+
+                <div class="sidebar-tabs">
+                    <div class="sidebar-tab" :class="{active: activeCategory === 'MAIN'}" @click="activeCategory = 'MAIN'">
+                        产品配方
+                        <span v-if="recipeCategories.main.length > 0" class="count-badge">{{ recipeCategories.main.length }}</span>
+                    </div>
+                    <div class="sidebar-tab" :class="{active: activeCategory === 'PRE_DOUGH'}" @click="activeCategory = 'PRE_DOUGH'">
+                        面种
+                        <span v-if="recipeCategories.preDough.length > 0" class="count-badge">{{ recipeCategories.preDough.length }}</span>
+                    </div>
+                    <div class="sidebar-tab" :class="{active: activeCategory === 'EXTRA'}" @click="activeCategory = 'EXTRA'">
+                        其他
+                        <span v-if="recipeCategories.extra.length > 0" class="count-badge">{{ recipeCategories.extra.length }}</span>
+                    </div>
+                </div>
+
+                <div class="recipe-list-container">
+                    <div
+                        v-for="recipe in filteredRecipes"
+                        :key="recipe.id"
+                        class="recipe-list-item"
+                        :class="{ active: currentRecipe && currentRecipe.id === recipe.id }"
+                        @click="selectRecipe(recipe.id)"
+                    >
+                        <div class="recipe-info">
+                            <strong>{{ recipe.name || `未命名配方` }}</strong>
+                        </div>
+                        <button class="btn-delete-recipe" @click.stop="deleteRecipe(recipe.id)">
+                            <svg><use href="#icon-trash"></use></svg>
+                        </button>
+                    </div>
+                </div>
+                <footer class="sidebar-footer">
+                    <button class="btn btn-dashed btn-full-width" @click="addRecipe()">+ 新增配方</button>
+                    <button class="btn btn-secondary btn-full-width" @click="triggerImport">导入 JSON</button>
+                    <button class="btn btn-primary btn-full-width" @click="exportAllJson" :disabled="recipes.length === 0" style="grid-column: 1 / -1">
+                        导出全部配方
+                    </button>
+                    <input type="file" ref="fileInput" @change="handleFileImport" accept=".json" style="display: none" />
+                </footer>
+            </aside>
+
+            <main class="main-content" ref="mainContentRef">
+                <div v-if="currentRecipe" class="editor-content">
+                    <div class="card">
+                        <div class="form-item">
+                            <label class="form-item-label">配方类型</label>
+                            <input class="input-field" :value="recipeTypeDisplay(currentRecipe.type)" readonly disabled />
+                        </div>
+                        <div v-if="currentRecipe.type === 'MAIN'" class="form-item">
+                            <label class="form-item-label">配方品类</label>
+                            <select class="picker" v-model="currentRecipe.category">
+                                <option v-for="cat in mainRecipeCategories" :key="cat.value" :value="cat.value">{{ cat.text }}</option>
+                            </select>
+                        </div>
+                        <div class="form-item">
+                            <label class="form-item-label">配方名称</label>
+                            <input class="input-field" v-model="currentRecipe.name" :placeholder="recipeNamePlaceholder" />
+                        </div>
+                    </div>
+
+                    <div v-if="currentRecipe.type === 'MAIN'">
+                        <template v-if="currentRecipe.category === 'BREAD'">
+                            <div v-for="(dough, doughIndex) in currentRecipe.doughs.filter(d => d.type === 'PRE_DOUGH')" :key="dough.id" class="card">
+                                <button class="btn-delete-dough" @click="removePreDough(doughIndex)">
+                                    <svg><use href="#icon-close"></use></svg>
+                                </button>
+                                <div class="card-title-wrapper"><span class="card-title">{{ dough.name }}</span></div>
+                                <div class="form-item">
+                                    <label class="form-item-label">面种中面粉占总面粉的百分比 (%)</label>
+                                    <input class="input-field" type="number" v-model.number="dough.flourRatioInMainDough" placeholder="例如: 20" />
+                                </div>
+                                <div v-for="(ing, ingIndex) in dough.ingredients" :key="ing.id" class="ingredient-row" style="opacity: 0.7">
+                                    <input class="input-field" :value="ing.name" readonly />
+                                    <input class="input-field ratio-input" type="number" :value="ing.ratio" readonly />
+                                </div>
+                            </div>
+                            <button class="btn btn-dashed btn-full-width" style="margin-bottom: 20px" @click="openAddPreDoughModal">+ 添加面种引用</button>
+                        </template>
+
+                        <div class="card">
+                            <div class="card-title-wrapper"><span class="card-title">{{ recipeContentTitle }}</span></div>
+                            <div v-if="currentRecipe.category === 'BREAD'" class="form-item">
+                                <label class="form-item-label">面团出缸温度 (°C)</label>
+                                <input class="input-field" type="number" v-model.number="currentRecipe.targetTemp" placeholder="例如: 26" />
+                            </div>
+                            <div class="form-item">
+                                <label class="form-item-label">工艺损耗率 (%)</label
+                                ><input class="input-field" type="number" v-model.number="mainDough.lossRatio" placeholder="例如: 2" />
+                            </div>
+                            <div class="ingredient-header">
+                                <span class="col-name">原料名称</span>
+                                <span class="col-ratio">比例 %</span>
+                                <span class="col-action"></span>
+                            </div>
+                            <div v-for="(ing, index) in mainDough.ingredients" :key="ing.id" class="ingredient-row">
+                                <input
+                                    class="input-field"
+                                    v-model="ing.name"
+                                    placeholder="输入原料名称"
+                                    @focus="handleIngredientInput(ing, $event)"
+                                    @input="handleIngredientInput(ing, $event)"
+                                    @blur="handleIngredientBlur(ing)"
+                                />
+                                <input class="input-field ratio-input" type="number" v-model.number="ing.ratio" placeholder="%" />
+                                <button class="btn btn-remove" @click="removeMainDoughIngredient(index)">
+                                    <svg><use href="#icon-trash"></use></svg>
+                                </button>
+                            </div>
+                            <button class="btn btn-dashed btn-full-width" @click="addMainDoughIngredient">+ 添加原料</button>
+                            <div class="procedure-notes sub-group">
+                                <span class="notes-title">制作要点:</span>
+                                <div v-for="(step, index) in mainDough.procedure" :key="index" class="procedure-item">
+                                    <input class="input-field" v-model="mainDough.procedure[index]" placeholder="输入制作步骤" />
+                                    <button class="btn btn-remove" @click="removeMainDoughProcedureStep(index)">
+                                        <svg><use href="#icon-trash"></use></svg>
+                                    </button>
+                                </div>
+                                <button class="btn btn-dashed btn-full-width" @click="addMainDoughProcedureStep">+ 添加要点</button>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-title-wrapper"><span class="card-title">产品列表</span></div>
+                            <div class="product-tabs-wrapper">
+                                <button v-if="tabScrollState.showLeft" class="tab-scroll-btn left" @click="scrollTabs(-150)">&lt;</button>
+                                <div class="product-tabs" ref="productTabsRef" @scroll="updateTabScrollButtons">
+                                    <div
+                                        v-for="(product, index) in currentRecipe.products"
+                                        :key="product.id"
+                                        class="tab-item"
+                                        :class="{ active: activeProductTab === index }"
+                                        @click="activeProductTab = index"
+                                    >
+                                        <span>{{ product.name || `产品${index + 1}` }}</span>
+                                        <button class="tab-delete-btn" @click.stop="deleteProduct(index)">
+                                            <svg><use href="#icon-close"></use></svg>
+                                        </button>
+                                    </div>
+                                    <div class="tab-item add-tab" @click="addProduct">+</div>
+                                </div>
+                                <button v-if="tabScrollState.showRight" class="tab-scroll-btn right" @click="scrollTabs(150)">&gt;</button>
+                            </div>
+
+                            <div v-if="currentRecipe.products.length > 0">
+                                <div v-for="(product, prodIndex) in currentRecipe.products" v-show="activeProductTab === prodIndex" :key="product.id">
+                                    <div class="form-item">
+                                        <label class="form-item-label">产品名称</label
+                                        ><input class="input-field" v-model="product.name" :placeholder="`产品${prodIndex + 1}`" />
+                                    </div>
+                                    <div class="form-item">
+                                        <label class="form-item-label">基础原料克重 (g)</label
+                                        ><input class="input-field" type="number" v-model.number="product.baseDoughWeight" placeholder="例如: 100" />
+                                    </div>
+                                    <div class="sub-group">
+                                        <h4 class="sub-group-title">辅料 (Mix-ins) - 配方百分比</h4>
+                                        <div v-for="(ing, ingIndex) in product.mixIns" :key="ing.id" class="ingredient-row">
+                                            <div class="input-with-tag-wrapper">
+                                                <input
+                                                    class="input-field"
+                                                    v-model="ing.name"
+                                                    placeholder="输入辅料名称"
+                                                    @focus="handleIngredientInput(ing, $event)"
+                                                    @input="handleIngredientInput(ing, $event)"
+                                                    @blur="handleIngredientBlur(ing)"
+                                                />
+                                                <span v-if="isSelfMade(ing.name)" class="self-made-tag">自制</span>
+                                            </div>
+                                            <input class="input-field ratio-input" type="number" v-model.number="ing.ratio" placeholder="%" />
+                                            <button class="btn btn-remove" @click="removeSubIngredient(prodIndex, 'mixIns', ingIndex)">
+                                                <svg><use href="#icon-trash"></use></svg>
+                                            </button>
+                                        </div>
+                                        <button class="btn btn-dashed btn-full-width" @click="addSubIngredient(prodIndex, 'mixIns')">+ 添加辅料</button>
+                                    </div>
+                                    <div class="sub-group">
+                                        <h4 class="sub-group-title">馅料 (Fillings) - 克/个</h4>
+                                        <div v-for="(ing, ingIndex) in product.fillings" :key="ing.id" class="ingredient-row">
+                                            <div class="input-with-tag-wrapper">
+                                                <input
+                                                    class="input-field"
+                                                    v-model="ing.name"
+                                                    placeholder="输入馅料名称"
+                                                    @focus="handleIngredientInput(ing, $event)"
+                                                    @input="handleIngredientInput(ing, $event)"
+                                                    @blur="handleIngredientBlur(ing)"
+                                                />
+                                                <span v-if="isSelfMade(ing.name)" class="self-made-tag">自制</span>
+                                            </div>
+                                            <input class="input-field ratio-input" type="number" v-model.number="ing.weightInGrams" placeholder="g/个" />
+                                            <button class="btn btn-remove" @click="removeSubIngredient(prodIndex, 'fillings', ingIndex)">
+                                                <svg><use href="#icon-trash"></use></svg>
+                                            </button>
+                                        </div>
+                                        <button class="btn btn-dashed btn-full-width" @click="addSubIngredient(prodIndex, 'fillings')">+ 添加馅料</button>
+                                    </div>
+                                    <div class="sub-group">
+                                        <h4 class="sub-group-title">表面装饰 (Toppings) - 克/个</h4>
+                                        <div v-for="(ing, ingIndex) in product.toppings" :key="ing.id" class="ingredient-row">
+                                            <div class="input-with-tag-wrapper">
+                                                <input
+                                                    class="input-field"
+                                                    v-model="ing.name"
+                                                    placeholder="输入装饰名称"
+                                                    @focus="handleIngredientInput(ing, $event)"
+                                                    @input="handleIngredientInput(ing, $event)"
+                                                    @blur="handleIngredientBlur(ing)"
+                                                />
+                                                <span v-if="isSelfMade(ing.name)" class="self-made-tag">自制</span>
+                                            </div>
+                                            <input class="input-field ratio-input" type="number" v-model.number="ing.weightInGrams" placeholder="g/个" />
+                                            <button class="btn btn-remove" @click="removeSubIngredient(prodIndex, 'toppings', ingIndex)">
+                                                <svg><use href="#icon-trash"></use></svg>
+                                            </button>
+                                        </div>
+                                        <button class="btn btn-dashed btn-full-width" @click="addSubIngredient(prodIndex, 'toppings')">+ 添加表面装饰</button>
+                                    </div>
+                                    <div class="procedure-notes sub-group">
+                                        <span class="notes-title">产品制作要点:</span>
+                                        <div v-for="(step, stepIndex) in product.procedure" :key="stepIndex" class="procedure-item">
+                                            <input class="input-field" v-model="product.procedure[stepIndex]" placeholder="输入制作步骤" />
+                                            <button class="btn btn-remove" @click="removeProductProcedureStep(prodIndex, stepIndex)">
+                                                <svg><use href="#icon-trash"></use></svg>
+                                            </button>
+                                        </div>
+                                        <button class="btn btn-dashed btn-full-width" @click="addProductProcedureStep(prodIndex)">+ 添加要点</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div v-else class="editor-placeholder">
+                                <p>暂无产品<br />点击上方的 "+" 添加一个新产品</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-else>
+                        <div class="card">
+                            <div class="card-title-wrapper"><span class="card-title">原料列表</span></div>
+                            <div class="form-item">
+                                <label class="form-item-label">工艺损耗率 (%)</label>
+                                <input class="input-field" type="number" v-model.number="currentRecipe.lossRatio" placeholder="例如: 1" />
+                            </div>
+                            <div class="ingredient-header">
+                                <span class="col-name">原料名称</span>
+                                <span class="col-ratio">比例 %</span>
+                                <span class="col-action"></span>
+                            </div>
+                            <div v-for="(ing, index) in currentRecipe.ingredients" :key="ing.id" class="ingredient-row">
+                                <input
+                                    class="input-field"
+                                    v-model="ing.name"
+                                    placeholder="输入原料名称"
+                                    @focus="handleIngredientInput(ing, $event)"
+                                    @input="handleIngredientInput(ing, $event)"
+                                    @blur="handleIngredientBlur(ing)"
+                                />
+                                <input class="input-field ratio-input" type="number" v-model.number="ing.ratio" placeholder="%" />
+                                <button class="btn btn-remove" @click="removeOtherIngredient(index)">
+                                    <svg><use href="#icon-trash"></use></svg>
+                                </button>
+                            </div>
+                            <button class="btn btn-dashed btn-full-width" @click="addOtherIngredient">+ 添加原料</button>
+                            <div class="procedure-notes sub-group">
+                                <span class="notes-title">制作要点:</span>
+                                <div v-for="(step, index) in currentRecipe.procedure" :key="index" class="procedure-item">
+                                    <input class="input-field" v-model="currentRecipe.procedure[index]" placeholder="输入制作步骤" />
+                                    <button class="btn btn-remove" @click="removeOtherProcedureStep(index)">
+                                        <svg><use href="#icon-trash"></use></svg>
+                                    </button>
+                                </div>
+                                <button class="btn btn-dashed btn-full-width" @click="addOtherProcedureStep">+ 添加要点</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div v-else class="editor-placeholder">
+                    <p>← 从左侧选择一个配方进行编辑<br />或新增一个配方</p>
+                </div>
+
+                <ul v-if="suggestionState.visible" class="suggestion-box" :style="suggestionBoxStyle">
+                    <li v-for="sugg in suggestionState.suggestions" :key="sugg.name" class="suggestion-item" @mousedown="selectSuggestion(sugg)">
+                        <span>{{ sugg.name }}</span>
+                        <span v-if="sugg.selfMade" class="suggestion-tag">自制</span>
+                    </li>
+                </ul>
+            </main>
+
+            <div v-if="isAddPreDoughModalVisible" class="modal-overlay" @click="isAddPreDoughModalVisible = false">
+                <div class="modal-content" @click.stop>
+                    <div class="modal-header">选择要引用的面种</div>
+                    <div class="modal-body">
+                        <div v-for="dough in availablePreDoughsForReferencing" :key="dough.id" class="recipe-list-item" @click="addPreDoughReference(dough)">
+                            <div class="recipe-info"><strong>{{ dough.name }}</strong></div>
+                        </div>
+                        <div v-if="availablePreDoughsForReferencing.length === 0" style="text-align: center; color: var(--text-secondary)">
+                            暂无可引用的面种
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" @click="isAddPreDoughModalVisible = false">关闭</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const { createApp, ref, computed, watch, nextTick, onMounted, onUnmounted } = Vue;
+
+            createApp({
+                setup() {
+                    let nextRecipeId = 1;
+                    let nextIngredientId = 1000;
+
+                    const recipes = ref([]);
+                    const currentRecipeId = ref(null);
+                    const activeProductTab = ref(0);
+                    const fileInput = ref(null);
+                    const isAddPreDoughModalVisible = ref(false);
+                    const activeCategory = ref("MAIN");
+                    const mainContentRef = ref(null);
+                    const productTabsRef = ref(null);
+
+                    const tabScrollState = ref({
+                        showLeft: false,
+                        showRight: false,
+                    });
+
+                    const categoryDisplayMap = {
+                        BREAD: "面包类",
+                        PASTRY: "西点类",
+                        DESSERT: "甜品类",
+                        DRINK: "饮品类",
+                        OTHER: "其他",
+                    };
+                    const categoryDisplay = (category) => categoryDisplayMap[category] || "未知品类";
+
+                    const mainRecipeCategories = ref(
+                        Object.entries(categoryDisplayMap)
+                            .filter(([key]) => key !== "OTHER")
+                            .map(([value, text]) => ({ value, text }))
+                    );
+
+                    const predefinedIngredients = ref([
+                        { name: "面包粉", isFlour: true, waterContent: 0 },
+                        { name: "高筋粉", isFlour: true, waterContent: 0 },
+                        { name: "中筋粉", isFlour: true, waterContent: 0 },
+                        { name: "全麦粉", isFlour: true, waterContent: 0 },
+                        { name: "裸麦粉", isFlour: true, waterContent: 0 },
+                        { name: "黑麦粉", isFlour: true, waterContent: 0 },
+                        { name: "T45", isFlour: true, waterContent: 0 },
+                        { name: "T55", isFlour: true, waterContent: 0 },
+                        { name: "T65", isFlour: true, waterContent: 0 },
+                        { name: "T80", isFlour: true, waterContent: 0 },
+                        { name: "T110", isFlour: true, waterContent: 0 },
+                        { name: "T150", isFlour: true, waterContent: 0 },
+                        { name: "T170", isFlour: true, waterContent: 0 },
+                        { name: "水", isFlour: false, waterContent: 1 },
+                        { name: "牛奶", isFlour: false, waterContent: 0.87 },
+                        { name: "淡奶油", isFlour: false, waterContent: 0.6 },
+                        { name: "蜂蜜", isFlour: false, waterContent: 0.17 },
+                        { name: "炼乳", isFlour: false, waterContent: 0.27 },
+                        { name: "鸡蛋", isFlour: false, waterContent: 0.75 },
+                        { name: "全蛋", isFlour: false, waterContent: 0.75 },
+                        { name: "蛋黄", isFlour: false, waterContent: 0.5 },
+                        { name: "蛋清", isFlour: false, waterContent: 0.88 },
+                        { name: "蛋白", isFlour: false, waterContent: 0.88 },
+                        { name: "白砂糖", isFlour: false, waterContent: 0 },
+                        { name: "盐", isFlour: false, waterContent: 0 },
+                        { name: "即发干酵母", isFlour: false, waterContent: 0 },
+                        { name: "鲜酵母", isFlour: false, waterContent: 0 },
+                        { name: "黄油", isFlour: false, waterContent: 0 },
+                        { name: "奶粉", isFlour: false, waterContent: 0 },
+                        { name: "麦芽精", isFlour: false, waterContent: 0 },
+                    ]);
+
+                    const allAvailableIngredients = computed(() => {
+                        const ingredientsMap = new Map();
+                        predefinedIngredients.value.forEach((ing) => {
+                            ingredientsMap.set(ing.name, { ...ing, selfMade: false });
+                        });
+                        recipes.value
+                            .filter((r) => r.type !== "MAIN" && r.name)
+                            .forEach((recipe) => {
+                                ingredientsMap.set(recipe.name, {
+                                    name: recipe.name,
+                                    isFlour: false,
+                                    waterContent: 0,
+                                    selfMade: true,
+                                });
+                            });
+                        return Array.from(ingredientsMap.values());
+                    });
+
+                    const suggestionState = ref({
+                        visible: false,
+                        suggestions: [],
+                        target: null,
+                        ingRef: null,
+                    });
+                    const suggestionBoxStyle = ref({});
+
+                    watch(
+                        () => suggestionState.value.target,
+                        (newTarget) => {
+                            if (!newTarget || !mainContentRef.value) {
+                                suggestionState.value.visible = false;
+                                return;
+                            }
+                            const targetRect = newTarget.getBoundingClientRect();
+                            const parentRect = mainContentRef.value.getBoundingClientRect();
+
+                            suggestionBoxStyle.value = {
+                                top: `${targetRect.bottom - parentRect.top + mainContentRef.value.scrollTop}px`,
+                                left: `${targetRect.left - parentRect.left}px`,
+                                width: `${targetRect.width}px`,
+                            };
+                        }
+                    );
+
+                    const currentRecipeIndex = computed(() => recipes.value.findIndex((r) => r.id === currentRecipeId.value));
+                    const currentRecipe = computed(() => (currentRecipeIndex.value > -1 ? recipes.value[currentRecipeIndex.value] : null));
+                    const mainDough = computed(() =>
+                        currentRecipe.value?.type === "MAIN" ? currentRecipe.value.doughs.find((d) => d.type === "MAIN_DOUGH") : null
+                    );
+
+                    const recipeContentTitle = computed(() => {
+                        if (!currentRecipe.value) return "";
+                        if (currentRecipe.value.category === "BREAD") return "主面团";
+                        return "配方内容";
+                    });
+
+                    const recipeCategories = computed(() => ({
+                        main: recipes.value.filter((r) => r.type === "MAIN"),
+                        preDough: recipes.value.filter((r) => r.type === "PRE_DOUGH"),
+                        extra: recipes.value.filter((r) => r.type === "EXTRA"),
+                    }));
+
+                    const filteredRecipes = computed(() => {
+                        return recipes.value.filter((r) => r.type === activeCategory.value);
+                    });
+
+                    const recipeNamePlaceholder = computed(() =>
+                        !currentRecipe.value
+                            ? ""
+                            : { MAIN: "例如：法式长棍", PRE_DOUGH: "例如：波兰种", EXTRA: "例如：奶酥馅" }[currentRecipe.value.type] || "配方名称"
+                    );
+                    const recipeTypeDisplay = (type) => ({ MAIN: "产品配方", PRE_DOUGH: "面种", EXTRA: "馅料/其他" }[type]);
+
+                    const selfMadeRecipeNames = computed(() => new Set(recipes.value.filter((r) => r.type !== "MAIN").map((r) => r.name)));
+                    const isSelfMade = (name) => selfMadeRecipeNames.value.has(name);
+
+                    const availablePreDoughs = computed(() => recipes.value.filter((r) => r.type === "PRE_DOUGH"));
+
+                    const availablePreDoughsForReferencing = computed(() => {
+                        if (!currentRecipe.value || currentRecipe.value.type !== "MAIN") return [];
+                        const existingDoughNames = new Set(currentRecipe.value.doughs.filter((d) => d.type === "PRE_DOUGH").map((d) => d.name));
+                        return availablePreDoughs.value.filter((d) => !existingDoughNames.has(d.name));
+                    });
+
+                    watch(
+                        () => currentRecipe.value?.products,
+                        () => {
+                            nextTick(() => {
+                                updateTabScrollButtons();
+                            });
+                        },
+                        { deep: true }
+                    );
+
+                    watch(currentRecipeId, (newId) => {
+                        if (!newId) return;
+                        const recipe = recipes.value.find((r) => r.id === newId);
+                        if (recipe && recipe.type === "MAIN") {
+                            activeProductTab.value = 0;
+                            nextTick(() => {
+                                updateTabScrollButtons();
+                            });
+                        }
+                    });
+
+                    onMounted(() => {
+                        window.addEventListener("resize", updateTabScrollButtons);
+                    });
+                    onUnmounted(() => {
+                        window.removeEventListener("resize", updateTabScrollButtons);
+                    });
+
+                    const updateTabScrollButtons = () => {
+                        const el = productTabsRef.value;
+                        if (!el) {
+                            tabScrollState.value = { showLeft: false, showRight: false };
+                            return;
+                        }
+                        const hasOverflow = el.scrollWidth > el.clientWidth;
+                        tabScrollState.value.showLeft = hasOverflow && el.scrollLeft > 0;
+                        tabScrollState.value.showRight = hasOverflow && el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
+                    };
+
+                    const scrollTabs = (amount) => {
+                        productTabsRef.value?.scrollBy({ left: amount, behavior: "smooth" });
+                    };
+
+                    function getNewForm(type) {
+                        const id = nextRecipeId++;
+                        const commonIngredient = { id: nextIngredientId++, name: "", ratio: null, isFlour: false, waterContent: 0 };
+                        const category = type === "MAIN" ? "BREAD" : "OTHER";
+
+                        if (type === "MAIN") {
+                            return {
+                                id,
+                                name: "",
+                                type: "MAIN",
+                                category,
+                                notes: "",
+                                targetTemp: null,
+                                doughs: [
+                                    {
+                                        id: nextIngredientId++,
+                                        name: "主面团",
+                                        type: "MAIN_DOUGH",
+                                        lossRatio: null,
+                                        ingredients: [JSON.parse(JSON.stringify(commonIngredient))],
+                                        procedure: [""],
+                                    },
+                                ],
+                                products: [
+                                    { id: nextRecipeId++, name: "产品1", baseDoughWeight: 100, mixIns: [], fillings: [], toppings: [], procedure: [""] },
+                                ],
+                            };
+                        }
+                        // [修改] 为非产品配方(面种/其他)添加 lossRatio 属性
+                        return { id, name: "", type: type, category, notes: "", lossRatio: null, ingredients: [JSON.parse(JSON.stringify(commonIngredient))], procedure: [""] };
+                    }
+
+                    const addRecipe = () => {
+                        const newRecipe = getNewForm(activeCategory.value);
+                        recipes.value.push(newRecipe);
+                        currentRecipeId.value = newRecipe.id;
+                    };
+
+                    const selectRecipe = (id) => {
+                        suggestionState.value.visible = false;
+                        currentRecipeId.value = id;
+                    };
+
+                    const deleteRecipe = (id) => {
+                        const index = recipes.value.findIndex((r) => r.id === id);
+                        if (index === -1) return;
+                        if (!confirm(`确定要删除 "${recipes.value[index].name || "未命名配方"}" 吗？`)) return;
+                        if (currentRecipeId.value === id) currentRecipeId.value = null;
+                        recipes.value.splice(index, 1);
+                    };
+
+                    const openAddPreDoughModal = () => {
+                        isAddPreDoughModalVisible.value = true;
+                    };
+                    const addPreDoughReference = (dough) => {
+                        currentRecipe.value.doughs.push({
+                            ...JSON.parse(JSON.stringify(dough)),
+                            id: nextRecipeId++,
+                            type: "PRE_DOUGH",
+                            flourRatioInMainDough: 20,
+                        });
+                        isAddPreDoughModalVisible.value = false;
+                    };
+                    const removePreDough = (index) => {
+                        const preDoughs = currentRecipe.value.doughs.filter((d) => d.type === "PRE_DOUGH");
+                        const doughToRemove = preDoughs[index];
+                        const originalIndex = currentRecipe.value.doughs.findIndex((d) => d === doughToRemove);
+                        if (originalIndex > -1) {
+                            currentRecipe.value.doughs.splice(originalIndex, 1);
+                        }
+                    };
+
+                    const handleIngredientInput = (ingredient, event) => {
+                        const query = event.target.value;
+                        suggestionState.value.ingRef = ingredient;
+                        suggestionState.value.target = event.target;
+
+                        if (!query) {
+                            suggestionState.value.visible = false;
+                            suggestionState.value.suggestions = [];
+                            return;
+                        }
+
+                        const filtered = allAvailableIngredients.value.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()));
+
+                        suggestionState.value.suggestions = filtered;
+                        suggestionState.value.visible = filtered.length > 0;
+                    };
+
+                    const handleIngredientBlur = (ingredient) => {
+                        if (ingredient.name) {
+                            const perfectMatch = allAvailableIngredients.value.find((p) => p.name === ingredient.name);
+                            if (perfectMatch) {
+                                ingredient.isFlour = perfectMatch.isFlour;
+                                ingredient.waterContent = perfectMatch.waterContent;
+                            }
+                        }
+                        setTimeout(() => {
+                            if (suggestionState.value) {
+                                suggestionState.value.visible = false;
+                            }
+                        }, 200);
+                    };
+
+                    const selectSuggestion = (suggestion) => {
+                        if (suggestionState.value.ingRef) {
+                            suggestionState.value.ingRef.name = suggestion.name;
+                            suggestionState.value.ingRef.isFlour = suggestion.isFlour;
+                            suggestionState.value.ingRef.waterContent = suggestion.waterContent;
+                        }
+                        suggestionState.value.visible = false;
+                        suggestionState.value.suggestions = [];
+                        suggestionState.value.target = null;
+                        suggestionState.value.ingRef = null;
+                    };
+
+                    const addMainDoughIngredient = () =>
+                        mainDough.value.ingredients.push({ id: nextIngredientId++, name: "", ratio: null, isFlour: false, waterContent: 0 });
+                    const removeMainDoughIngredient = (index) => mainDough.value.ingredients.splice(index, 1);
+                    const addMainDoughProcedureStep = () => mainDough.value.procedure.push("");
+                    const removeMainDoughProcedureStep = (index) => mainDough.value.procedure.splice(index, 1);
+
+                    const addOtherIngredient = () =>
+                        currentRecipe.value.ingredients.push({ id: nextIngredientId++, name: "", ratio: null, isFlour: false, waterContent: 0 });
+                    const removeOtherIngredient = (index) => currentRecipe.value.ingredients.splice(index, 1);
+                    const addOtherProcedureStep = () => currentRecipe.value.procedure.push("");
+                    const removeOtherProcedureStep = (index) => currentRecipe.value.procedure.splice(index, 1);
+
+                    const addProduct = () => {
+                        currentRecipe.value.products.push({
+                            id: nextRecipeId++,
+                            name: `产品${currentRecipe.value.products.length + 1}`,
+                            baseDoughWeight: 100,
+                            mixIns: [],
+                            fillings: [],
+                            toppings: [],
+                            procedure: [""],
+                        });
+                        nextTick(() => {
+                            activeProductTab.value = currentRecipe.value.products.length - 1;
+                        });
+                    };
+
+                    const deleteProduct = (index) => {
+                        const productName = currentRecipe.value.products[index].name || `产品${index + 1}`;
+                        if (!confirm(`确定要删除产品 "${productName}" 吗？`)) return;
+
+                        currentRecipe.value.products.splice(index, 1);
+
+                        if (activeProductTab.value >= currentRecipe.value.products.length) {
+                            activeProductTab.value = Math.max(0, currentRecipe.value.products.length - 1);
+                        }
+                    };
+
+                    const addSubIngredient = (prodIndex, type) =>
+                        currentRecipe.value.products[prodIndex][type].push({
+                            id: nextIngredientId++,
+                            name: "",
+                            ratio: null,
+                            weightInGrams: null,
+                            isFlour: false,
+                            waterContent: 0,
+                        });
+                    const removeSubIngredient = (prodIndex, type, ingIndex) => currentRecipe.value.products[prodIndex][type].splice(ingIndex, 1);
+                    const addProductProcedureStep = (prodIndex) => currentRecipe.value.products[prodIndex].procedure.push("");
+                    const removeProductProcedureStep = (prodIndex, stepIndex) => currentRecipe.value.products[prodIndex].procedure.splice(stepIndex, 1);
+
+                    const toDecimal = (percentage) =>
+                        percentage === null || percentage === undefined ? 0 : parseFloat((parseFloat(percentage) / 100).toPrecision(12));
+                    const toPercentage = (decimal) => (decimal === null || decimal === undefined ? null : parseFloat((decimal * 100).toPrecision(12)));
+
+                    const triggerImport = () => fileInput.value.click();
+                    const handleFileImport = (event) => {
+                        const file = event.target.files[0];
+                        if (!file) return;
+
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            try {
+                                const importedData = JSON.parse(e.target.result);
+                                if (!Array.isArray(importedData)) throw new Error("JSON文件格式不正确，根节点应为数组。");
+
+                                const preDoughMap = new Map();
+                                importedData.filter((r) => r.type !== "MAIN").forEach((r) => preDoughMap.set(r.name, r));
+
+                                const normalizedRecipes = importedData.map((recipe) => normalizeRecipe(recipe, preDoughMap));
+
+                                recipes.value.push(...normalizedRecipes);
+
+                                if (currentRecipeId.value === null && recipes.value.length > 0) {
+                                    nextTick(() => {
+                                        currentRecipeId.value = recipes.value[0].id;
+                                        activeCategory.value = recipes.value[0].type;
+                                    });
+                                }
+                                alert(`成功导入 ${normalizedRecipes.length} 个配方！`);
+                            } catch (err) {
+                                console.error("Import Error:", err);
+                                alert(`导入失败：${err.message}`);
+                            } finally {
+                                event.target.value = "";
+                            }
+                        };
+                        reader.readAsText(file);
+                    };
+
+                    const normalizeRecipe = (recipe, preDoughMap) => {
+                        const baseRecipe = {
+                            id: nextRecipeId++,
+                            name: recipe.name,
+                            type: recipe.type,
+                            category: recipe.category || (recipe.type === "MAIN" ? "BREAD" : "OTHER"),
+                            notes: recipe.notes || "",
+                            targetTemp: null,
+                            lossRatio: null, // [新增] 为基础配方对象添加 lossRatio
+                            doughs: [],
+                            products: [],
+                            ingredients: [],
+                            procedure: [],
+                        };
+
+                        const processImportedIngredient = (ing) => {
+                            const predefinedMatch = allAvailableIngredients.value.find((p) => p.name === ing.name);
+                            return {
+                                id: nextIngredientId++,
+                                name: ing.name,
+                                ratio: toPercentage(ing.ratio),
+                                isFlour: predefinedMatch ? predefinedMatch.isFlour : !!ing.isFlour,
+                                waterContent: predefinedMatch ? predefinedMatch.waterContent : ing.waterContent || 0,
+                            };
+                        };
+
+                        if (recipe.type === "MAIN") {
+                            const preDoughs = [];
+                            const mainDoughIngredients = [];
+
+                            (recipe.ingredients || []).forEach((ing) => {
+                                if (preDoughMap.has(ing.name)) {
+                                    const preDoughDef = preDoughMap.get(ing.name);
+                                    if (preDoughDef) {
+                                        const processedPreDoughIngredients = (preDoughDef.ingredients || []).map(processImportedIngredient);
+                                        preDoughs.push({
+                                            id: nextRecipeId++,
+                                            name: ing.name,
+                                            type: "PRE_DOUGH",
+                                            flourRatioInMainDough: toPercentage(ing.flourRatio),
+                                            ingredients: processedPreDoughIngredients,
+                                            procedure: preDoughDef.procedure || [],
+                                        });
+                                    }
+                                } else {
+                                    mainDoughIngredients.push(processImportedIngredient(ing));
+                                }
+                            });
+
+                            const mainDoughData = {
+                                id: nextIngredientId++,
+                                name: "主面团",
+                                type: "MAIN_DOUGH",
+                                lossRatio: toPercentage(recipe.lossRatio),
+                                procedure: recipe.procedure && recipe.procedure.length > 0 ? recipe.procedure : [""],
+                                ingredients:
+                                    mainDoughIngredients.length > 0
+                                        ? mainDoughIngredients
+                                        : [{ id: nextIngredientId++, name: "", ratio: null, isFlour: false, waterContent: 0 }],
+                            };
+
+                            baseRecipe.targetTemp = recipe.targetTemp || null;
+                            baseRecipe.doughs = [mainDoughData, ...preDoughs];
+                            baseRecipe.products =
+                                recipe.products && recipe.products.length > 0
+                                    ? recipe.products.map((p) => ({
+                                          id: nextRecipeId++,
+                                          name: p.name,
+                                          baseDoughWeight: p.weight,
+                                          mixIns: (p.mixIn || []).map((i) => ({
+                                              id: nextIngredientId++,
+                                              name: i.name,
+                                              ratio: toPercentage(i.ratio),
+                                              weightInGrams: null,
+                                              isFlour: false,
+                                              waterContent: 0,
+                                          })),
+                                          fillings: (p.fillings || []).map((i) => ({
+                                              id: nextIngredientId++,
+                                              name: i.name,
+                                              weightInGrams: i.weightInGrams,
+                                              ratio: null,
+                                              isFlour: false,
+                                              waterContent: 0,
+                                          })),
+                                          toppings: (p.toppings || []).map((i) => ({
+                                              id: nextIngredientId++,
+                                              name: i.name,
+                                              weightInGrams: i.weightInGrams,
+                                              ratio: null,
+                                              isFlour: false,
+                                              waterContent: 0,
+                                          })),
+                                          procedure: p.procedure && p.procedure.length > 0 ? p.procedure : [""],
+                                      }))
+                                    : [{ id: nextRecipeId++, name: "产品1", baseDoughWeight: 100, mixIns: [], fillings: [], toppings: [], procedure: [""] }];
+                        } else {
+                            // [修改] 导入时为非产品配方(面种/其他)设置 lossRatio
+                            baseRecipe.lossRatio = toPercentage(recipe.lossRatio) || null;
+                            baseRecipe.ingredients =
+                                recipe.ingredients && recipe.ingredients.length > 0
+                                    ? recipe.ingredients.map(processImportedIngredient)
+                                    : [{ id: nextIngredientId++, name: "", ratio: null, isFlour: false, waterContent: 0 }];
+                            baseRecipe.procedure = recipe.procedure && recipe.procedure.length > 0 ? recipe.procedure : [""];
+                        }
+
+                        return baseRecipe;
+                    };
+
+                    const exportAllJson = () => {
+                        if (recipes.value.length === 0) return alert("请先添加至少一个配方");
+                        try {
+                            const processedRecipes = recipes.value.map((recipe) => {
+                                if (!recipe.name || !recipe.name.trim()) throw new Error(`列表中有未命名的配方，请检查后再导出。`);
+
+                                const formatIngredient = (ing) => {
+                                    const result = {
+                                        name: ing.name,
+                                        ratio: toDecimal(ing.ratio),
+                                    };
+                                    if (ing.isFlour) {
+                                        result.isFlour = true;
+                                    }
+                                    if (ing.waterContent && ing.waterContent > 0) {
+                                        result.waterContent = ing.waterContent;
+                                    }
+                                    return result;
+                                };
+
+                                if (recipe.type === "MAIN") {
+                                    const md = recipe.doughs.find((d) => d.type === "MAIN_DOUGH");
+                                    const finalIngredients = [
+                                        ...recipe.doughs
+                                            .filter((d) => d.type === "PRE_DOUGH")
+                                            .map((pd) => ({ name: pd.name, flourRatio: toDecimal(pd.flourRatioInMainDough) })),
+                                        ...md.ingredients.filter((ing) => ing.name.trim() && ing.ratio !== null).map(formatIngredient),
+                                    ];
+                                    return {
+                                        name: recipe.name,
+                                        type: recipe.type,
+                                        category: recipe.category,
+                                        targetTemp: recipe.targetTemp,
+                                        lossRatio: toDecimal(md.lossRatio),
+                                        procedure: md.procedure.filter((p) => p.trim()),
+                                        ingredients: finalIngredients,
+                                        products: recipe.products.map((p) => ({
+                                            name: p.name,
+                                            weight: p.baseDoughWeight,
+                                            procedure: p.procedure.filter((step) => step.trim()),
+                                            mixIn: p.mixIns
+                                                .filter((i) => i.name.trim() && i.ratio !== null)
+                                                .map((i) => ({ name: i.name, ratio: toDecimal(i.ratio) })),
+                                            fillings: p.fillings
+                                                .filter((i) => i.name.trim() && i.weightInGrams !== null)
+                                                .map((i) => ({ name: i.name, weightInGrams: i.weightInGrams })),
+                                            toppings: p.toppings
+                                                .filter((i) => i.name.trim() && i.weightInGrams !== null)
+                                                .map((i) => ({ name: i.name, weightInGrams: i.weightInGrams })),
+                                        })),
+                                    };
+                                } else {
+                                    return {
+                                        name: recipe.name,
+                                        type: recipe.type,
+                                        category: recipe.category,
+                                        lossRatio: toDecimal(recipe.lossRatio), // [修改] 导出时添加 lossRatio
+                                        ingredients: recipe.ingredients.filter((ing) => ing.name.trim() && ing.ratio !== null).map(formatIngredient),
+                                        procedure: recipe.procedure.filter((p) => p.trim()),
+                                        products: [],
+                                    };
+                                }
+                            });
+                            const jsonString = JSON.stringify(processedRecipes, null, 4);
+                            const blob = new Blob([jsonString], { type: "application/json" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = `recipes_batch_export.json`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                        } catch (err) {
+                            alert(`导出失败: ${err.message}`);
+                        }
+                    };
+
+                    return {
+                        recipes,
+                        currentRecipeId,
+                        activeProductTab,
+                        currentRecipe,
+                        mainDough,
+                        fileInput,
+                        recipeNamePlaceholder,
+                        recipeTypeDisplay,
+                        isSelfMade,
+                        recipeCategories,
+                        filteredRecipes,
+                        isAddPreDoughModalVisible,
+                        categoryDisplay,
+                        recipeContentTitle,
+                        mainRecipeCategories,
+                        availablePreDoughs,
+                        availablePreDoughsForReferencing,
+                        activeCategory,
+                        mainContentRef,
+                        productTabsRef,
+                        tabScrollState,
+                        suggestionState,
+                        suggestionBoxStyle,
+                        addRecipe,
+                        selectRecipe,
+                        deleteRecipe,
+                        triggerImport,
+                        handleFileImport,
+                        openAddPreDoughModal,
+                        addPreDoughReference,
+                        removePreDough,
+                        handleIngredientInput,
+                        handleIngredientBlur,
+                        selectSuggestion,
+                        scrollTabs,
+                        updateTabScrollButtons,
+                        addMainDoughIngredient,
+                        removeMainDoughIngredient,
+                        addMainDoughProcedureStep,
+                        removeMainDoughProcedureStep,
+                        addOtherIngredient,
+                        removeOtherIngredient,
+                        addOtherProcedureStep,
+                        removeOtherProcedureStep,
+                        addProduct,
+                        deleteProduct,
+                        addSubIngredient,
+                        removeSubIngredient,
+                        addProductProcedureStep,
+                        removeProductProcedureStep,
+                        exportAllJson,
+                    };
+                },
+            }).mount("#app");
+        </script>
+    </body>
+</html>

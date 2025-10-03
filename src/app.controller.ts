@@ -8,10 +8,10 @@ import { UserPayload } from './auth/interfaces/user-payload.interface';
 export class AppController {
     constructor(private readonly appService: AppService) {}
 
-    @Get()
-    getHello(): string {
-        return this.appService.getHello();
-    }
+    // 修复: 移除此处的 @Get() 路由，以避免与静态页面冲突
+    // getHello(): string {
+    //     return this.appService.getHello();
+    // }
 
     @UseGuards(AuthGuard('jwt'))
     @Get('profile')

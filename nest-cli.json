@@ -5,6 +5,7 @@
     "compilerOptions": {
         "deleteOutDir": true,
         "webpack": true,
-        "watchAssets": true
+        "watchAssets": true,
+        "assets": ["public"]
     }
 }
