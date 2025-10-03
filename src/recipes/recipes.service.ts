@@ -12,8 +12,11 @@ import {
     ComponentIngredient,
     Product,
     RecipeCategory,
+    Ingredient,
+    Role,
 } from '@prisma/client';
 import { RecipeFormTemplateDto, ComponentTemplate } from './dto/recipe-form-template.dto';
+import { BatchImportRecipeDto, BatchImportResultDto } from './dto/batch-import-recipe.dto';
 
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
 
@@ -28,6 +31,118 @@ type PreloadedRecipeFamily = RecipeFamily & {
 @Injectable()
 export class RecipesService {
     constructor(private prisma: PrismaService) {}
+
+    async batchImportRecipes(
+        userId: string,
+        recipesDto: BatchImportRecipeDto[],
+        tenantIds?: string[],
+    ): Promise<BatchImportResultDto> {
+        // 1. 确定目标店铺并获取其名称
+        let targetTenants: { id: string; name: string }[];
+
+        if (tenantIds && tenantIds.length > 0) {
+            const ownedTenants = await this.prisma.tenant.findMany({
+                where: {
+                    id: { in: tenantIds },
+                    members: {
+                        some: {
+                            userId,
+                            role: Role.OWNER,
+                        },
+                    },
+                },
+                select: { id: true, name: true },
+            });
+
+            if (ownedTenants.length !== tenantIds.length) {
+                throw new BadRequestException('包含了您没有权限的店铺ID。');
+            }
+            targetTenants = ownedTenants;
+        } else {
+            const allOwnedTenants = await this.prisma.tenant.findMany({
+                where: {
+                    members: {
+                        some: {
+                            userId,
+                            role: Role.OWNER,
+                        },
+                    },
+                },
+                select: { id: true, name: true },
+            });
+            targetTenants = allOwnedTenants;
+        }
+
+        if (targetTenants.length === 0) {
+            throw new BadRequestException('没有找到可导入的店铺。');
+        }
+
+        // 2. 遍历每个目标店铺并执行导入
+        const overallResult: BatchImportResultDto = {
+            totalCount: recipesDto.length * targetTenants.length,
+            importedCount: 0,
+            skippedCount: 0,
+            skippedRecipes: [],
+        };
+
+        for (const tenant of targetTenants) {
+            const tenantId = tenant.id;
+            const tenantName = tenant.name;
+
+            const existingFamilies = await this.prisma.recipeFamily.findMany({
+                where: {
+                    tenantId,
+                    name: { in: recipesDto.map((r) => r.name) },
+                    deletedAt: null,
+                },
+                select: { name: true },
+            });
+            const existingFamilyNames = new Set(existingFamilies.map((f) => f.name));
+
+            for (const recipeDto of recipesDto) {
+                if (existingFamilyNames.has(recipeDto.name)) {
+                    overallResult.skippedCount++;
+                    // [修改] 使用店铺名称替代ID
+                    overallResult.skippedRecipes.push(`${recipeDto.name} (在店铺 "${tenantName}" 已存在)`);
+                    continue;
+                }
+
+                try {
+                    const createDto: CreateRecipeDto = {
+                        name: recipeDto.name,
+                        type: recipeDto.type,
+                        category: recipeDto.category,
+                        notes: recipeDto.notes,
+                        targetTemp: recipeDto.targetTemp,
+                        lossRatio: recipeDto.lossRatio,
+                        procedure: recipeDto.procedure,
+                        ingredients: recipeDto.ingredients.map((ing) => ({
+                            ...ing,
+                            ratio: ing.ratio,
+                            flourRatio: ing.flourRatio,
+                        })),
+                        products: recipeDto.products?.map((p) => ({
+                            ...p,
+                            weight: p.weight,
+                            mixIn: p.mixIn?.map((i) => ({ ...i, type: ProductIngredientType.MIX_IN })) || [],
+                            fillings: p.fillings?.map((i) => ({ ...i, type: ProductIngredientType.FILLING })) || [],
+                            toppings: p.toppings?.map((i) => ({ ...i, type: ProductIngredientType.TOPPING })) || [],
+                        })),
+                    };
+
+                    await this.create(tenantId, createDto);
+                    overallResult.importedCount++;
+                } catch (error) {
+                    console.error(`向店铺 ${tenantName} 导入配方 "${recipeDto.name}" 失败:`, error);
+                    overallResult.skippedCount++;
+                    // [修改] 使用店铺名称替代ID
+                    overallResult.skippedRecipes.push(`${recipeDto.name} (在店铺 "${tenantName}" 导入失败)`);
+                }
+            }
+        }
+
+        return overallResult;
+    }
 
     async create(tenantId: string, createRecipeDto: CreateRecipeDto) {
         const { name } = createRecipeDto;
@@ -463,41 +578,93 @@ export class RecipesService {
         });
     }
 
-    private async _ensureIngredientsExist(tenantId: string, recipeDto: CreateRecipeDto, tx: Prisma.TransactionClient) {
+    private async _ensureIngredientsExist(
+        tenantId: string,
+        recipeDto: CreateRecipeDto | BatchImportRecipeDto,
+        tx: Prisma.TransactionClient,
+    ) {
         const { ingredients, products } = recipeDto;
         const allRawIngredients = [
             ...ingredients,
             ...(products ?? []).flatMap((p) => [...(p.mixIn ?? []), ...(p.fillings ?? []), ...(p.toppings ?? [])]),
         ];
 
+        const newIngredientNames = new Set<string>();
+
         for (const ing of allRawIngredients) {
-            if (ing.ingredientId) continue;
+            newIngredientNames.add(ing.name);
+        }
 
-            const isPreDoughOrExtra = await tx.recipeFamily.findFirst({
-                where: { name: ing.name, tenantId, type: { in: ['PRE_DOUGH', 'EXTRA'] } },
-            });
-            if (isPreDoughOrExtra) continue;
+        const existingIngredients = await tx.ingredient.findMany({
+            where: {
+                tenantId,
+                name: { in: Array.from(newIngredientNames) },
+                deletedAt: null,
+            },
+        });
 
-            let existingIngredient = await tx.ingredient.findFirst({
-                where: { tenantId, name: ing.name, deletedAt: null },
-            });
+        const existingIngredientMap = new Map<string, Ingredient | Prisma.IngredientCreateManyInput>(
+            existingIngredients.map((i) => [i.name, i]),
+        );
 
-            if (!existingIngredient) {
-                const isWater = ing.name === '水';
+        const existingFamilies = await tx.recipeFamily.findMany({
+            where: {
+                tenantId,
+                name: { in: Array.from(newIngredientNames) },
+                type: { in: ['PRE_DOUGH', 'EXTRA'] },
+            },
+        });
+        const existingFamilyNames = new Set(existingFamilies.map((f) => f.name));
 
-                const waterContentForDb = isWater ? 1 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0;
+        const ingredientsToCreate: Prisma.IngredientCreateManyInput[] = [];
 
-                existingIngredient = await tx.ingredient.create({
-                    data: {
-                        tenantId,
-                        name: ing.name,
-                        type: isWater ? IngredientType.UNTRACKED : IngredientType.STANDARD,
-                        isFlour: isWater ? false : 'isFlour' in ing ? (ing.isFlour ?? false) : false,
-                        waterContent: new Prisma.Decimal(waterContentForDb),
-                    },
-                });
+        for (const ing of allRawIngredients) {
+            if (existingIngredientMap.has(ing.name) || existingFamilyNames.has(ing.name)) {
+                if ('ingredientId' in ing) {
+                    const existing = existingIngredientMap.get(ing.name);
+                    if (existing && 'id' in existing) {
+                        ing.ingredientId = existing.id;
+                    }
+                }
+                continue;
             }
-            ing.ingredientId = existingIngredient.id;
+            const isWater = ing.name === '水';
+
+            const waterContentForDb = isWater ? 1 : 'waterContent' in ing ? (ing.waterContent ?? 0) : 0;
+            const newIngredientData: Prisma.IngredientCreateManyInput = {
+                tenantId,
+                name: ing.name,
+                type: isWater ? IngredientType.UNTRACKED : IngredientType.STANDARD,
+                isFlour: isWater ? false : 'isFlour' in ing ? (ing.isFlour ?? false) : false,
+                waterContent: new Prisma.Decimal(waterContentForDb),
+            };
+            ingredientsToCreate.push(newIngredientData);
+            existingIngredientMap.set(ing.name, newIngredientData);
+        }
+
+        if (ingredientsToCreate.length > 0) {
+            await tx.ingredient.createMany({
+                data: ingredientsToCreate,
+                skipDuplicates: true,
+            });
+            const createdIngredients = await tx.ingredient.findMany({
+                where: {
+                    tenantId,
+                    name: { in: ingredientsToCreate.map((i) => i.name) },
+                },
+            });
+            for (const created of createdIngredients) {
+                existingIngredientMap.set(created.name, created);
+            }
+        }
+
+        for (const ing of allRawIngredients) {
+            if ('ingredientId' in ing && !existingFamilyNames.has(ing.name)) {
+                const existing = existingIngredientMap.get(ing.name);
+                if (existing && 'id' in existing) {
+                    ing.ingredientId = existing.id;
+                }
+            }
         }
     }
 
@@ -520,11 +687,10 @@ export class RecipesService {
                         },
                     },
                 },
-                // 新增: 计算每种配方被引用的次数
                 _count: {
                     select: {
-                        usedInComponents: true, // 作为 PRE_DOUGH 被引用的次数
-                        usedInProducts: true, // 作为 EXTRA 被引用的次数
+                        usedInComponents: true,
+                        usedInProducts: true,
                     },
                 },
             },
@@ -540,16 +706,12 @@ export class RecipesService {
                         0,
                     ) || 0;
 
-                // 新增: 合并计算总的引用次数
                 const usageCount = (family._count?.usedInComponents || 0) + (family._count?.usedInProducts || 0);
 
                 if (family.type !== 'MAIN') {
-                    // 对于面种和馅料，直接返回所需信息，生产任务数为0
-                    // 新增: 加上 productionTaskCount: 0 修复类型错误
                     return { ...family, ingredientCount, usageCount, productionTaskCount: 0 };
                 }
 
-                // 以下逻辑仅针对主配方
                 if (!activeVersion || activeVersion.products.length === 0) {
                     return { ...family, productCount, ingredientCount, productionTaskCount: 0, usageCount };
                 }
@@ -581,7 +743,6 @@ export class RecipesService {
             .filter((family) => family.type === 'MAIN')
             .sort((a, b) => (b.productionTaskCount || 0) - (a.productionTaskCount || 0));
 
-        // 修改: 将 otherRecipes 按类型（PRE_DOUGH, EXTRA）分组
         const preDoughs = familiesWithCounts
             .filter((family) => family.type === 'PRE_DOUGH')
             .sort((a, b) => a.name.localeCompare(b.name));
@@ -590,7 +751,6 @@ export class RecipesService {
             .filter((family) => family.type === 'EXTRA')
             .sort((a, b) => a.name.localeCompare(b.name));
 
-        // 修改: 更新返回的数据结构
         return {
             mainRecipes,
             preDoughs,
@@ -731,7 +891,6 @@ export class RecipesService {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
-        // [核心修复] 使用类型安全的方式来处理数据并附加 extraInfo
         const processedFamily = {
             ...family,
             versions: family.versions.map((version) => {
@@ -739,33 +898,26 @@ export class RecipesService {
                     ...version,
                     components: version.components.map((component) => {
                         const ingredientNotes = new Map<string, string>();
-                        // [核心修改] 移除正则表达式中不必要的转义字符
                         const noteRegex = /@(?:\[)?(.*?)(?:\])?[(（](.*?)[)）]/g;
 
-                        // [核心修改] 过滤和清理制作步骤
                         const cleanedProcedure = component.procedure
                             .map((step) => {
-                                // 首先，提取所有附加说明，存入 map
                                 const stepMatches = [...step.matchAll(noteRegex)];
                                 for (const match of stepMatches) {
-                                    // match[1] 是原料名, match[2] 是括号内的说明
                                     const [, ingredientName, note] = match;
                                     if (ingredientName && note) {
                                         ingredientNotes.set(ingredientName.trim(), note.trim());
                                     }
                                 }
 
-                                // 将所有"@原料(说明)"格式的文本块替换为空字符串，并去除前后空格
                                 const cleanedStep = step.replace(noteRegex, '').trim();
 
-                                // 如果清理后的步骤为空字符串，则返回 null，后续将被过滤掉
                                 if (cleanedStep === '') {
                                     return null;
                                 }
 
                                 return cleanedStep;
                             })
-                            // 过滤掉所有 null 值的步骤
                             .filter((step): step is string => step !== null);
 
                         return {
@@ -774,7 +926,6 @@ export class RecipesService {
                             ingredients: component.ingredients.map((ing) => {
                                 if (ing.ingredient) {
                                     const extraInfo = ingredientNotes.get(ing.ingredient.name);
-                                    // 创建一个新的 ingredient 对象来附加属性，而不是直接修改
                                     return {
                                         ...ing,
                                         ingredient: {
