@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateRecipeDto, ComponentIngredientDto, ProductDto } from './dto/create-recipe.dto';
+import { CreateRecipeDto, ComponentIngredientDto, ProductDto, ProductIngredientDto } from './dto/create-recipe.dto';
 import {
     Prisma,
     RecipeFamily,
@@ -37,7 +37,6 @@ export class RecipesService {
         recipesDto: BatchImportRecipeDto[],
         tenantIds?: string[],
     ): Promise<BatchImportResultDto> {
-        // 1. 确定目标店铺并获取其名称
         let targetTenants: { id: string; name: string }[];
 
         if (tenantIds && tenantIds.length > 0) {
@@ -77,7 +76,6 @@ export class RecipesService {
             throw new BadRequestException('没有找到可导入的店铺。');
         }
 
-        // 2. 遍历每个目标店铺并执行导入
         const overallResult: BatchImportResultDto = {
             totalCount: recipesDto.length * targetTenants.length,
             importedCount: 0,
@@ -102,12 +100,12 @@ export class RecipesService {
             for (const recipeDto of recipesDto) {
                 if (existingFamilyNames.has(recipeDto.name)) {
                     overallResult.skippedCount++;
-                    // [修改] 使用店铺名称替代ID
                     overallResult.skippedRecipes.push(`${recipeDto.name} (在店铺 "${tenantName}" 已存在)`);
                     continue;
                 }
 
                 try {
+                    // [核心修复] 彻底修正 DTO 转换逻辑，确保类型完全匹配
                     const createDto: CreateRecipeDto = {
                         name: recipeDto.name,
                         type: recipeDto.type,
@@ -116,18 +114,42 @@ export class RecipesService {
                         targetTemp: recipeDto.targetTemp,
                         lossRatio: recipeDto.lossRatio,
                         procedure: recipeDto.procedure,
-                        ingredients: recipeDto.ingredients.map((ing) => ({
-                            ...ing,
-                            ratio: ing.ratio,
-                            flourRatio: ing.flourRatio,
-                        })),
-                        products: recipeDto.products?.map((p) => ({
-                            ...p,
-                            weight: p.weight,
-                            mixIn: p.mixIn?.map((i) => ({ ...i, type: ProductIngredientType.MIX_IN })) || [],
-                            fillings: p.fillings?.map((i) => ({ ...i, type: ProductIngredientType.FILLING })) || [],
-                            toppings: p.toppings?.map((i) => ({ ...i, type: ProductIngredientType.TOPPING })) || [],
-                        })),
+                        ingredients: recipeDto.ingredients.map(
+                            (ing): ComponentIngredientDto => ({
+                                ...ing,
+                                ingredientId: undefined, // 确保 ingredientId 属性存在
+                            }),
+                        ),
+                        products: recipeDto.products?.map(
+                            (p): ProductDto => ({
+                                ...p,
+                                // 使用正确的 ProductIngredientDto 类型进行转换
+                                mixIn:
+                                    p.mixIn?.map(
+                                        (i): ProductIngredientDto => ({
+                                            ...i,
+                                            type: ProductIngredientType.MIX_IN,
+                                            ingredientId: undefined,
+                                        }),
+                                    ) || [],
+                                fillings:
+                                    p.fillings?.map(
+                                        (i): ProductIngredientDto => ({
+                                            ...i,
+                                            type: ProductIngredientType.FILLING,
+                                            ingredientId: undefined,
+                                        }),
+                                    ) || [],
+                                toppings:
+                                    p.toppings?.map(
+                                        (i): ProductIngredientDto => ({
+                                            ...i,
+                                            type: ProductIngredientType.TOPPING,
+                                            ingredientId: undefined,
+                                        }),
+                                    ) || [],
+                            }),
+                        ),
                     };
 
                     await this.create(tenantId, createDto);
@@ -135,7 +157,6 @@ export class RecipesService {
                 } catch (error) {
                     console.error(`向店铺 ${tenantName} 导入配方 "${recipeDto.name}" 失败:`, error);
                     overallResult.skippedCount++;
-                    // [修改] 使用店铺名称替代ID
                     overallResult.skippedRecipes.push(`${recipeDto.name} (在店铺 "${tenantName}" 导入失败)`);
                 }
             }
@@ -335,7 +356,7 @@ export class RecipesService {
                 await tx.product.update({
                     where: { id: existingProduct.id },
                     data: {
-                        baseDoughWeight: new Prisma.Decimal(productDto.weight), // [核心修复]
+                        baseDoughWeight: new Prisma.Decimal(productDto.weight),
                         procedure: productDto.procedure,
                     },
                 });
@@ -346,7 +367,7 @@ export class RecipesService {
                     data: {
                         recipeVersionId: versionId,
                         name: productDto.name,
-                        baseDoughWeight: new Prisma.Decimal(productDto.weight), // [核心修复]
+                        baseDoughWeight: new Prisma.Decimal(productDto.weight),
                         procedure: productDto.procedure,
                     },
                 });
@@ -578,11 +599,7 @@ export class RecipesService {
         });
     }
 
-    private async _ensureIngredientsExist(
-        tenantId: string,
-        recipeDto: CreateRecipeDto | BatchImportRecipeDto,
-        tx: Prisma.TransactionClient,
-    ) {
+    private async _ensureIngredientsExist(tenantId: string, recipeDto: CreateRecipeDto, tx: Prisma.TransactionClient) {
         const { ingredients, products } = recipeDto;
         const allRawIngredients = [
             ...ingredients,
@@ -620,11 +637,9 @@ export class RecipesService {
 
         for (const ing of allRawIngredients) {
             if (existingIngredientMap.has(ing.name) || existingFamilyNames.has(ing.name)) {
-                if ('ingredientId' in ing) {
-                    const existing = existingIngredientMap.get(ing.name);
-                    if (existing && 'id' in existing) {
-                        ing.ingredientId = existing.id;
-                    }
+                const existing = existingIngredientMap.get(ing.name);
+                if (existing && 'id' in existing) {
+                    ing.ingredientId = existing.id;
                 }
                 continue;
             }
