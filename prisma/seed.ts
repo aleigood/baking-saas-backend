@@ -29,7 +29,7 @@ async function main() {
     const leoPassword = '123';
     const hashedLeoPassword = await bcrypt.hash(leoPassword, 10);
 
-    await prisma.user.upsert({
+    const leo = await prisma.user.upsert({
         where: { phone: leoPhone },
         update: {},
         create: {
@@ -41,6 +41,21 @@ async function main() {
         },
     });
     console.log(`测试店主 "Leo" 已创建/确认存在: ${leoPhone}`);
+
+    // 3. [恢复] 为 Leo 创建一个店铺，并将他设为所有者
+    await prisma.tenant.create({
+        data: {
+            name: '小时光',
+            members: {
+                create: {
+                    userId: leo.id, // 关联 Leo 的用户 ID
+                    role: 'OWNER',
+                    status: 'ACTIVE',
+                },
+            },
+        },
+    });
+    console.log(`店铺 "小时光" 已创建，并关联到用户 "Leo"`);
 
     console.log('种子脚本执行完毕！');
 }
