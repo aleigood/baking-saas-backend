@@ -40,6 +40,7 @@ export interface ProductDetails {
 export interface ComponentGroup {
     familyId: string;
     familyName: string;
+    note: string | null; // [核心新增] 用于存放版本备注信息
     category: RecipeCategory; // [核心新增] 增加品类字段，用于驱动前端UI
     productsDescription: string;
     totalComponentWeight: number; // [核心重命名] totalDoughWeight -> totalComponentWeight

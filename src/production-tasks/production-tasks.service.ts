@@ -9,7 +9,7 @@ import {
     ProductIngredientType,
     ProductionTask,
     ProductionTaskStatus,
-    RecipeCategory, // [核心新增] 导入 RecipeCategory
+    RecipeCategory,
     RecipeFamily,
     RecipeType,
 } from '@prisma/client';
@@ -17,8 +17,8 @@ import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
 import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
 import {
-    ComponentGroup, // [核心重命名]
-    ProductComponentSummary, // [核心重命名]
+    ComponentGroup,
+    ProductComponentSummary,
     ProductDetails,
     TaskDetailResponseDto,
     TaskIngredientDetail,
@@ -821,6 +821,10 @@ export class ProductionTasksService {
         const componentGroups: ComponentGroup[] = [];
         for (const [familyId, data] of componentsMap.entries()) {
             const firstItem = data.items[0];
+
+            // [核心修正] 从 recipeVersion.notes 字段读取版本备注作为版本信息
+            const versionNotes = (firstItem.product.recipeVersion as unknown as { notes: string | null }).notes;
+
             const baseComponentInfo = firstItem.product.recipeVersion.components[0];
             const ingredientNotes = new Map<string, string>();
             const cleanedProcedure = this._parseProcedureForNotes(baseComponentInfo.procedure, ingredientNotes);
@@ -1031,7 +1035,8 @@ export class ProductionTasksService {
 
             componentGroups.push({
                 familyId,
-                familyName: data.familyName,
+                familyName: data.familyName, // [核心修正] familyName 恢复为纯净的配方族名称
+                note: versionNotes, // [核心修正] 新增 note 字段，用于存放版本信息
                 category: data.category,
                 productsDescription: data.items
                     .map((i) => {
