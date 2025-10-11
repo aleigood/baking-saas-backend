@@ -167,6 +167,9 @@ export class ProductionTasksService {
         }
 
         const productIds = products.map((p) => p.productId);
+
+        // [中文注释] 核心修正：分两步验证，提供更精确的错误提示
+        // 步骤1: 验证所有产品ID是否存在且属于该店铺
         const existingProducts = await this.prisma.product.findMany({
             where: {
                 id: { in: productIds },
@@ -177,6 +180,8 @@ export class ProductionTasksService {
                     include: {
                         family: {
                             select: {
+                                deletedAt: true,
+                                name: true,
                                 category: true,
                             },
                         },
@@ -187,6 +192,13 @@ export class ProductionTasksService {
 
         if (existingProducts.length !== productIds.length) {
             throw new NotFoundException('一个或多个目标产品不存在或不属于该店铺。');
+        }
+
+        // 步骤2: 在已找到的产品中，检查是否有任何产品关联的配方已被停用
+        const discontinuedProducts = existingProducts.filter((p) => p.recipeVersion.family.deletedAt !== null);
+        if (discontinuedProducts.length > 0) {
+            const names = [...new Set(discontinuedProducts.map((p) => p.recipeVersion.family.name))].join('", "');
+            throw new BadRequestException(`无法创建任务，因为配方 "${names}" 已被停用。`);
         }
 
         const firstCategory = existingProducts[0].recipeVersion.family.category;
@@ -1237,15 +1249,37 @@ export class ProductionTasksService {
             });
 
             const productIds = products.map((p) => p.productId);
+
+            // [中文注释] 核心修正：分两步验证，提供更精确的错误提示
+            // 步骤1: 验证所有产品ID是否存在且属于该店铺
             const existingProducts = await tx.product.findMany({
                 where: {
                     id: { in: productIds },
                     recipeVersion: { family: { tenantId } },
                 },
+                include: {
+                    recipeVersion: {
+                        include: {
+                            family: {
+                                select: {
+                                    deletedAt: true,
+                                    name: true,
+                                },
+                            },
+                        },
+                    },
+                },
             });
 
             if (existingProducts.length !== productIds.length) {
                 throw new NotFoundException('一个或多个目标产品不存在或不属于该店铺。');
+            }
+
+            // 步骤2: 在已找到的产品中，检查是否有任何产品关联的配方已被停用
+            const discontinuedProducts = existingProducts.filter((p) => p.recipeVersion.family.deletedAt !== null);
+            if (discontinuedProducts.length > 0) {
+                const names = [...new Set(discontinuedProducts.map((p) => p.recipeVersion.family.name))].join('", "');
+                throw new BadRequestException(`无法更新任务，因为配方 "${names}" 已被停用。`);
             }
 
             const updatedTask = await tx.productionTask.update({
