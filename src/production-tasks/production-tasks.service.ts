@@ -412,11 +412,43 @@ export class ProductionTasksService {
 
         const prepTaskItems: CalculatedRecipeDetails[] = [];
         for (const [id, data] of requiredPrepItems.entries()) {
-            const details = await this.costingService.getCalculatedRecipeDetails(
-                tenantId,
-                id,
-                data.totalWeight.toNumber(),
-            );
+            const [details, recipeFamily] = await Promise.all([
+                this.costingService.getCalculatedRecipeDetails(tenantId, id, data.totalWeight.toNumber()),
+                this.prisma.recipeFamily.findUnique({
+                    where: { id },
+                    include: {
+                        versions: {
+                            where: { isActive: true },
+                            select: {
+                                components: {
+                                    select: {
+                                        procedure: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                }),
+            ]);
+
+            const procedure = recipeFamily?.versions[0]?.components[0]?.procedure;
+            if (procedure && details.ingredients && details.ingredients.length > 0) {
+                const ingredientNotes = new Map<string, string>();
+                // [核心修改] 调用笔记解析函数，并接收返回的、被清洗过的制作步骤
+                const cleanedProcedure = this._parseProcedureForNotes(procedure, ingredientNotes);
+                // [核心修改] 将清洗后的制作步骤更新回 details 对象
+                details.procedure = cleanedProcedure;
+
+                if (ingredientNotes.size > 0) {
+                    details.ingredients.forEach((ingredient: TaskIngredientDetail) => {
+                        const note = ingredientNotes.get(ingredient.name);
+                        if (note) {
+                            const existingInfo = ingredient.extraInfo ? `${ingredient.extraInfo}\n` : '';
+                            ingredient.extraInfo = `${existingInfo}${note}`;
+                        }
+                    });
+                }
+            }
             prepTaskItems.push(details);
         }
 
