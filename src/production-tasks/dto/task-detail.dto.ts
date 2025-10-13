@@ -2,8 +2,9 @@
  * 文件路径: src/production-tasks/dto/task-detail.dto.ts
  * 文件描述: [核心重构] 将与“面团”相关的命名更新为通用的“组件”。
  */
-import { ProductionTaskStatus, RecipeCategory } from '@prisma/client'; // [核心新增] 导入 RecipeCategory
-import { PrepTask } from '../production-tasks.service';
+import { ProductionTaskStatus, RecipeCategory } from '@prisma/client';
+// [核心修改] 从新的 DTO 文件导入 PrepTask
+import { PrepTask } from './preparation.dto';
 
 // 定义原料详情的数据结构
 export interface TaskIngredientDetail {

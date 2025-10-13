@@ -141,11 +141,16 @@ export class IngredientsService {
                 ? priceMap.get(ingredient.activeSkuId) || new Prisma.Decimal(0)
                 : new Prisma.Decimal(0);
 
-            if (ingredient.type === IngredientType.UNTRACKED) {
+            // [修改] 对 UNTRACKED 和 NON_INVENTORIED 类型的原料做特殊处理
+            if (ingredient.type === IngredientType.UNTRACKED || ingredient.type === IngredientType.NON_INVENTORIED) {
+                // [修改] 如果是 NON_INVENTORIED 类型，则可用天数为0，表示不管理库存
+                const daysOfSupply = ingredient.type === IngredientType.UNTRACKED ? Infinity : 0;
                 return {
                     ...ingredient,
-                    currentPricePerPackage: new Prisma.Decimal(0),
-                    daysOfSupply: Infinity,
+                    // [修改] UNTRACKED 类型成本为0，NON_INVENTORIED 成本按最新采购价计算
+                    currentPricePerPackage:
+                        ingredient.type === IngredientType.UNTRACKED ? new Prisma.Decimal(0) : currentPricePerPackage,
+                    daysOfSupply: daysOfSupply,
                     avgDailyConsumption: 0,
                     avgConsumptionPerTask: 0,
                     totalConsumptionInGrams,
@@ -186,6 +191,7 @@ export class IngredientsService {
             (a, b) => b.totalConsumptionInGrams - a.totalConsumptionInGrams,
         );
         const lowStockIngredients = [...processedIngredients]
+            // [修改] 在过滤低库存原料时，排除 NON_INVENTORIED 类型
             .filter(
                 (ing) =>
                     ing.type === 'STANDARD' &&

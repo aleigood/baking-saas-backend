@@ -64,6 +64,7 @@ enum ProductionTaskStatus {
 enum IngredientType {
   STANDARD // 标准原料，需要追踪库存和成本
   UNTRACKED // 非追踪原料，如水、盐等低价值或难计量的
+  NON_INVENTORIED // 免盘点原料，需要计算成本但不追踪库存，如生鲜类原料
 }
 
 // 新增：配方类型枚举

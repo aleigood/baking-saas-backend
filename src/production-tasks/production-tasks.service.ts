@@ -24,6 +24,8 @@ import {
     TaskIngredientDetail,
 } from './dto/task-detail.dto';
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
+// [核心修改] 从新建的 DTO 文件导入准备工作相关的类型
+import { BillOfMaterialsResponseDto, BillOfMaterialsItem, PrepTask } from './dto/preparation.dto';
 
 const spoilageStages = [
     { key: 'kneading', label: '打面失败' },
@@ -34,12 +36,7 @@ const spoilageStages = [
     { key: 'other', label: '其他原因' },
 ];
 
-export interface PrepTask {
-    id: string;
-    title: string;
-    details: string;
-    items: CalculatedRecipeDetails[];
-}
+// [核心修改] PrepTask, BillOfMaterialsItem, BillOfMaterialsResponseDto 的定义已移至 preparation.dto.ts
 
 const taskWithDetailsInclude = {
     items: {
@@ -168,8 +165,6 @@ export class ProductionTasksService {
 
         const productIds = products.map((p) => p.productId);
 
-        // [中文注释] 核心修正：分两步验证，提供更精确的错误提示
-        // 步骤1: 验证所有产品ID是否存在且属于该店铺
         const existingProducts = await this.prisma.product.findMany({
             where: {
                 id: { in: productIds },
@@ -194,7 +189,6 @@ export class ProductionTasksService {
             throw new NotFoundException('一个或多个目标产品不存在或不属于该店铺。');
         }
 
-        // 步骤2: 在已找到的产品中，检查是否有任何产品关联的配方已被停用
         const discontinuedProducts = existingProducts.filter((p) => p.recipeVersion.family.deletedAt !== null);
         if (discontinuedProducts.length > 0) {
             const names = [...new Set(discontinuedProducts.map((p) => p.recipeVersion.family.name))].join('", "');
@@ -290,9 +284,9 @@ export class ProductionTasksService {
         return { task: createdTask, warning: stockWarning };
     }
 
-    private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<PrepTask | null> {
+    private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<CalculatedRecipeDetails[]> {
         if (!task || !task.items || task.items.length === 0) {
-            return null;
+            return [];
         }
 
         const requiredPrepItems = new Map<string, RequiredPrepItem>();
@@ -413,7 +407,7 @@ export class ProductionTasksService {
         }
 
         if (requiredPrepItems.size === 0) {
-            return null;
+            return [];
         }
 
         const prepTaskItems: CalculatedRecipeDetails[] = [];
@@ -426,12 +420,7 @@ export class ProductionTasksService {
             prepTaskItems.push(details);
         }
 
-        return {
-            id: `prep-task-for-${task.id}`,
-            title: '备料清单',
-            details: `包含 ${prepTaskItems.length} 种预制件`,
-            items: prepTaskItems,
-        };
+        return prepTaskItems;
     }
 
     private async _getPrepTask(tenantId: string, date?: string): Promise<PrepTask | null> {
@@ -465,17 +454,31 @@ export class ProductionTasksService {
             return null;
         }
 
-        const combinedPrepTask = await this._getPrepItemsForTask(tenantId, {
+        const combinedTaskItems = {
             ...activeTasks[0],
             items: activeTasks.flatMap((task) => task.items),
-        });
+        };
 
-        if (combinedPrepTask) {
-            combinedPrepTask.id = 'prep-task-combined';
-            combinedPrepTask.title = '前置准备任务';
+        const [prepItems, billOfMaterials] = await Promise.all([
+            this._getPrepItemsForTask(tenantId, combinedTaskItems),
+            this.getBillOfMaterialsForDate(tenantId, date),
+        ]);
+
+        const detailsParts: string[] = [];
+        if (billOfMaterials.standardItems.length > 0 || billOfMaterials.nonInventoriedItems.length > 0) {
+            detailsParts.push('备料清单');
+        }
+        if (prepItems.length > 0) {
+            detailsParts.push(`${prepItems.length}种预制件`);
         }
 
-        return combinedPrepTask;
+        return {
+            id: 'prep-task-combined',
+            title: '前置准备任务',
+            details: detailsParts.join('，'),
+            items: prepItems,
+            billOfMaterials,
+        };
     }
 
     async findActive(tenantId: string, date?: string) {
@@ -495,8 +498,17 @@ export class ProductionTasksService {
         const sortedRegularTasks = [...inProgressTasks, ...pendingTasks];
 
         const combinedTasks: (ProductionTask | (PrepTask & { status: 'PREP' }))[] = [...sortedRegularTasks];
+
         if (prepTask) {
-            combinedTasks.unshift({ ...prepTask, status: 'PREP' });
+            const hasPrepItems = prepTask.items.length > 0;
+            const hasBillOfMaterials =
+                prepTask.billOfMaterials &&
+                (prepTask.billOfMaterials.standardItems.length > 0 ||
+                    prepTask.billOfMaterials.nonInventoriedItems.length > 0);
+
+            if (hasPrepItems || hasBillOfMaterials) {
+                combinedTasks.unshift({ ...prepTask, status: 'PREP' });
+            }
         }
 
         return {
@@ -731,6 +743,91 @@ export class ProductionTasksService {
         };
     }
 
+    async getBillOfMaterialsForDate(tenantId: string, date?: string): Promise<BillOfMaterialsResponseDto> {
+        const tasksForDate = await this.findTasksForDate(tenantId, date);
+
+        if (tasksForDate.length === 0) {
+            return { standardItems: [], nonInventoriedItems: [] };
+        }
+
+        const totalConsumptionMap = new Map<string, { name: string; totalConsumed: number }>();
+
+        for (const task of tasksForDate) {
+            for (const item of task.items) {
+                const consumptions = await this.costingService.calculateProductConsumptions(
+                    tenantId,
+                    item.productId,
+                    item.quantity,
+                );
+
+                for (const consumption of consumptions) {
+                    const existing = totalConsumptionMap.get(consumption.ingredientId);
+                    if (existing) {
+                        existing.totalConsumed += consumption.totalConsumed;
+                    } else {
+                        totalConsumptionMap.set(consumption.ingredientId, {
+                            name: consumption.ingredientName,
+                            totalConsumed: consumption.totalConsumed,
+                        });
+                    }
+                }
+            }
+        }
+
+        const ingredientIds = Array.from(totalConsumptionMap.keys());
+        if (ingredientIds.length === 0) {
+            return { standardItems: [], nonInventoriedItems: [] };
+        }
+
+        const ingredients = await this.prisma.ingredient.findMany({
+            where: {
+                id: { in: ingredientIds },
+            },
+            select: {
+                id: true,
+                name: true,
+                type: true,
+                currentStockInGrams: true,
+            },
+        });
+
+        const standardItems: BillOfMaterialsItem[] = [];
+        const nonInventoriedItems: BillOfMaterialsItem[] = [];
+
+        for (const ingredient of ingredients) {
+            const required = totalConsumptionMap.get(ingredient.id);
+            if (!required) continue;
+
+            if (ingredient.type === IngredientType.STANDARD) {
+                const currentStock = ingredient.currentStockInGrams.toNumber();
+                const totalRequired = required.totalConsumed;
+                const suggestedPurchase = Math.max(0, totalRequired - currentStock);
+
+                standardItems.push({
+                    ingredientId: ingredient.id,
+                    ingredientName: ingredient.name,
+                    totalRequired,
+                    currentStock,
+                    suggestedPurchase,
+                });
+            } else if (ingredient.type === IngredientType.NON_INVENTORIED) {
+                const totalRequired = required.totalConsumed;
+
+                nonInventoriedItems.push({
+                    ingredientId: ingredient.id,
+                    ingredientName: ingredient.name,
+                    totalRequired: totalRequired,
+                    suggestedPurchase: totalRequired,
+                });
+            }
+        }
+
+        standardItems.sort((a, b) => b.suggestedPurchase - a.suggestedPurchase);
+        nonInventoriedItems.sort((a, b) => b.suggestedPurchase - a.suggestedPurchase);
+
+        return { standardItems, nonInventoriedItems };
+    }
+
     async findOne(tenantId: string, id: string, query: QueryTaskDetailDto): Promise<TaskDetailResponseDto> {
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
@@ -750,12 +847,19 @@ export class ProductionTasksService {
         const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, task.items);
         const { stockWarning } = await this._calculateStockWarning(tenantId, task);
 
+        const prepItems = await this._getPrepItemsForTask(tenantId, task);
+
         return {
             id: task.id,
             status: task.status,
             notes: task.notes,
             stockWarning,
-            prepTask: await this._getPrepItemsForTask(tenantId, task),
+            prepTask: {
+                id: 'prep-task-combined',
+                title: '前置准备任务',
+                details: prepItems.length > 0 ? `包含 ${prepItems.length} 种预制件` : '',
+                items: prepItems,
+            },
             componentGroups,
             items: task.items.map((item) => ({
                 id: item.product.id,
@@ -772,32 +876,26 @@ export class ProductionTasksService {
         if (!procedure) {
             return [];
         }
-        // [核心修改] 移除正则表达式中不必要的转义字符
         const noteRegex = /@(?:\[)?(.*?)(?:\])?[(（](.*?)[)）]/g;
 
         const cleanedProcedure = procedure
             .map((step) => {
-                // 首先，提取所有附加说明，存入 map
                 const stepMatches = [...step.matchAll(noteRegex)];
                 for (const match of stepMatches) {
-                    // match[1] 是原料名, match[2] 是括号内的说明
                     const [, ingredientName, note] = match;
                     if (ingredientName && note) {
                         ingredientNotes.set(ingredientName.trim(), note.trim());
                     }
                 }
 
-                // [核心修改] 将所有"@原料(说明)"格式的文本块替换为空字符串，并去除前后空格
                 const cleanedStep = step.replace(noteRegex, '').trim();
 
-                // 如果清理后的步骤为空字符串，则返回 null，后续将被过滤掉
                 if (cleanedStep === '') {
                     return null;
                 }
 
                 return cleanedStep;
             })
-            // 过滤掉所有 null 值的步骤
             .filter((step): step is string => step !== null);
 
         return cleanedProcedure;
@@ -834,7 +932,6 @@ export class ProductionTasksService {
         for (const [familyId, data] of componentsMap.entries()) {
             const firstItem = data.items[0];
 
-            // [核心修正] 从 recipeVersion.notes 字段读取版本备注作为版本信息
             const versionNotes = (firstItem.product.recipeVersion as unknown as { notes: string | null }).notes;
 
             const baseComponentInfo = firstItem.product.recipeVersion.components[0];
@@ -1021,10 +1118,6 @@ export class ProductionTasksService {
 
                 const mixInWeightPerUnit = mixIns.reduce((sum, i) => sum.add(i.weightInGrams), new Prisma.Decimal(0));
 
-                // [中文注释] 修正分割重量的计算。
-                // 分割重量应该是产品定义的基础面团克重，加上需要额外搅拌进去的原料（mixIns）的克重。
-                // 损耗率（lossRatio）已经在此前的总原料计算中（通过_calculateTotalFlourWeightForProduct）考虑，
-                // 不应影响单个产品的分割克重，否则就失去了设置损耗率来弥补操作损耗的意义。
                 const correctedDivisionWeight = new Prisma.Decimal(product.baseDoughWeight).add(mixInWeightPerUnit);
 
                 products.push({
@@ -1047,8 +1140,8 @@ export class ProductionTasksService {
 
             componentGroups.push({
                 familyId,
-                familyName: data.familyName, // [核心修正] familyName 恢复为纯净的配方族名称
-                note: versionNotes, // [核心修正] 新增 note 字段，用于存放版本信息
+                familyName: data.familyName,
+                note: versionNotes,
                 category: data.category,
                 productsDescription: data.items
                     .map((i) => {
@@ -1250,8 +1343,6 @@ export class ProductionTasksService {
 
             const productIds = products.map((p) => p.productId);
 
-            // [中文注释] 核心修正：分两步验证，提供更精确的错误提示
-            // 步骤1: 验证所有产品ID是否存在且属于该店铺
             const existingProducts = await tx.product.findMany({
                 where: {
                     id: { in: productIds },
@@ -1275,7 +1366,6 @@ export class ProductionTasksService {
                 throw new NotFoundException('一个或多个目标产品不存在或不属于该店铺。');
             }
 
-            // 步骤2: 在已找到的产品中，检查是否有任何产品关联的配方已被停用
             const discontinuedProducts = existingProducts.filter((p) => p.recipeVersion.family.deletedAt !== null);
             if (discontinuedProducts.length > 0) {
                 const names = [...new Set(discontinuedProducts.map((p) => p.recipeVersion.family.name))].join('", "');

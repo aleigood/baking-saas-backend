@@ -12,6 +12,8 @@ import {
     RecipeType,
     RecipeVersion,
     RecipeCategory,
+    // [新增] 导入 IngredientType
+    IngredientType,
 } from '@prisma/client';
 
 interface ConsumptionDetail {
@@ -493,7 +495,8 @@ export class CostingService {
 
         const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientIds = Array.from(flatIngredients.keys());
-        const pricePerGramMap = await this._getWeightedAveragePricePerGramMap(tenantId, ingredientIds);
+        // [修改] 调用已改造的、更智能的计价函数
+        const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
 
         const getPricePerKg = (id: string) => {
             const pricePerGram = pricePerGramMap.get(id);
@@ -742,7 +745,8 @@ export class CostingService {
 
         const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientIds = Array.from(flatIngredients.keys());
-        const pricePerGramMap = await this._getWeightedAveragePricePerGramMap(tenantId, ingredientIds);
+        // [修改] 调用已改造的、更智能的计价函数
+        const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
 
         let totalCost = new Prisma.Decimal(0);
 
@@ -772,7 +776,8 @@ export class CostingService {
 
         const flatIngredients = await this._getFlattenedIngredients(product);
         const ingredientIds = Array.from(flatIngredients.keys());
-        const pricePerGramMap = await this._getWeightedAveragePricePerGramMap(tenantId, ingredientIds);
+        // [修改] 调用已改造的、更智能的计价函数
+        const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
         const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
         const ingredientMap = new Map(ingredients.map((i) => [i.id, i]));
 
@@ -993,33 +998,89 @@ export class CostingService {
         return result;
     }
 
-    private async _getWeightedAveragePricePerGramMap(
-        tenantId: string,
-        ingredientIds: string[],
-    ): Promise<Map<string, Prisma.Decimal>> {
+    // [核心改造] 将原函数重命名并扩展，以支持所有原料类型的计价
+    private async _getPricePerGramMap(tenantId: string, ingredientIds: string[]): Promise<Map<string, Prisma.Decimal>> {
         const ingredients = await this.prisma.ingredient.findMany({
             where: {
                 tenantId,
                 id: { in: ingredientIds },
             },
+            // [修改] 增加 type 和 activeSkuId 字段用于后续判断
             select: {
                 id: true,
+                type: true,
                 currentStockInGrams: true,
                 currentStockValue: true,
+                activeSkuId: true,
             },
         });
 
         const priceMap = new Map<string, Prisma.Decimal>();
+        const nonInventoriedIngredients = ingredients.filter((i) => i.type === IngredientType.NON_INVENTORIED);
 
+        // [新增] 批量获取 NON_INVENTORIED 原料的最新采购价
+        if (nonInventoriedIngredients.length > 0) {
+            const activeSkuIds = nonInventoriedIngredients.map((i) => i.activeSkuId).filter(Boolean) as string[];
+
+            if (activeSkuIds.length > 0) {
+                const latestProcurements: {
+                    skuId: string;
+                    pricePerPackage: Prisma.Decimal;
+                    specWeightInGrams: Prisma.Decimal;
+                }[] = await this.prisma.$queryRaw`
+                    SELECT p."skuId", p."pricePerPackage", s."specWeightInGrams"
+                    FROM "ProcurementRecord" p
+                    INNER JOIN "IngredientSKU" s ON p."skuId" = s.id
+                    INNER JOIN (
+                        SELECT "skuId", MAX("purchaseDate") as max_date
+                        FROM "ProcurementRecord"
+                        WHERE "skuId" IN (${Prisma.join(activeSkuIds)})
+                        GROUP BY "skuId"
+                    ) lp ON p."skuId" = lp."skuId" AND p."purchaseDate" = lp.max_date
+                `;
+
+                const latestPriceMap = new Map(latestProcurements.map((p) => [p.skuId, p]));
+                for (const ingredient of nonInventoriedIngredients) {
+                    const procurement = latestPriceMap.get(ingredient.activeSkuId || '');
+                    if (procurement && new Prisma.Decimal(procurement.specWeightInGrams).gt(0)) {
+                        const pricePerGram = new Prisma.Decimal(procurement.pricePerPackage).div(
+                            procurement.specWeightInGrams,
+                        );
+                        priceMap.set(ingredient.id, pricePerGram);
+                    } else {
+                        priceMap.set(ingredient.id, new Prisma.Decimal(0));
+                    }
+                }
+            }
+        }
+
+        // [修改] 循环处理所有原料，根据类型应用不同逻辑
         for (const ingredient of ingredients) {
-            const stockInGrams = new Prisma.Decimal(ingredient.currentStockInGrams);
-            const stockValue = new Prisma.Decimal(ingredient.currentStockValue);
+            // 如果已在上面处理过，则跳过
+            if (priceMap.has(ingredient.id)) {
+                continue;
+            }
 
-            if (stockInGrams.gt(0) && stockValue.gt(0)) {
-                const pricePerGram = stockValue.div(stockInGrams);
-                priceMap.set(ingredient.id, pricePerGram);
-            } else {
-                priceMap.set(ingredient.id, new Prisma.Decimal(0));
+            switch (ingredient.type) {
+                case IngredientType.STANDARD: {
+                    const stockInGrams = new Prisma.Decimal(ingredient.currentStockInGrams);
+                    const stockValue = new Prisma.Decimal(ingredient.currentStockValue);
+                    if (stockInGrams.gt(0) && stockValue.gt(0)) {
+                        const pricePerGram = stockValue.div(stockInGrams);
+                        priceMap.set(ingredient.id, pricePerGram);
+                    } else {
+                        priceMap.set(ingredient.id, new Prisma.Decimal(0));
+                    }
+                    break;
+                }
+                case IngredientType.UNTRACKED: {
+                    priceMap.set(ingredient.id, new Prisma.Decimal(0));
+                    break;
+                }
+                // NON_INVENTORIED 中没有最新采购记录的也会在这里被置为0
+                default:
+                    priceMap.set(ingredient.id, new Prisma.Decimal(0));
+                    break;
             }
         }
 
