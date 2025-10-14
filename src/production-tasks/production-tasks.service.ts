@@ -1147,11 +1147,26 @@ export class ProductionTasksService {
 
                 const correctedDivisionWeight = new Prisma.Decimal(product.baseDoughWeight).add(mixInWeightPerUnit);
 
+                // [核心修复] 计算包含损耗的总基础面团重量
+                // 1. 获取主面团的损耗率
+                const lossRatio = new Prisma.Decimal(baseComponentInfo.lossRatio || 0);
+                const divisor = new Prisma.Decimal(1).sub(lossRatio);
+
+                // 2. 根据损耗率计算单个产品需要投入的基础面团重量
+                const singleUnitInputWeight =
+                    divisor.isZero() || divisor.isNegative()
+                        ? new Prisma.Decimal(product.baseDoughWeight) // 如果损耗率为100%或更高，则退回理论值
+                        : new Prisma.Decimal(product.baseDoughWeight).div(divisor);
+
+                // 3. 计算生产指定数量产品需要投入的总基础面团重量
+                const totalBaseComponentWeightWithLoss = singleUnitInputWeight.mul(quantity);
+
                 products.push({
                     id: product.id,
                     name: product.name,
                     quantity: quantity,
-                    totalBaseComponentWeight: new Prisma.Decimal(product.baseDoughWeight).mul(quantity).toNumber(),
+                    // [核心修复] 使用计算出的包含损耗的值
+                    totalBaseComponentWeight: totalBaseComponentWeightWithLoss.toNumber(),
                     divisionWeight: correctedDivisionWeight.toNumber(),
                 });
 
