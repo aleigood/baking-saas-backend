@@ -502,19 +502,6 @@ export class CostingService {
         const componentGroups: CalculatedComponentGroup[] = [];
         let totalCost = new Prisma.Decimal(0);
 
-        const allIngredientsMeta = await this.prisma.ingredient.findMany({
-            where: { id: { in: ingredientIds } },
-            select: { id: true, isFlour: true },
-        });
-        const ingredientsMetaMap = new Map(allIngredientsMeta.map((i) => [i.id, i]));
-
-        let trueTotalFlourWeight = new Prisma.Decimal(0);
-        for (const [id, weight] of flatIngredients.entries()) {
-            if (ingredientsMetaMap.get(id)?.isFlour) {
-                trueTotalFlourWeight = trueTotalFlourWeight.add(weight);
-            }
-        }
-
         const processComponent = (
             component: FullRecipeVersion['components'][0],
             componentWeight: Prisma.Decimal,
@@ -675,7 +662,8 @@ export class CostingService {
             let finalWeightInGrams = new Prisma.Decimal(0);
 
             if (ing.type === 'MIX_IN' && ing.ratio) {
-                finalWeightInGrams = trueTotalFlourWeight.mul(new Prisma.Decimal(ing.ratio));
+                // [核心修复] 使用 `flourWeightReference` (仅基础面团的面粉重量) 而不是错误的 `trueTotalFlourWeight`
+                finalWeightInGrams = flourWeightReference.mul(new Prisma.Decimal(ing.ratio));
             } else if (ing.weightInGrams) {
                 finalWeightInGrams = new Prisma.Decimal(ing.weightInGrams);
             }
