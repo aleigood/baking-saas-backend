@@ -67,10 +67,10 @@ export interface CalculatedRecipeDetails {
     id: string;
     name: string;
     type: RecipeType;
-    // [核心修改] 字段名从 totalWeight 改为 inputWeight，更清晰地表达这是“为达成目标产量，需要投入的原料总重”
-    inputWeight: number;
-    // [核心修改] 字段名从 targetWeight 改为 outputWeight，表意更明确
-    outputWeight: number;
+    // [核心修复] 字段名改回 totalWeight，代表为达成目标产量，需要投入的原料总重 (含损耗)
+    totalWeight: number;
+    // [核心修复] 字段名改回 targetWeight，代表目标产出净重 (不含损耗)
+    targetWeight: number;
     procedure: string[];
     ingredients: CalculatedRecipeIngredient[];
 }
@@ -123,7 +123,7 @@ export class CostingService {
     async getCalculatedRecipeDetails(
         tenantId: string,
         recipeFamilyId: string,
-        totalWeight: number, // [核心修改] 此处传入的 totalWeight 参数被明确定义为“目标产出重量 (Output)”
+        totalWeight: number, // 此处传入的 totalWeight 参数被明确定义为“目标产出重量 (Output)”
     ): Promise<CalculatedRecipeDetails> {
         const outputWeightTarget = new Prisma.Decimal(totalWeight);
 
@@ -176,8 +176,8 @@ export class CostingService {
                 id: recipeFamily.id,
                 name: recipeFamily.name,
                 type: recipeFamily.type,
-                inputWeight: outputWeightTarget.toNumber(), // 如果没有配比，投入=产出
-                outputWeight: outputWeightTarget.toNumber(),
+                totalWeight: outputWeightTarget.toNumber(), // 如果没有配比，投入=产出
+                targetWeight: outputWeightTarget.toNumber(),
                 procedure: mainComponent.procedure,
                 ingredients: [],
             };
@@ -212,9 +212,9 @@ export class CostingService {
             id: recipeFamily.id,
             name: recipeFamily.name,
             type: recipeFamily.type,
-            // [核心修改] 返回值清晰区分 inputWeight 和 outputWeight
-            inputWeight: requiredInputWeight.toDP(2).toNumber(),
-            outputWeight: outputWeightTarget.toDP(2).toNumber(),
+            // [核心修复] 返回值清晰区分 totalWeight 和 targetWeight
+            totalWeight: requiredInputWeight.toDP(2).toNumber(),
+            targetWeight: outputWeightTarget.toDP(2).toNumber(),
             procedure: mainComponent.procedure,
             ingredients: calculatedIngredients,
         };
