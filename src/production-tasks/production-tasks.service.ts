@@ -1147,7 +1147,7 @@ export class ProductionTasksService {
 
                 const correctedDivisionWeight = new Prisma.Decimal(product.baseDoughWeight).add(mixInWeightPerUnit);
 
-                // [核心修复] 计算包含损耗的总基础面团重量
+                // [核心修改] 计算包含损耗的总基础面团重量
                 // 1. 获取主面团的损耗率
                 const lossRatio = new Prisma.Decimal(baseComponentInfo.lossRatio || 0);
                 const divisor = new Prisma.Decimal(1).sub(lossRatio);
@@ -1165,7 +1165,7 @@ export class ProductionTasksService {
                     id: product.id,
                     name: product.name,
                     quantity: quantity,
-                    // [核心修复] 使用计算出的包含损耗的值
+                    // [核心修改] 使用计算出的包含损耗的值
                     totalBaseComponentWeight: totalBaseComponentWeightWithLoss.toNumber(),
                     divisionWeight: correctedDivisionWeight.toNumber(),
                 });
@@ -1174,8 +1174,17 @@ export class ProductionTasksService {
                     id: product.id,
                     name: product.name,
                     mixIns: mixIns.map((i) => ({ ...i, weightInGrams: i.weightInGrams * quantity })),
-                    fillings: fillings.map((i) => ({ ...i, weightInGrams: i.weightInGrams * quantity })),
-                    toppings: toppings.map((i) => ({ ...i, weightInGrams: i.weightInGrams * quantity })),
+                    // [核心修改] 为馅料和装饰增加 weightPerUnit 字段
+                    fillings: fillings.map((i) => ({
+                        ...i,
+                        weightPerUnit: i.weightInGrams, // 单件用量
+                        weightInGrams: i.weightInGrams * quantity, // 总用量
+                    })),
+                    toppings: toppings.map((i) => ({
+                        ...i,
+                        weightPerUnit: i.weightInGrams, // 单件用量
+                        weightInGrams: i.weightInGrams * quantity, // 总用量
+                    })),
                     procedure: product.procedure || [],
                 });
             });
