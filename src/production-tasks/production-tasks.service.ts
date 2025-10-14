@@ -24,7 +24,6 @@ import {
     TaskIngredientDetail,
 } from './dto/task-detail.dto';
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
-// [核心修改] 从新建的 DTO 文件导入准备工作相关的类型
 import { BillOfMaterialsResponseDto, BillOfMaterialsItem, PrepTask } from './dto/preparation.dto';
 
 const spoilageStages = [
@@ -35,8 +34,6 @@ const spoilageStages = [
     { key: 'development', label: '新品研发' },
     { key: 'other', label: '其他原因' },
 ];
-
-// [核心修改] PrepTask, BillOfMaterialsItem, BillOfMaterialsResponseDto 的定义已移至 preparation.dto.ts
 
 const taskWithDetailsInclude = {
     items: {
@@ -434,9 +431,7 @@ export class ProductionTasksService {
             const procedure = recipeFamily?.versions[0]?.components[0]?.procedure;
             if (procedure && details.ingredients && details.ingredients.length > 0) {
                 const ingredientNotes = new Map<string, string>();
-                // [核心修改] 调用笔记解析函数，并接收返回的、被清洗过的制作步骤
                 const cleanedProcedure = this._parseProcedureForNotes(procedure, ingredientNotes);
-                // [核心修改] 将清洗后的制作步骤更新回 details 对象
                 details.procedure = cleanedProcedure;
 
                 if (ingredientNotes.size > 0) {
@@ -1473,20 +1468,23 @@ export class ProductionTasksService {
 
         const { notes, completedItems } = completeDto;
 
-        const totalConsumptionNeeded = new Map<string, { name: string; totalConsumed: number }>();
+        // [核心重构] 步骤 1: 计算完成和损耗所需的【总投入量】，用于库存检查
+        const totalInputNeeded = new Map<string, { name: string; totalConsumed: number }>();
         for (const item of completedItems) {
-            if (item.completedQuantity > 0) {
+            const totalQuantity =
+                item.completedQuantity + (item.spoilageDetails?.reduce((s, d) => s + d.quantity, 0) || 0);
+            if (totalQuantity > 0) {
                 const consumptions = await this.costingService.calculateProductConsumptions(
                     tenantId,
                     item.productId,
-                    item.completedQuantity,
+                    totalQuantity,
                 );
                 for (const cons of consumptions) {
-                    const existing = totalConsumptionNeeded.get(cons.ingredientId);
+                    const existing = totalInputNeeded.get(cons.ingredientId);
                     if (existing) {
                         existing.totalConsumed += cons.totalConsumed;
                     } else {
-                        totalConsumptionNeeded.set(cons.ingredientId, {
+                        totalInputNeeded.set(cons.ingredientId, {
                             name: cons.ingredientName,
                             totalConsumed: cons.totalConsumed,
                         });
@@ -1495,16 +1493,17 @@ export class ProductionTasksService {
             }
         }
 
-        const neededIngredientIds = Array.from(totalConsumptionNeeded.keys());
+        // 库存检查
+        const neededIngredientIds = Array.from(totalInputNeeded.keys());
         if (neededIngredientIds.length > 0) {
             const ingredientsInStock = await this.prisma.ingredient.findMany({
                 where: { id: { in: neededIngredientIds }, type: IngredientType.STANDARD },
-                select: { id: true, currentStockInGrams: true },
+                select: { id: true, name: true, currentStockInGrams: true },
             });
             const stockMap = new Map(ingredientsInStock.map((i) => [i.id, i.currentStockInGrams]));
 
             const insufficientIngredients: string[] = [];
-            for (const [id, needed] of totalConsumptionNeeded.entries()) {
+            for (const [id, needed] of totalInputNeeded.entries()) {
                 const currentStock = stockMap.get(id) ?? new Prisma.Decimal(0);
                 if (new Prisma.Decimal(currentStock).lt(needed.totalConsumed)) {
                     insufficientIngredients.push(needed.name);
@@ -1513,6 +1512,33 @@ export class ProductionTasksService {
 
             if (insufficientIngredients.length > 0) {
                 throw new BadRequestException(`操作失败：原料库存不足 (${insufficientIngredients.join(', ')})`);
+            }
+        }
+
+        // [核心重构] 步骤 2: 计算成功生产部分的【理论消耗量】，用于计入产品成本
+        const theoreticalConsumption = new Map<
+            string,
+            { name: string; totalConsumed: number; activeSkuId: string | null }
+        >();
+        for (const item of completedItems) {
+            if (item.completedQuantity > 0) {
+                const consumptions = await this.costingService.calculateTheoreticalProductConsumptions(
+                    tenantId,
+                    item.productId,
+                    item.completedQuantity,
+                );
+                for (const cons of consumptions) {
+                    const existing = theoreticalConsumption.get(cons.ingredientId);
+                    if (existing) {
+                        existing.totalConsumed += cons.totalConsumed;
+                    } else {
+                        theoreticalConsumption.set(cons.ingredientId, {
+                            name: cons.ingredientName,
+                            totalConsumed: cons.totalConsumed,
+                            activeSkuId: cons.activeSkuId,
+                        });
+                    }
+                }
             }
         }
 
@@ -1533,18 +1559,7 @@ export class ProductionTasksService {
                 },
             });
 
-            const totalSuccessfulConsumption = new Map<string, { totalConsumed: number; activeSkuId: string | null }>();
-            for (const [ingId, data] of totalConsumptionNeeded.entries()) {
-                const ingredientInfo = await tx.ingredient.findUnique({
-                    where: { id: ingId },
-                    select: { activeSkuId: true },
-                });
-                totalSuccessfulConsumption.set(ingId, {
-                    totalConsumed: data.totalConsumed,
-                    activeSkuId: ingredientInfo?.activeSkuId || null,
-                });
-            }
-
+            // [核心重构] 步骤 3: 处理显式报损 (Spoilage)
             for (const completedItem of completedItems) {
                 const { productId, completedQuantity, spoilageDetails } = completedItem;
                 const plannedQuantity = plannedQuantities.get(productId);
@@ -1553,18 +1568,20 @@ export class ProductionTasksService {
                     throw new BadRequestException(`产品ID ${productId} 不在任务中。`);
                 }
 
+                // 验证上报损耗数量
                 const calculatedSpoilage = spoilageDetails?.reduce((sum, s) => sum + s.quantity, 0) || 0;
-                const calculatedOverproduction = Math.max(0, completedQuantity - plannedQuantity);
                 const actualSpoilage = Math.max(0, plannedQuantity - completedQuantity);
-
                 if (calculatedSpoilage !== actualSpoilage) {
                     throw new BadRequestException(
-                        `产品 ${productId} 的损耗数量计算不一致。计划: ${plannedQuantity}, 完成: ${completedQuantity}, 上报损耗: ${calculatedSpoilage}`,
+                        `产品 ${
+                            task.items.find((i) => i.productId === productId)?.product.name
+                        } 的损耗数量计算不一致。计划: ${plannedQuantity}, 完成: ${completedQuantity}, 上报损耗: ${calculatedSpoilage}，差额应为 ${actualSpoilage}`,
                     );
                 }
 
                 if (actualSpoilage > 0 && spoilageDetails) {
-                    const spoiledConsumptions = await this.costingService.calculateProductConsumptions(
+                    // 报损消耗同样按理论值计算
+                    const spoiledConsumptions = await this.costingService.calculateTheoreticalProductConsumptions(
                         tenantId,
                         productId,
                         actualSpoilage,
@@ -1585,17 +1602,20 @@ export class ProductionTasksService {
                     for (const cons of spoiledConsumptions) {
                         const productName =
                             task.items.find((i) => i.productId === productId)?.product.name || '未知产品';
+                        // 显式报损直接通过库存调整扣减，因为它是一种直接损失
                         await tx.ingredientStockAdjustment.create({
                             data: {
                                 ingredientId: cons.ingredientId,
                                 userId: userId,
                                 changeInGrams: new Prisma.Decimal(-cons.totalConsumed),
-                                reason: `生产损耗: ${productName}`,
+                                reason: `生产报损: ${productName}`,
                             },
                         });
                     }
                 }
 
+                // 处理超量生产
+                const calculatedOverproduction = Math.max(0, completedQuantity - plannedQuantity);
                 if (calculatedOverproduction > 0) {
                     await tx.productionTaskOverproductionLog.create({
                         data: {
@@ -1607,15 +1627,16 @@ export class ProductionTasksService {
                 }
             }
 
-            const ingredientIds = Array.from(totalSuccessfulConsumption.keys());
-            if (ingredientIds.length > 0) {
+            // [核心重构] 步骤 4: 根据理论消耗，记录消耗日志并扣减库存（计入COGS）
+            const ingredientIdsToUpdate = Array.from(theoreticalConsumption.keys());
+            if (ingredientIdsToUpdate.length > 0) {
                 const ingredients = await tx.ingredient.findMany({
-                    where: { id: { in: ingredientIds } },
+                    where: { id: { in: ingredientIdsToUpdate }, type: IngredientType.STANDARD },
                     select: { id: true, currentStockInGrams: true, currentStockValue: true },
                 });
                 const ingredientDataMap = new Map(ingredients.map((i) => [i.id, i]));
 
-                for (const [ingId, cons] of totalSuccessfulConsumption.entries()) {
+                for (const [ingId, cons] of theoreticalConsumption.entries()) {
                     await tx.ingredientConsumptionLog.create({
                         data: {
                             productionLogId: productionLog.id,
@@ -1628,13 +1649,14 @@ export class ProductionTasksService {
                     const ingredient = ingredientDataMap.get(ingId);
                     if (ingredient) {
                         const decrementAmount = new Prisma.Decimal(cons.totalConsumed);
-                        const currentStockValue = new Prisma.Decimal(ingredient.currentStockValue.toString());
+                        const currentStockValue = new Prisma.Decimal(ingredient.currentStockValue);
                         let valueToDecrement = new Prisma.Decimal(0);
                         if (new Prisma.Decimal(ingredient.currentStockInGrams).gt(0)) {
                             const avgPricePerGram = currentStockValue.div(ingredient.currentStockInGrams);
                             valueToDecrement = avgPricePerGram.mul(decrementAmount);
                         }
 
+                        // 只扣减理论消耗部分
                         await tx.ingredient.update({
                             where: { id: ingId },
                             data: {
@@ -1643,6 +1665,26 @@ export class ProductionTasksService {
                             },
                         });
                     }
+                }
+            }
+
+            // [核心重构] 步骤 5: 计算并处理工艺损耗
+            for (const [ingId, inputData] of totalInputNeeded.entries()) {
+                const theoreticalData = theoreticalConsumption.get(ingId);
+                const theoreticalConsumed = theoreticalData ? theoreticalData.totalConsumed : 0;
+                const processLoss = new Prisma.Decimal(inputData.totalConsumed).sub(theoreticalConsumed);
+
+                if (processLoss.gt(0.01)) {
+                    // 设置一个阈值避免浮点数误差
+                    // 工艺损耗作为一种独立的库存调整被记录
+                    await tx.ingredientStockAdjustment.create({
+                        data: {
+                            ingredientId: ingId,
+                            userId: userId,
+                            changeInGrams: processLoss.negated(),
+                            reason: `工艺损耗: 任务 #${task.id.substring(0, 8)}`,
+                        },
+                    });
                 }
             }
 

@@ -12,7 +12,6 @@ import {
     RecipeType,
     RecipeVersion,
     RecipeCategory,
-    // [新增] 导入 IngredientType
     IngredientType,
 } from '@prisma/client';
 
@@ -68,8 +67,10 @@ export interface CalculatedRecipeDetails {
     id: string;
     name: string;
     type: RecipeType;
-    totalWeight: number; // 含义：原料投料总重 (Input)
-    targetWeight?: number; // 含义：目标产出重量 (Output)，可选
+    // [核心修改] 字段名从 totalWeight 改为 inputWeight，更清晰地表达这是“为达成目标产量，需要投入的原料总重”
+    inputWeight: number;
+    // [核心修改] 字段名从 targetWeight 改为 outputWeight，表意更明确
+    outputWeight: number;
     procedure: string[];
     ingredients: CalculatedRecipeIngredient[];
 }
@@ -122,9 +123,9 @@ export class CostingService {
     async getCalculatedRecipeDetails(
         tenantId: string,
         recipeFamilyId: string,
-        totalWeight: number, // 传入的参数是“目标产出重量”
+        totalWeight: number, // [核心修改] 此处传入的 totalWeight 参数被明确定义为“目标产出重量 (Output)”
     ): Promise<CalculatedRecipeDetails> {
-        const outputWeightTarget = totalWeight;
+        const outputWeightTarget = new Prisma.Decimal(totalWeight);
 
         const recipeFamily = await this.prisma.recipeFamily.findFirst({
             where: { id: recipeFamilyId, tenantId },
@@ -158,12 +159,12 @@ export class CostingService {
         const activeVersion = recipeFamily.versions[0];
         const mainComponent = activeVersion.components[0];
 
+        // [核心逻辑] 根据损耗率，从“目标产出重量”反推计算“所需投入原料总重”
+        // Input = Output / (1 - lossRatio)
         const lossRatio = new Prisma.Decimal(mainComponent.lossRatio || 0);
         const divisor = new Prisma.Decimal(1).sub(lossRatio);
 
-        const adjustedTotalWeight = divisor.isZero()
-            ? new Prisma.Decimal(outputWeightTarget)
-            : new Prisma.Decimal(outputWeightTarget).div(divisor);
+        const requiredInputWeight = divisor.isZero() ? outputWeightTarget : outputWeightTarget.div(divisor);
 
         const totalRatio = mainComponent.ingredients.reduce(
             (sum, ing) => sum.add(new Prisma.Decimal(ing.ratio ?? 0)),
@@ -175,13 +176,14 @@ export class CostingService {
                 id: recipeFamily.id,
                 name: recipeFamily.name,
                 type: recipeFamily.type,
-                totalWeight: outputWeightTarget,
+                inputWeight: outputWeightTarget.toNumber(), // 如果没有配比，投入=产出
+                outputWeight: outputWeightTarget.toNumber(),
                 procedure: mainComponent.procedure,
                 ingredients: [],
             };
         }
 
-        const weightPerRatioPoint = adjustedTotalWeight.div(totalRatio);
+        const weightPerRatioPoint = requiredInputWeight.div(totalRatio);
 
         const calculatedIngredients = mainComponent.ingredients
             .map((ing) => {
@@ -206,22 +208,16 @@ export class CostingService {
             })
             .filter(Boolean) as CalculatedRecipeIngredient[];
 
-        // [核心修改] 将小数位数从 1 位修正为 2 位，与原料保持一致
-        const finalInputWeight = adjustedTotalWeight.toDP(2).toNumber();
-        const finalOutputWeight = new Prisma.Decimal(outputWeightTarget).toDP(2).toNumber();
-
         const response: CalculatedRecipeDetails = {
             id: recipeFamily.id,
             name: recipeFamily.name,
             type: recipeFamily.type,
-            totalWeight: finalInputWeight,
+            // [核心修改] 返回值清晰区分 inputWeight 和 outputWeight
+            inputWeight: requiredInputWeight.toDP(2).toNumber(),
+            outputWeight: outputWeightTarget.toDP(2).toNumber(),
             procedure: mainComponent.procedure,
             ingredients: calculatedIngredients,
         };
-
-        if (finalInputWeight !== finalOutputWeight) {
-            response.targetWeight = finalOutputWeight;
-        }
 
         return response;
     }
@@ -493,9 +489,9 @@ export class CostingService {
 
         const trueHydration = this._calculateTrueHydration(product);
 
-        const flatIngredients = await this._getFlattenedIngredients(product);
+        // [核心修改] 调用“理论计算”方法，用于成本核算，忽略所有损耗率
+        const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
-        // [修改] 调用已改造的、更智能的计价函数
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
 
         const getPricePerKg = (id: string) => {
@@ -536,12 +532,8 @@ export class CostingService {
                 totalCost: 0,
             };
 
-            const lossRatio = new Prisma.Decimal(component.lossRatio || 0);
-            const divisor = new Prisma.Decimal(1).sub(lossRatio);
-            if (divisor.isZero() || divisor.isNegative()) {
-                return group;
-            }
-            const adjustedComponentWeight = componentWeight.div(divisor);
+            // [核心修改] 理论计算，不考虑损耗，所以直接使用 componentWeight
+            const adjustedComponentWeight = componentWeight;
 
             const totalRatio = component.ingredients.reduce(
                 (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
@@ -648,11 +640,8 @@ export class CostingService {
         };
 
         const baseComponentTotalRatio = calculateTotalRatioForMain(baseComponent);
-        const baseComponentLossRatio = new Prisma.Decimal(baseComponent.lossRatio || 0);
-        const baseComponentDivisor = new Prisma.Decimal(1).sub(baseComponentLossRatio);
-        const adjustedBaseComponentWeight = !baseComponentDivisor.isZero()
-            ? new Prisma.Decimal(product.baseDoughWeight).div(baseComponentDivisor)
-            : new Prisma.Decimal(0);
+        // [核心修改] 理论计算，不考虑损耗，所以直接使用 baseDoughWeight
+        const adjustedBaseComponentWeight = new Prisma.Decimal(product.baseDoughWeight);
 
         const flourWeightReference = !baseComponentTotalRatio.isZero()
             ? adjustedBaseComponentWeight.div(baseComponentTotalRatio)
@@ -743,9 +732,9 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const flatIngredients = await this._getFlattenedIngredients(product);
+        // [核心修改] 成本计算应基于理论值，不含损耗
+        const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
-        // [修改] 调用已改造的、更智能的计价函数
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
 
         let totalCost = new Prisma.Decimal(0);
@@ -774,9 +763,9 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const flatIngredients = await this._getFlattenedIngredients(product);
+        // [核心修改] 成本分解同样基于理论值
+        const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
-        // [修改] 调用已改造的、更智能的计价函数
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
         const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
         const ingredientMap = new Map(ingredients.map((i) => [i.id, i]));
@@ -872,17 +861,127 @@ export class CostingService {
         }) as Promise<FullProduct | null>;
     }
 
+    /**
+     * [核心函数] 计算生产一个产品所需的**所有基础原料的总投入量** (含损耗)。
+     * 用于生产任务备料、前置准备任务等需要知道“我需要领多少料”的场景。
+     * @param product 完整的产品对象
+     * @returns Map<ingredientId, totalInputWeight>
+     */
     private async _getFlattenedIngredients(product: FullProduct): Promise<Map<string, Prisma.Decimal>> {
+        const flattenedIngredients = new Map<string, Prisma.Decimal>();
+
+        // [核心重构] 这是一个递归函数，用于计算一个组件（面团、面种、馅料等）需要的所有基础原料的投入量
+        const processComponentRecursively = (
+            component: FullRecipeVersion['components'][0],
+            requiredOutputWeight: Prisma.Decimal, // 目标产出净重
+        ) => {
+            // 步骤 1: 根据损耗率，从目标产出净重反推计算需要投入的原料总量
+            const lossRatio = new Prisma.Decimal(component.lossRatio || 0);
+            const divisor = new Prisma.Decimal(1).sub(lossRatio);
+            if (divisor.isZero() || divisor.isNegative()) return;
+            const totalInputWeight = requiredOutputWeight.div(divisor);
+
+            // 步骤 2: 计算该组件内所有原料的“配方比例总和”
+            const totalRatio = component.ingredients.reduce(
+                (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
+                new Prisma.Decimal(0),
+            );
+            if (totalRatio.isZero()) return;
+
+            // 步骤 3: 计算出“每1%的配比”对应多少克重的原料
+            const weightPerRatioPoint = totalInputWeight.div(totalRatio);
+
+            // 步骤 4: 遍历组件内的每一种“原料”
+            for (const ing of component.ingredients) {
+                // 计算当前“原料”按配比需要投入的克重
+                const ingredientInputWeight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
+
+                // 如果这个“原料”本身是另一个配方（如预制面种），则递归调用本函数
+                if (ing.linkedPreDough) {
+                    const preDoughComponent = ing.linkedPreDough.versions?.[0]?.components?.[0];
+                    if (preDoughComponent) {
+                        processComponentRecursively(
+                            preDoughComponent as FullRecipeVersion['components'][0],
+                            ingredientInputWeight, // 此时，对于下一层面种来说，这个投入量就是它的“目标产出量”
+                        );
+                    }
+                } else if (ing.ingredientId) {
+                    // 如果是基础原料（如面粉、水），则将其重量累加到最终的清单中
+                    const currentWeight = flattenedIngredients.get(ing.ingredientId) || new Prisma.Decimal(0);
+                    flattenedIngredients.set(ing.ingredientId, currentWeight.add(ingredientInputWeight));
+                }
+            }
+        };
+
+        // 从产品的主面团开始，进行第一次递归计算
+        const mainComponent = product.recipeVersion.components[0];
+        if (mainComponent) {
+            // Product.baseDoughWeight 是最终产品需要的面团“净重”，作为递归的起点
+            processComponentRecursively(mainComponent, new Prisma.Decimal(product.baseDoughWeight));
+        }
+
+        // [核心逻辑] 计算用于 MIX_IN 按比例计算的总面粉量
+        // 注意：这里的总面粉量是考虑了损耗之后的“投入量”，确保计算 MIX_IN 原料时也间接考虑了主面团的损耗
+        let totalFlourInputWeight = new Prisma.Decimal(0);
+        const ingredientIds = Array.from(flattenedIngredients.keys());
+        if (ingredientIds.length > 0) {
+            const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
+            const ingredientMap = new Map(ingredients.map((i) => [i.id, i]));
+
+            for (const [id, weight] of flattenedIngredients.entries()) {
+                const ingredientInfo = ingredientMap.get(id);
+                if (ingredientInfo?.isFlour) {
+                    totalFlourInputWeight = totalFlourInputWeight.add(weight);
+                }
+            }
+        }
+
+        // 处理产品特有的附加原料（搅拌、馅料、装饰）
+        for (const pIng of product.ingredients || []) {
+            let requiredOutputWeight = new Prisma.Decimal(0); // 同样，先确定附加原料的“目标产出净重”
+            if (pIng.weightInGrams) {
+                requiredOutputWeight = new Prisma.Decimal(pIng.weightInGrams); // 固定克重
+            } else if (pIng.ratio && pIng.type === 'MIX_IN') {
+                requiredOutputWeight = totalFlourInputWeight.mul(new Prisma.Decimal(pIng.ratio)); // 按总面粉投入量比例计算
+            }
+
+            if (requiredOutputWeight.isZero() || requiredOutputWeight.isNegative()) continue;
+
+            // 如果附加原料本身也是一个配方（如卡仕达酱），则递归计算其原料用量
+            if (pIng.linkedExtra) {
+                const extraComponent = pIng.linkedExtra.versions?.[0]?.components?.[0];
+                if (extraComponent) {
+                    processComponentRecursively(
+                        extraComponent as FullRecipeVersion['components'][0],
+                        requiredOutputWeight,
+                    );
+                }
+            } else if (pIng.ingredientId) {
+                // 如果是基础原料，直接累加
+                // 注意：这里我们假设附加的基础原料（如杏仁片）自身损耗为0，所以投入=产出
+                const currentWeight = flattenedIngredients.get(pIng.ingredientId) || new Prisma.Decimal(0);
+                flattenedIngredients.set(pIng.ingredientId, currentWeight.add(requiredOutputWeight));
+            }
+        }
+
+        return flattenedIngredients;
+    }
+
+    /**
+     * [新增函数] 计算生产一个产品所需的**所有基础原料的理论净重** (不含损耗)。
+     * 用于理论成本核算、任务完成后的库存核销等需要知道“我应该消耗多少料”的场景。
+     * @param product 完整的产品对象
+     * @returns Map<ingredientId, theoreticalWeight>
+     */
+    private async _getFlattenedIngredientsTheoretical(product: FullProduct): Promise<Map<string, Prisma.Decimal>> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>();
 
         const processComponentRecursively = (
             component: FullRecipeVersion['components'][0],
             requiredOutputWeight: Prisma.Decimal,
         ) => {
-            const lossRatio = new Prisma.Decimal(component.lossRatio || 0);
-            const divisor = new Prisma.Decimal(1).sub(lossRatio);
-            if (divisor.isZero() || divisor.isNegative()) return;
-            const totalInputWeight = requiredOutputWeight.div(divisor);
+            // [核心区别] 理论计算，不考虑损耗率，直接使用 requiredOutputWeight 作为 totalInputWeight
+            const totalInputWeight = requiredOutputWeight;
 
             const totalRatio = component.ingredients.reduce(
                 (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
@@ -915,7 +1014,7 @@ export class CostingService {
             processComponentRecursively(mainComponent, new Prisma.Decimal(product.baseDoughWeight));
         }
 
-        let totalFlourWeight = new Prisma.Decimal(0);
+        let totalFlourInputWeight = new Prisma.Decimal(0);
         const ingredientIds = Array.from(flattenedIngredients.keys());
         if (ingredientIds.length > 0) {
             const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
@@ -924,7 +1023,7 @@ export class CostingService {
             for (const [id, weight] of flattenedIngredients.entries()) {
                 const ingredientInfo = ingredientMap.get(id);
                 if (ingredientInfo?.isFlour) {
-                    totalFlourWeight = totalFlourWeight.add(weight);
+                    totalFlourInputWeight = totalFlourInputWeight.add(weight);
                 }
             }
         }
@@ -934,7 +1033,7 @@ export class CostingService {
             if (pIng.weightInGrams) {
                 requiredOutputWeight = new Prisma.Decimal(pIng.weightInGrams);
             } else if (pIng.ratio && pIng.type === 'MIX_IN') {
-                requiredOutputWeight = totalFlourWeight.mul(new Prisma.Decimal(pIng.ratio));
+                requiredOutputWeight = totalFlourInputWeight.mul(new Prisma.Decimal(pIng.ratio));
             }
 
             if (requiredOutputWeight.isZero() || requiredOutputWeight.isNegative()) continue;
@@ -956,6 +1055,10 @@ export class CostingService {
         return flattenedIngredients;
     }
 
+    /**
+     * 计算生产指定数量产品所需的**总投入原料**清单 (含损耗)。
+     * 用于【生产任务】和【备料清单】。
+     */
     async calculateProductConsumptions(
         tenantId: string,
         productId: string,
@@ -998,14 +1101,58 @@ export class CostingService {
         return result;
     }
 
-    // [核心改造] 将原函数重命名并扩展，以支持所有原料类型的计价
+    /**
+     * [新增函数] 计算生产指定数量产品的**理论原料消耗**清单 (不含损耗)。
+     * 用于【任务完成】时的库存核销。
+     */
+    async calculateTheoreticalProductConsumptions(
+        tenantId: string,
+        productId: string,
+        quantity: number,
+    ): Promise<ConsumptionDetail[]> {
+        const product = await this.getFullProduct(tenantId, productId);
+        if (!product) {
+            throw new NotFoundException('产品不存在');
+        }
+
+        const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
+        const ingredientIds = Array.from(flatIngredients.keys());
+        if (ingredientIds.length === 0) return [];
+
+        const ingredients = await this.prisma.ingredient.findMany({
+            where: {
+                tenantId,
+                id: { in: ingredientIds },
+            },
+            select: {
+                id: true,
+                name: true,
+                activeSkuId: true,
+            },
+        });
+
+        const result: ConsumptionDetail[] = [];
+        for (const ingredient of ingredients) {
+            const totalConsumed = (flatIngredients.get(ingredient.id) || new Prisma.Decimal(0)).mul(quantity);
+            if (totalConsumed.gt(0)) {
+                result.push({
+                    ingredientId: ingredient.id,
+                    ingredientName: ingredient.name,
+                    activeSkuId: ingredient.activeSkuId,
+                    totalConsumed: totalConsumed.toNumber(),
+                });
+            }
+        }
+
+        return result;
+    }
+
     private async _getPricePerGramMap(tenantId: string, ingredientIds: string[]): Promise<Map<string, Prisma.Decimal>> {
         const ingredients = await this.prisma.ingredient.findMany({
             where: {
                 tenantId,
                 id: { in: ingredientIds },
             },
-            // [修改] 增加 type 和 activeSkuId 字段用于后续判断
             select: {
                 id: true,
                 type: true,
@@ -1018,7 +1165,6 @@ export class CostingService {
         const priceMap = new Map<string, Prisma.Decimal>();
         const nonInventoriedIngredients = ingredients.filter((i) => i.type === IngredientType.NON_INVENTORIED);
 
-        // [新增] 批量获取 NON_INVENTORIED 原料的最新采购价
         if (nonInventoriedIngredients.length > 0) {
             const activeSkuIds = nonInventoriedIngredients.map((i) => i.activeSkuId).filter(Boolean) as string[];
 
@@ -1054,9 +1200,7 @@ export class CostingService {
             }
         }
 
-        // [修改] 循环处理所有原料，根据类型应用不同逻辑
         for (const ingredient of ingredients) {
-            // 如果已在上面处理过，则跳过
             if (priceMap.has(ingredient.id)) {
                 continue;
             }
@@ -1077,7 +1221,6 @@ export class CostingService {
                     priceMap.set(ingredient.id, new Prisma.Decimal(0));
                     break;
                 }
-                // NON_INVENTORIED 中没有最新采购记录的也会在这里被置为0
                 default:
                     priceMap.set(ingredient.id, new Prisma.Decimal(0));
                     break;
