@@ -75,7 +75,24 @@ const taskWithDetailsInclude = {
                     ingredients: {
                         include: {
                             ingredient: { include: { activeSku: true } },
-                            linkedExtra: true,
+                            linkedExtra: {
+                                include: {
+                                    versions: {
+                                        where: { isActive: true },
+                                        include: {
+                                            components: {
+                                                include: {
+                                                    ingredients: {
+                                                        include: {
+                                                            ingredient: true,
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
                         },
                     },
                 },
@@ -101,6 +118,8 @@ type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
 
 type TaskItemWithDetails = TaskWithDetails['items'][0];
 type ProductWithDetails = TaskItemWithDetails['product'];
+// [新增] 为内部计算方法定义组件类型别名，以提高代码可读性
+type ComponentWithIngredients = ProductWithDetails['recipeVersion']['components'][0];
 type ComponentWithRecursiveIngredients = ProductWithDetails['recipeVersion']['components'][0];
 
 type PrepItemFamily = RecipeFamily;
@@ -204,20 +223,25 @@ export class ProductionTasksService {
             { ingredientId: string; ingredientName: string; totalConsumed: number }
         >();
         for (const item of products) {
-            const consumptions = await this.costingService.calculateProductConsumptions(
-                tenantId,
-                item.productId,
-                item.quantity,
-            );
-            for (const consumption of consumptions) {
-                const existing = allConsumptions.get(consumption.ingredientId);
+            // 库存检查，应基于包含所有损耗的备料计算
+            const fullProduct = await this.prisma.product.findUnique({
+                where: { id: item.productId },
+                include: taskWithDetailsInclude.items.include.product.include,
+            });
+            if (!fullProduct) continue;
+
+            const consumptions = this._getFlattenedIngredientsForBOM(fullProduct as ProductWithDetails);
+            for (const [ingredientId, weight] of consumptions.entries()) {
+                const totalWeight = weight.mul(item.quantity);
+                const existing = allConsumptions.get(ingredientId);
                 if (existing) {
-                    existing.totalConsumed += consumption.totalConsumed;
+                    existing.totalConsumed += totalWeight.toNumber();
                 } else {
-                    allConsumptions.set(consumption.ingredientId, {
-                        ingredientId: consumption.ingredientId,
-                        ingredientName: consumption.ingredientName,
-                        totalConsumed: consumption.totalConsumed,
+                    const ingredientInfo = await this.prisma.ingredient.findUnique({ where: { id: ingredientId } });
+                    allConsumptions.set(ingredientId, {
+                        ingredientId: ingredientId,
+                        ingredientName: ingredientInfo?.name || '未知原料',
+                        totalConsumed: totalWeight.toNumber(),
                     });
                 }
             }
@@ -325,7 +349,6 @@ export class ProductionTasksService {
             );
 
             if (totalRatio.isZero()) return;
-
             const weightPerRatioPoint = requiredWeight.div(totalRatio);
 
             for (const ing of mainComponent.ingredients) {
@@ -582,27 +605,7 @@ export class ProductionTasksService {
 
         return this.prisma.productionTask.findMany({
             where,
-            include: {
-                items: {
-                    include: {
-                        product: {
-                            include: {
-                                recipeVersion: {
-                                    include: {
-                                        family: true,
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                createdBy: {
-                    select: {
-                        name: true,
-                        phone: true,
-                    },
-                },
-            },
+            include: taskWithDetailsInclude,
             orderBy: {
                 startDate: 'asc',
             },
@@ -770,33 +773,133 @@ export class ProductionTasksService {
         };
     }
 
-    async getBillOfMaterialsForDate(tenantId: string, date?: string): Promise<BillOfMaterialsResponseDto> {
-        const tasksForDate = await this.findTasksForDate(tenantId, date);
+    /**
+     * [核心修复] 计算生产一个产品所需的**所有基础原料的总投入量** (含损耗)，用于备料清单。
+     * @param product 完整的产品对象 (包含深度嵌套的配方信息)
+     * @returns Map<ingredientId, totalInputWeight>
+     */
+    private _getFlattenedIngredientsForBOM(product: ProductWithDetails): Map<string, Prisma.Decimal> {
+        const flattenedIngredients = new Map<string, Prisma.Decimal>();
+        const mainComponent = product.recipeVersion.components[0];
+        if (!mainComponent) return flattenedIngredients;
 
-        if (tasksForDate.length === 0) {
-            return { standardItems: [], nonInventoriedItems: [] };
+        // 辅助函数：递归地展开一个组件，计算其所有基础原料的投入量
+        const processComponentWithLoss = (
+            component: ComponentWithIngredients,
+            requiredOutputWeight: Prisma.Decimal, // 目标产出净重
+        ) => {
+            const lossRatio = new Prisma.Decimal(component.lossRatio || 0);
+            const divisor = new Prisma.Decimal(1).sub(lossRatio);
+            if (divisor.isZero() || divisor.isNegative()) return;
+            const totalInputWeight = requiredOutputWeight.div(divisor);
+
+            const totalRatio = component.ingredients.reduce(
+                (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
+                new Prisma.Decimal(0),
+            );
+            if (totalRatio.isZero()) return;
+
+            const weightPerRatioPoint = totalInputWeight.div(totalRatio);
+
+            for (const ing of component.ingredients) {
+                const ingredientInputWeight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
+                if (ing.linkedPreDough) {
+                    const preDoughComponent = ing.linkedPreDough.versions?.[0]?.components?.[0];
+                    if (preDoughComponent) {
+                        processComponentWithLoss(preDoughComponent as ComponentWithIngredients, ingredientInputWeight);
+                    }
+                } else if (ing.ingredientId) {
+                    const currentWeight = flattenedIngredients.get(ing.ingredientId) || new Prisma.Decimal(0);
+                    flattenedIngredients.set(ing.ingredientId, currentWeight.add(ingredientInputWeight));
+                }
+            }
+        };
+
+        // 步骤 1: 计算理论面粉量基准 (不含任何损耗)
+        const theoreticalFlourWeightPerUnit = this._calculateTheoreticalTotalFlourWeightForProduct(product);
+
+        // 步骤 2: 计算基础面团中所有原料的投入量
+        const mainDoughLossDivisor = new Prisma.Decimal(1).sub(mainComponent.lossRatio || 0);
+        if (mainDoughLossDivisor.isZero() || mainDoughLossDivisor.isNegative()) return flattenedIngredients;
+
+        for (const ing of mainComponent.ingredients) {
+            let theoreticalWeight: Prisma.Decimal;
+            // 计算原料的理论重量
+            if (ing.linkedPreDough && ing.flourRatio) {
+                const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.components[0];
+                if (!preDoughRecipe) continue;
+                const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
+                    (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
+                    new Prisma.Decimal(0),
+                );
+                theoreticalWeight = theoreticalFlourWeightPerUnit.mul(ing.flourRatio).mul(preDoughTotalRatio);
+            } else if (ing.ingredient && ing.ratio) {
+                theoreticalWeight = theoreticalFlourWeightPerUnit.mul(ing.ratio);
+            } else {
+                continue;
+            }
+
+            // 应用主面团损耗，得到“成品需求量”
+            const requiredOutputWeight = theoreticalWeight.div(mainDoughLossDivisor);
+
+            // 展开原料
+            if (ing.linkedPreDough) {
+                const preDoughComponent = ing.linkedPreDough.versions?.[0]?.components?.[0];
+                if (preDoughComponent) {
+                    processComponentWithLoss(preDoughComponent as ComponentWithIngredients, requiredOutputWeight);
+                }
+            } else if (ing.ingredientId) {
+                const currentWeight = flattenedIngredients.get(ing.ingredientId) || new Prisma.Decimal(0);
+                flattenedIngredients.set(ing.ingredientId, currentWeight.add(requiredOutputWeight));
+            }
         }
 
-        const totalConsumptionMap = new Map<string, { name: string; totalConsumed: number }>();
+        // 步骤 3: 计算产品特有原料 (mixIn, fillings, toppings) 的投入量
+        for (const pIng of product.ingredients || []) {
+            let theoreticalWeight = new Prisma.Decimal(0);
+            if (pIng.weightInGrams) {
+                theoreticalWeight = new Prisma.Decimal(pIng.weightInGrams);
+            } else if (pIng.ratio && pIng.type === 'MIX_IN') {
+                theoreticalWeight = theoreticalFlourWeightPerUnit.mul(pIng.ratio);
+            } else {
+                continue;
+            }
 
-        for (const task of tasksForDate) {
+            let requiredOutputWeight = theoreticalWeight;
+            // mixIn 和主面团一样，需要考虑主面团的损耗
+            if (pIng.type === 'MIX_IN') {
+                requiredOutputWeight = theoreticalWeight.div(mainDoughLossDivisor);
+            }
+
+            if (pIng.linkedExtra) {
+                const extraComponent = pIng.linkedExtra.versions?.[0]?.components?.[0];
+                if (extraComponent) {
+                    processComponentWithLoss(extraComponent as ComponentWithIngredients, requiredOutputWeight);
+                }
+            } else if (pIng.ingredientId) {
+                const currentWeight = flattenedIngredients.get(pIng.ingredientId) || new Prisma.Decimal(0);
+                flattenedIngredients.set(pIng.ingredientId, currentWeight.add(requiredOutputWeight));
+            }
+        }
+
+        return flattenedIngredients;
+    }
+
+    private async _calculateBillOfMaterialsForTasks(
+        tenantId: string,
+        tasks: TaskWithDetails[],
+    ): Promise<BillOfMaterialsResponseDto> {
+        const totalConsumptionMap = new Map<string, Prisma.Decimal>();
+
+        for (const task of tasks) {
             for (const item of task.items) {
-                const consumptions = await this.costingService.calculateProductConsumptions(
-                    tenantId,
-                    item.productId,
-                    item.quantity,
-                );
+                // [核心修复] 调用重写后的同步方法
+                const consumptions = this._getFlattenedIngredientsForBOM(item.product);
 
-                for (const consumption of consumptions) {
-                    const existing = totalConsumptionMap.get(consumption.ingredientId);
-                    if (existing) {
-                        existing.totalConsumed += consumption.totalConsumed;
-                    } else {
-                        totalConsumptionMap.set(consumption.ingredientId, {
-                            name: consumption.ingredientName,
-                            totalConsumed: consumption.totalConsumed,
-                        });
-                    }
+                for (const [ingredientId, weight] of consumptions.entries()) {
+                    const totalRequiredForItem = weight.mul(item.quantity);
+                    const existing = totalConsumptionMap.get(ingredientId) || new Prisma.Decimal(0);
+                    totalConsumptionMap.set(ingredientId, existing.add(totalRequiredForItem));
                 }
             }
         }
@@ -822,29 +925,27 @@ export class ProductionTasksService {
         const nonInventoriedItems: BillOfMaterialsItem[] = [];
 
         for (const ingredient of ingredients) {
-            const required = totalConsumptionMap.get(ingredient.id);
-            if (!required) continue;
+            const requiredDecimal = totalConsumptionMap.get(ingredient.id);
+            if (!requiredDecimal) continue;
+            const required = requiredDecimal.toNumber();
 
             if (ingredient.type === IngredientType.STANDARD) {
                 const currentStock = ingredient.currentStockInGrams.toNumber();
-                const totalRequired = required.totalConsumed;
-                const suggestedPurchase = Math.max(0, totalRequired - currentStock);
+                const suggestedPurchase = Math.max(0, required - currentStock);
 
                 standardItems.push({
                     ingredientId: ingredient.id,
                     ingredientName: ingredient.name,
-                    totalRequired,
+                    totalRequired: required,
                     currentStock,
                     suggestedPurchase,
                 });
             } else if (ingredient.type === IngredientType.NON_INVENTORIED) {
-                const totalRequired = required.totalConsumed;
-
                 nonInventoriedItems.push({
                     ingredientId: ingredient.id,
                     ingredientName: ingredient.name,
-                    totalRequired: totalRequired,
-                    suggestedPurchase: totalRequired,
+                    totalRequired: required,
+                    suggestedPurchase: required,
                 });
             }
         }
@@ -853,6 +954,16 @@ export class ProductionTasksService {
         nonInventoriedItems.sort((a, b) => b.suggestedPurchase - a.suggestedPurchase);
 
         return { standardItems, nonInventoriedItems };
+    }
+
+    async getBillOfMaterialsForDate(tenantId: string, date?: string): Promise<BillOfMaterialsResponseDto> {
+        const tasksForDate = await this.findTasksForDate(tenantId, date);
+
+        if (tasksForDate.length === 0) {
+            return { standardItems: [], nonInventoriedItems: [] };
+        }
+
+        return this._calculateBillOfMaterialsForTasks(tenantId, tasksForDate);
     }
 
     async findOne(tenantId: string, id: string, query: QueryTaskDetailDto): Promise<TaskDetailResponseDto> {
@@ -1110,7 +1221,7 @@ export class ProductionTasksService {
                 if (quantity === 0) return;
 
                 const { product } = item;
-                const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
+                const theoreticalFlourWeightPerUnit = this._calculateTheoreticalTotalFlourWeightForProduct(product);
                 const flattenedProductIngredients = this._flattenIngredientsForProduct(product, false);
 
                 const mixIns: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
@@ -1120,7 +1231,7 @@ export class ProductionTasksService {
                         name: ing.name,
                         brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
-                        weightInGrams: totalFlourWeight.mul(ing.ratio ?? 0).toNumber(),
+                        weightInGrams: theoreticalFlourWeightPerUnit.mul(ing.ratio ?? 0).toNumber(),
                     }));
 
                 const fillings: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
@@ -1147,25 +1258,19 @@ export class ProductionTasksService {
 
                 const correctedDivisionWeight = new Prisma.Decimal(product.baseDoughWeight).add(mixInWeightPerUnit);
 
-                // [核心修改] 计算包含损耗的总基础面团重量
-                // 1. 获取主面团的损耗率
                 const lossRatio = new Prisma.Decimal(baseComponentInfo.lossRatio || 0);
                 const divisor = new Prisma.Decimal(1).sub(lossRatio);
-
-                // 2. 根据损耗率计算单个产品需要投入的基础面团重量
                 const singleUnitInputWeight =
                     divisor.isZero() || divisor.isNegative()
-                        ? new Prisma.Decimal(product.baseDoughWeight) // 如果损耗率为100%或更高，则退回理论值
+                        ? new Prisma.Decimal(product.baseDoughWeight)
                         : new Prisma.Decimal(product.baseDoughWeight).div(divisor);
 
-                // 3. 计算生产指定数量产品需要投入的总基础面团重量
                 const totalBaseComponentWeightWithLoss = singleUnitInputWeight.mul(quantity);
 
                 products.push({
                     id: product.id,
                     name: product.name,
                     quantity: quantity,
-                    // [核心修改] 使用计算出的包含损耗的值
                     totalBaseComponentWeight: totalBaseComponentWeightWithLoss.toNumber(),
                     divisionWeight: correctedDivisionWeight.toNumber(),
                 });
@@ -1174,16 +1279,15 @@ export class ProductionTasksService {
                     id: product.id,
                     name: product.name,
                     mixIns: mixIns.map((i) => ({ ...i, weightInGrams: i.weightInGrams * quantity })),
-                    // [核心修改] 为馅料和装饰增加 weightPerUnit 字段
                     fillings: fillings.map((i) => ({
                         ...i,
-                        weightPerUnit: i.weightInGrams, // 单件用量
-                        weightInGrams: i.weightInGrams * quantity, // 总用量
+                        weightPerUnit: i.weightInGrams,
+                        weightInGrams: i.weightInGrams * quantity,
                     })),
                     toppings: toppings.map((i) => ({
                         ...i,
-                        weightPerUnit: i.weightInGrams, // 单件用量
-                        weightInGrams: i.weightInGrams * quantity, // 总用量
+                        weightPerUnit: i.weightInGrams,
+                        weightInGrams: i.weightInGrams * quantity,
                     })),
                     procedure: product.procedure || [],
                 });
@@ -1285,6 +1389,42 @@ export class ProductionTasksService {
         return flattened;
     }
 
+    /**
+     * [新增的辅助函数] 计算单个产品的理论总面粉量 (不含损耗)。
+     * 用于精确计算搅拌原料(mixIn)的理论重量和产品的理论分割重量。
+     * @param product 包含完整配方信息的产品对象
+     * @returns 单个产品的理论面粉量
+     */
+    private _calculateTheoreticalTotalFlourWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
+        const mainDough = product.recipeVersion.components[0];
+        if (!mainDough) return new Prisma.Decimal(0);
+
+        // [核心区别] 直接使用理论基础面团重量，不计算损耗
+        const theoreticalDoughWeight = new Prisma.Decimal(product.baseDoughWeight);
+
+        const calculateTotalRatio = (dough: ComponentWithRecursiveIngredients): Prisma.Decimal => {
+            return dough.ingredients.reduce((sum, i) => {
+                if (i.linkedPreDough && i.flourRatio) {
+                    const preDough = i.linkedPreDough.versions.find((v) => v.isActive)?.components[0];
+                    if (preDough) {
+                        const preDoughTotalRatio = preDough.ingredients.reduce(
+                            (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
+                            new Prisma.Decimal(0),
+                        );
+                        return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio));
+                    }
+                }
+                return sum.add(new Prisma.Decimal(i.ratio ?? 0));
+            }, new Prisma.Decimal(0));
+        };
+
+        const totalRatio = calculateTotalRatio(mainDough);
+        if (totalRatio.isZero()) return new Prisma.Decimal(0);
+
+        // 返回每单位产品的理论面粉量
+        return theoreticalDoughWeight.div(totalRatio);
+    }
+
     private _calculateTotalFlourWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
         const mainDough = product.recipeVersion.components[0];
         if (!mainDough) return new Prisma.Decimal(0);
@@ -1320,19 +1460,18 @@ export class ProductionTasksService {
         const totalIngredientsMap = new Map<string, { name: string; totalWeight: number }>();
         await Promise.all(
             task.items.map(async (item) => {
-                const consumptions = await this.costingService.calculateProductConsumptions(
-                    tenantId,
-                    item.productId,
-                    item.quantity,
-                );
-                for (const consumption of consumptions) {
-                    const existing = totalIngredientsMap.get(consumption.ingredientId);
+                // 库存预警应基于最完整的备料清单计算
+                const consumptions = this._getFlattenedIngredientsForBOM(item.product);
+                for (const [ingredientId, weight] of consumptions.entries()) {
+                    const totalWeight = weight.mul(item.quantity);
+                    const existing = totalIngredientsMap.get(ingredientId);
                     if (existing) {
-                        existing.totalWeight += consumption.totalConsumed;
+                        existing.totalWeight += totalWeight.toNumber();
                     } else {
-                        totalIngredientsMap.set(consumption.ingredientId, {
-                            name: consumption.ingredientName,
-                            totalWeight: consumption.totalConsumed,
+                        const ingInfo = await this.prisma.ingredient.findUnique({ where: { id: ingredientId } });
+                        totalIngredientsMap.set(ingredientId, {
+                            name: ingInfo?.name || '未知原料',
+                            totalWeight: totalWeight.toNumber(),
                         });
                     }
                 }
