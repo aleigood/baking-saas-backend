@@ -906,38 +906,21 @@ export class RecipesService {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
+        // [核心修改] 使用新的辅助函数来处理步骤和注释
         const processedFamily = {
             ...family,
             versions: family.versions.map((version) => {
                 return {
                     ...version,
                     components: version.components.map((component) => {
-                        const ingredientNotes = new Map<string, string>();
-                        const noteRegex = /@(?:\[)?(.*?)(?:\])?[(（](.*?)[)）]/g;
-
-                        const cleanedProcedure = component.procedure
-                            .map((step) => {
-                                const stepMatches = [...step.matchAll(noteRegex)];
-                                for (const match of stepMatches) {
-                                    const [, ingredientName, note] = match;
-                                    if (ingredientName && note) {
-                                        ingredientNotes.set(ingredientName.trim(), note.trim());
-                                    }
-                                }
-
-                                const cleanedStep = step.replace(noteRegex, '').trim();
-
-                                if (cleanedStep === '') {
-                                    return null;
-                                }
-
-                                return cleanedStep;
-                            })
-                            .filter((step): step is string => step !== null);
+                        const { processedProcedure, ingredientNotes } = this._processProcedureWithCalculatedNotes(
+                            component,
+                            family,
+                        );
 
                         return {
                             ...component,
-                            procedure: cleanedProcedure,
+                            procedure: processedProcedure,
                             ingredients: component.ingredients.map((ing) => {
                                 if (ing.ingredient) {
                                     const extraInfo = ingredientNotes.get(ing.ingredient.name);
@@ -945,6 +928,16 @@ export class RecipesService {
                                         ...ing,
                                         ingredient: {
                                             ...ing.ingredient,
+                                            extraInfo: extraInfo || undefined,
+                                        },
+                                    };
+                                }
+                                if (ing.linkedPreDough) {
+                                    const extraInfo = ingredientNotes.get(ing.linkedPreDough.name);
+                                    return {
+                                        ...ing,
+                                        linkedPreDough: {
+                                            ...ing.linkedPreDough,
                                             extraInfo: extraInfo || undefined,
                                         },
                                     };
@@ -958,6 +951,72 @@ export class RecipesService {
         };
 
         return processedFamily;
+    }
+
+    /**
+     * [新增] 解析配方步骤，处理@注释和百分比语法糖
+     * @param component 配方组件
+     * @param family 配方族
+     * @returns 处理后的步骤和提取的注释
+     */
+    private _processProcedureWithCalculatedNotes(
+        component: RecipeComponent & { ingredients: (ComponentIngredient & { ingredient: Ingredient | null })[] },
+        family: RecipeFamily,
+    ): { processedProcedure: string[]; ingredientNotes: Map<string, string> } {
+        if (!component || !component.procedure) {
+            return { processedProcedure: [], ingredientNotes: new Map() };
+        }
+
+        let baseForPercentageCalc = new Prisma.Decimal(1000); // 默认基准为1000g总重
+
+        // 对于面包或面种类配方，基准应为1000g粉量
+        if (family.category === RecipeCategory.BREAD || family.type === RecipeType.PRE_DOUGH) {
+            baseForPercentageCalc = new Prisma.Decimal(1000); // 基准直接设为1000g粉
+        } else {
+            // 对于其他类型，基准是总重量，需通过总比例计算
+            const totalRatio = component.ingredients.reduce(
+                (sum, ing) => sum.add(new Prisma.Decimal(ing.ratio ?? 0)),
+                new Prisma.Decimal(0),
+            );
+            if (!totalRatio.isZero()) {
+                // 计算出当总重为1000g时，100%对应的基准重量
+                baseForPercentageCalc = new Prisma.Decimal(1000).div(totalRatio);
+            }
+        }
+
+        const ingredientNotes = new Map<string, string>();
+        const noteRegex = /@(?:\[)?(.*?)(?:\])?[(（](.*?)[)）]/g;
+        const percentageRegex = /\[(\d+(?:\.\d+)?)%\]/g;
+
+        const processedProcedure = component.procedure
+            .map((step) => {
+                // 第一步：替换百分比
+                const processedStep = step.replace(percentageRegex, (match: string, p1: string) => {
+                    const percentage = new Prisma.Decimal(p1);
+                    const calculatedWeight = baseForPercentageCalc.mul(percentage.div(100));
+                    return `${calculatedWeight.toDP(1).toNumber()}克`;
+                });
+
+                // 第二步：提取注释
+                const stepMatches = [...processedStep.matchAll(noteRegex)];
+                for (const match of stepMatches) {
+                    const [, ingredientName, note] = match;
+                    if (ingredientName && note) {
+                        ingredientNotes.set(ingredientName.trim(), note.trim());
+                    }
+                }
+
+                // 第三步：清理步骤文本中的注释
+                const cleanedStep = processedStep.replace(noteRegex, '').trim();
+
+                if (cleanedStep === '') {
+                    return null;
+                }
+                return cleanedStep;
+            })
+            .filter((step): step is string => step !== null);
+
+        return { processedProcedure, ingredientNotes };
     }
 
     async getRecipeVersionFormTemplate(

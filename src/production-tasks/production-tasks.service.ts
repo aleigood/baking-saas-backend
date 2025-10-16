@@ -439,10 +439,14 @@ export class ProductionTasksService {
                     include: {
                         versions: {
                             where: { isActive: true },
-                            select: {
+                            include: {
                                 components: {
-                                    select: {
-                                        procedure: true,
+                                    include: {
+                                        ingredients: {
+                                            include: {
+                                                ingredient: true,
+                                            },
+                                        },
                                     },
                                 },
                             },
@@ -451,12 +455,34 @@ export class ProductionTasksService {
                 }),
             ]);
 
-            const procedure = recipeFamily?.versions[0]?.components[0]?.procedure;
-            if (procedure && details.ingredients && details.ingredients.length > 0) {
-                const ingredientNotes = new Map<string, string>();
-                const cleanedProcedure = this._parseProcedureForNotes(procedure, ingredientNotes);
-                details.procedure = cleanedProcedure;
+            const mainComponent = recipeFamily?.versions[0]?.components[0];
+            const procedure = mainComponent?.procedure;
 
+            if (procedure && mainComponent && details.ingredients && details.ingredients.length > 0) {
+                // [核心修改] 根据配方类型，计算用于步骤中百分比语法糖的基准重量
+                let baseForPercentageCalc = new Prisma.Decimal(data.totalWeight.toNumber());
+                if (
+                    (recipeFamily.type === RecipeType.PRE_DOUGH || recipeFamily.category === RecipeCategory.BREAD) &&
+                    mainComponent.ingredients.length > 0
+                ) {
+                    // 对于面种和面包，基准是总粉量。通过总重量除以总比例计算得出
+                    const totalRatio = mainComponent.ingredients.reduce(
+                        (sum, ing) => sum.add(new Prisma.Decimal(ing.ratio ?? 0)),
+                        new Prisma.Decimal(0),
+                    );
+                    if (!totalRatio.isZero()) {
+                        baseForPercentageCalc = new Prisma.Decimal(data.totalWeight.toNumber()).div(totalRatio);
+                    }
+                }
+
+                // 使用统一的函数处理步骤文本和原料注释
+                const { processedProcedure, ingredientNotes } = this._parseAndCalculateProcedureNotes(
+                    procedure,
+                    baseForPercentageCalc,
+                );
+                details.procedure = processedProcedure;
+
+                // 将解析出的注释附加到对应的原料上
                 if (ingredientNotes.size > 0) {
                     details.ingredients.forEach((ingredient: TaskIngredientDetail) => {
                         const note = ingredientNotes.get(ingredient.name);
