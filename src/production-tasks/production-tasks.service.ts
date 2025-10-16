@@ -1804,6 +1804,9 @@ export class ProductionTasksService {
             });
 
             // [核心重构] 步骤 3: 处理显式报损 (Spoilage)
+            // [新增] 定义一个变量来累计所有报损产品的理论原料消耗，用于后续在工艺损耗中排除这部分，避免重复扣减库存
+            const totalSpoiledConsumption = new Map<string, Prisma.Decimal>();
+
             for (const completedItem of completedItems) {
                 const { productId, completedQuantity, spoilageDetails } = completedItem;
                 const plannedQuantity = plannedQuantities.get(productId);
@@ -1844,6 +1847,10 @@ export class ProductionTasksService {
                     }
 
                     for (const cons of spoiledConsumptions) {
+                        // [新增] 累计所有报损产品的原料消耗
+                        const currentSpoiled = totalSpoiledConsumption.get(cons.ingredientId) || new Prisma.Decimal(0);
+                        totalSpoiledConsumption.set(cons.ingredientId, currentSpoiled.add(cons.totalConsumed));
+
                         const productName =
                             task.items.find((i) => i.productId === productId)?.product.name || '未知产品';
                         // 显式报损直接通过库存调整扣减，因为它是一种直接损失
@@ -1915,8 +1922,15 @@ export class ProductionTasksService {
             // [核心重构] 步骤 5: 计算并处理工艺损耗
             for (const [ingId, inputData] of totalInputNeeded.entries()) {
                 const theoreticalData = theoreticalConsumption.get(ingId);
-                const theoreticalConsumed = theoreticalData ? theoreticalData.totalConsumed : 0;
-                const processLoss = new Prisma.Decimal(inputData.totalConsumed).sub(theoreticalConsumed);
+                const theoreticalConsumed = theoreticalData
+                    ? new Prisma.Decimal(theoreticalData.totalConsumed)
+                    : new Prisma.Decimal(0);
+
+                // [修复] 从总投入中减去成功品的消耗，并且还要减去已经单独扣过库存的报损品的消耗
+                const spoiledConsumed = totalSpoiledConsumption.get(ingId) || new Prisma.Decimal(0);
+                const processLoss = new Prisma.Decimal(inputData.totalConsumed)
+                    .sub(theoreticalConsumed)
+                    .sub(spoiledConsumed);
 
                 if (processLoss.gt(0.01)) {
                     // 设置一个阈值避免浮点数误差
