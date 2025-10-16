@@ -118,7 +118,7 @@ type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
 
 type TaskItemWithDetails = TaskWithDetails['items'][0];
 type ProductWithDetails = TaskItemWithDetails['product'];
-// [新增] 为内部计算方法定义组件类型别名，以提高代码可读性
+// [新增] 为内部计算方法定义组件类型别名, 以提高代码可读性
 type ComponentWithIngredients = ProductWithDetails['recipeVersion']['components'][0];
 type ComponentWithRecursiveIngredients = ProductWithDetails['recipeVersion']['components'][0];
 
@@ -1286,7 +1286,13 @@ export class ProductionTasksService {
                 if (quantity === 0) return;
 
                 const { product } = item;
-                const theoreticalFlourWeightPerUnit = this._calculateTheoreticalTotalFlourWeightForProduct(product);
+
+                // [核心修复] 此处应该使用包含损耗的面粉量作为基准来计算 mixIn 原料的重量, 以便向操作员展示正确的称重数量。
+                // 错误地使用了 _calculateTheoreticalTotalFlourWeightForProduct (理论值)。
+                // const theoreticalFlourWeightPerUnit = this._calculateTheoreticalTotalFlourWeightForProduct(product);
+                // [核心修复] 修正为使用 _calculateTotalFlourWeightForProduct，它会正确计算包含主面团损耗后的面粉投入量。
+                const flourWeightPerUnitWithLoss = this._calculateTotalFlourWeightForProduct(product);
+
                 const flattenedProductIngredients = this._flattenIngredientsForProduct(product, false);
 
                 const mixIns: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
@@ -1296,7 +1302,8 @@ export class ProductionTasksService {
                         name: ing.name,
                         brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
-                        weightInGrams: theoreticalFlourWeightPerUnit.mul(ing.ratio ?? 0).toNumber(),
+                        // [核心修复] 使用包含损耗的面粉量作为计算基准
+                        weightInGrams: flourWeightPerUnitWithLoss.mul(ing.ratio ?? 0).toNumber(),
                     }));
 
                 const fillings: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
@@ -1319,13 +1326,18 @@ export class ProductionTasksService {
                         weightInGrams: ing.weightInGrams?.toNumber() ?? 0,
                     }));
 
-                // [修复] 修正此处的类型警告，将 number 显式转换为 Prisma.Decimal
-                const mixInWeightPerUnit = mixIns.reduce(
-                    (sum, i) => sum.add(new Prisma.Decimal(i.weightInGrams)),
-                    new Prisma.Decimal(0),
-                );
+                // [核心修复] 为了计算正确的理论分割重量(divisionWeight)，必须使用理论面粉量重新计算理论mixIn重量, 因为分割重量不应包含损耗。
+                const theoreticalFlourWeightPerUnit = this._calculateTheoreticalTotalFlourWeightForProduct(product);
+                const theoreticalMixInWeightPerUnit = Array.from(flattenedProductIngredients.values())
+                    .filter((ing) => ing.type === 'MIX_IN')
+                    .reduce(
+                        (sum, ing) => sum.add(theoreticalFlourWeightPerUnit.mul(ing.ratio ?? 0)),
+                        new Prisma.Decimal(0),
+                    );
 
-                const correctedDivisionWeight = new Prisma.Decimal(product.baseDoughWeight).add(mixInWeightPerUnit);
+                const correctedDivisionWeight = new Prisma.Decimal(product.baseDoughWeight).add(
+                    theoreticalMixInWeightPerUnit,
+                );
 
                 const lossRatio = new Prisma.Decimal(baseComponentInfo.lossRatio || 0);
                 const divisor = new Prisma.Decimal(1).sub(lossRatio);
@@ -1341,7 +1353,7 @@ export class ProductionTasksService {
                     name: product.name,
                     quantity: quantity,
                     totalBaseComponentWeight: totalBaseComponentWeightWithLoss.toNumber(),
-                    divisionWeight: correctedDivisionWeight.toNumber(),
+                    divisionWeight: correctedDivisionWeight.toDP(2).toNumber(),
                 });
 
                 productDetails.push({
