@@ -893,7 +893,6 @@ export class ProductionTasksService {
 
         for (const task of tasks) {
             for (const item of task.items) {
-                // [核心修复] 调用重写后的同步方法
                 const consumptions = this._getFlattenedIngredientsForBOM(item.product);
 
                 for (const [ingredientId, weight] of consumptions.entries()) {
@@ -918,6 +917,11 @@ export class ProductionTasksService {
                 name: true,
                 type: true,
                 currentStockInGrams: true,
+                activeSku: {
+                    select: {
+                        brand: true,
+                    },
+                },
             },
         });
 
@@ -928,30 +932,30 @@ export class ProductionTasksService {
             const requiredDecimal = totalConsumptionMap.get(ingredient.id);
             if (!requiredDecimal) continue;
             const required = requiredDecimal.toNumber();
+            const brand = ingredient.activeSku?.brand || null;
 
             if (ingredient.type === IngredientType.STANDARD) {
                 const currentStock = ingredient.currentStockInGrams.toNumber();
-                const suggestedPurchase = Math.max(0, required - currentStock);
 
                 standardItems.push({
                     ingredientId: ingredient.id,
                     ingredientName: ingredient.name,
-                    totalRequired: required,
+                    brand,
                     currentStock,
-                    suggestedPurchase,
+                    totalRequired: required,
                 });
             } else if (ingredient.type === IngredientType.NON_INVENTORIED) {
                 nonInventoriedItems.push({
                     ingredientId: ingredient.id,
                     ingredientName: ingredient.name,
+                    brand,
                     totalRequired: required,
-                    suggestedPurchase: required,
                 });
             }
         }
 
-        standardItems.sort((a, b) => b.suggestedPurchase - a.suggestedPurchase);
-        nonInventoriedItems.sort((a, b) => b.suggestedPurchase - a.suggestedPurchase);
+        standardItems.sort((a, b) => b.totalRequired - a.totalRequired);
+        nonInventoriedItems.sort((a, b) => b.totalRequired - a.totalRequired);
 
         return { standardItems, nonInventoriedItems };
     }
@@ -1022,26 +1026,20 @@ export class ProductionTasksService {
         }
 
         const tempNotes = new Map<string, string[]>();
-        // 正则表达式匹配内容中的 [百分比]
         const percentageRegex = /\[(\d+(?:\.\d+)?)%\]/g;
 
-        // 1. 遍历所有步骤，计算百分比并替换
         const processedProcedure = procedure.map((step) => {
             let newStep = step;
-            const matches = [...step.matchAll(percentageRegex)];
-            if (matches.length > 0 && !totalFlourWeight.isZero()) {
-                for (const match of matches) {
-                    const percentageStr = match[1];
-                    const percentage = new Prisma.Decimal(percentageStr);
+            if (!totalFlourWeight.isZero()) {
+                newStep = step.replace(percentageRegex, (match: string, p1: string) => {
+                    const percentage = new Prisma.Decimal(p1);
                     const calculatedWeight = totalFlourWeight.mul(percentage.div(100));
-                    const replacementText = `${calculatedWeight.toDP(2).toNumber()}克`;
-                    newStep = newStep.replace(match[0], replacementText);
-                }
+                    return `${calculatedWeight.toDP(2).toNumber()}克`;
+                });
             }
             return newStep;
         });
 
-        // 2. 从处理后的步骤中提取所有注释内容
         const anyNoteRegex = /@([^（(]+?)\s*?[（(]([^)）]+?)[)）]/g;
         processedProcedure.forEach((step) => {
             const noteMatches = [...step.matchAll(anyNoteRegex)];
@@ -1055,7 +1053,6 @@ export class ProductionTasksService {
             }
         });
 
-        // 3. 合并同一原料的多个注释
         const ingredientNotes = new Map<string, string>();
         tempNotes.forEach((notes, name) => {
             ingredientNotes.set(name, notes.join(' '));
@@ -1071,7 +1068,6 @@ export class ProductionTasksService {
         if (!procedure) {
             return [];
         }
-        // [修复] 移除正则表达式中不必要的转义符
         const noteRegex = /@(?:\[)?(.*?)(?:\])?[（(](.*?)[)）]/g;
 
         const cleanedProcedure = procedure
@@ -1140,7 +1136,6 @@ export class ProductionTasksService {
                 totalFlourForFamily = totalFlourForFamily.add(flourPerUnit.mul(quantity));
             }
 
-            // [修改] 调用新的统一处理函数，获取计算后的步骤和所有注释
             const { processedProcedure, ingredientNotes } = this._parseAndCalculateProcedureNotes(
                 baseComponentInfo.procedure,
                 totalFlourForFamily,
@@ -1208,7 +1203,6 @@ export class ProductionTasksService {
                             brand,
                             weightInGrams: currentTotalWeight.toNumber(),
                             isRecipe,
-                            // [修改] 从新的注释 map 中获取附加信息
                             extraInfo: ingredientNotes.get(name) || null,
                         };
                         baseComponentIngredientsMap.set(id, newIngredient);
@@ -1248,7 +1242,6 @@ export class ProductionTasksService {
                         finalInfoParts.push(...autoCalculatedParts);
                     }
 
-                    // [修改] 确保 extraInfo 总是从 ingredient 对象中获取，它已经包含了所有注释
                     if (waterIngredient.extraInfo) {
                         finalInfoParts.push(waterIngredient.extraInfo);
                     }
@@ -1300,7 +1293,11 @@ export class ProductionTasksService {
                         weightInGrams: ing.weightInGrams?.toNumber() ?? 0,
                     }));
 
-                const mixInWeightPerUnit = mixIns.reduce((sum, i) => sum.add(i.weightInGrams), new Prisma.Decimal(0));
+                // [修复] 修正此处的类型警告，将 number 显式转换为 Prisma.Decimal
+                const mixInWeightPerUnit = mixIns.reduce(
+                    (sum, i) => sum.add(new Prisma.Decimal(i.weightInGrams)),
+                    new Prisma.Decimal(0),
+                );
 
                 const correctedDivisionWeight = new Prisma.Decimal(product.baseDoughWeight).add(mixInWeightPerUnit);
 
@@ -1355,7 +1352,7 @@ export class ProductionTasksService {
                 baseComponentIngredients: Array.from(baseComponentIngredientsMap.values()).sort(
                     (a, b) => (b.isRecipe ? 1 : 0) - (a.isRecipe ? 1 : 0),
                 ),
-                baseComponentProcedure: processedProcedure, // 使用处理后的步骤
+                baseComponentProcedure: processedProcedure,
                 products,
                 productDetails,
             });
