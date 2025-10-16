@@ -371,90 +371,6 @@ export class CostingService {
         return consumptionLogs.map((log) => ({ cost: log.quantityInGrams.toNumber() })).reverse();
     }
 
-    private _calculateTrueHydration(product: FullProduct): Prisma.Decimal {
-        const flattenedIngredients = new Map<string, { weight: Prisma.Decimal; ingredient: Ingredient }>();
-
-        const processComponent = (component: FullRecipeVersion['components'][0], flourWeightRef: Prisma.Decimal) => {
-            for (const ing of component.ingredients) {
-                if (ing.linkedPreDough && ing.flourRatio) {
-                    const preDough = ing.linkedPreDough.versions?.[0]?.components?.[0];
-                    if (preDough) {
-                        const flourForPreDough = flourWeightRef.mul(new Prisma.Decimal(ing.flourRatio));
-                        processComponent(preDough as FullRecipeVersion['components'][0], flourForPreDough);
-                    }
-                } else if (ing.ingredient && ing.ratio) {
-                    const ingredientWeight = flourWeightRef.mul(new Prisma.Decimal(ing.ratio));
-                    const current = flattenedIngredients.get(ing.ingredient.id);
-                    if (current) {
-                        current.weight = current.weight.add(ingredientWeight);
-                    } else {
-                        flattenedIngredients.set(ing.ingredient.id, {
-                            weight: ingredientWeight,
-                            ingredient: ing.ingredient,
-                        });
-                    }
-                }
-            }
-        };
-
-        const baseComponent = product.recipeVersion.components[0];
-        if (!baseComponent) return new Prisma.Decimal(0);
-
-        const baseComponentLossRatio = new Prisma.Decimal(baseComponent.lossRatio || 0);
-        const baseComponentDivisor = new Prisma.Decimal(1).sub(baseComponentLossRatio);
-        const adjustedBaseComponentWeight = !baseComponentDivisor.isZero()
-            ? new Prisma.Decimal(product.baseDoughWeight).div(baseComponentDivisor)
-            : new Prisma.Decimal(0);
-
-        const calculateTotalRatio = (component: FullRecipeVersion['components'][0]): Prisma.Decimal => {
-            return component.ingredients.reduce((sum, i) => {
-                if (i.flourRatio && i.linkedPreDough) {
-                    const preDough = i.linkedPreDough.versions?.[0]?.components?.[0];
-                    if (preDough) {
-                        const preDoughTotalRatio = preDough.ingredients.reduce(
-                            (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
-                            new Prisma.Decimal(0),
-                        );
-                        return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio));
-                    }
-                }
-                return sum.add(new Prisma.Decimal(i.ratio ?? 0));
-            }, new Prisma.Decimal(0));
-        };
-
-        const baseComponentTotalRatio = calculateTotalRatio(baseComponent);
-        const flourWeightReference = !baseComponentTotalRatio.isZero()
-            ? adjustedBaseComponentWeight.div(baseComponentTotalRatio)
-            : new Prisma.Decimal(0);
-
-        processComponent(baseComponent, flourWeightReference);
-
-        let totalFlourWeight = new Prisma.Decimal(0);
-        let totalWaterWeight = new Prisma.Decimal(0);
-
-        for (const data of flattenedIngredients.values()) {
-            if (data.ingredient.isFlour) {
-                totalFlourWeight = totalFlourWeight.add(data.weight);
-            }
-            if (data.ingredient.waterContent.gt(0)) {
-                const waterInIngredient = data.weight.mul(new Prisma.Decimal(data.ingredient.waterContent));
-                totalWaterWeight = totalWaterWeight.add(waterInIngredient);
-            }
-        }
-
-        if (totalFlourWeight.isZero()) {
-            return new Prisma.Decimal(0);
-        }
-
-        return totalWaterWeight.div(totalFlourWeight);
-    }
-
-    /**
-     * [核心修改] 增强此函数，使其同时处理百分比语法糖和@注释
-     * @param procedure 原始步骤数组
-     * @param baseWeightForPercentage 用于计算百分比的基准重量 (例如总粉量)
-     * @returns 一个包含处理后步骤和提取出的注释信息的对象
-     */
     private _parseProcedureForNotes(
         procedure: string[] | undefined | null,
         baseWeightForPercentage: Prisma.Decimal,
@@ -507,8 +423,6 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const trueHydration = this._calculateTrueHydration(product);
-
         // [核心修改] 调用“理论计算”方法，用于成本核算，忽略所有损耗率
         const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
@@ -545,7 +459,6 @@ export class CostingService {
 
             const currentFlourWeight = isBaseComponent ? flourWeightReference : componentWeight.div(totalRatio);
 
-            // [核心修改] 使用增强后的函数，并传入当前组件的总粉量作为计算基准
             const { cleanedProcedure, ingredientNotes } = this._parseProcedureForNotes(
                 component.procedure,
                 currentFlourWeight,
@@ -606,15 +519,6 @@ export class CostingService {
                         extraInfoParts.push(procedureNote);
                     }
 
-                    if (
-                        isBaseComponent &&
-                        ingredient.ingredient.name === '水' &&
-                        product.recipeVersion.family.category === RecipeCategory.BREAD
-                    ) {
-                        const waterNote = `总水量: ${trueHydration.mul(100).toDP(1).toNumber()}%`;
-                        extraInfoParts.push(waterNote);
-                    }
-
                     group.ingredients.push({
                         name: ingredient.ingredient.name,
                         ratio: effectiveRatio.toNumber(),
@@ -648,7 +552,6 @@ export class CostingService {
         };
 
         const baseComponentTotalRatio = calculateTotalRatioForMain(baseComponent);
-        // [核心修改] 理论计算，不考虑损耗，所以直接使用 baseDoughWeight
         const adjustedBaseComponentWeight = new Prisma.Decimal(product.baseDoughWeight);
 
         const flourWeightReference = !baseComponentTotalRatio.isZero()
@@ -683,7 +586,6 @@ export class CostingService {
             let finalWeightInGrams = new Prisma.Decimal(0);
 
             if (ing.type === 'MIX_IN' && ing.ratio) {
-                // [核心修复] 使用 `flourWeightReference` (仅基础面团的面粉重量) 而不是错误的 `trueTotalFlourWeight`
                 finalWeightInGrams = flourWeightReference.mul(new Prisma.Decimal(ing.ratio));
             } else if (ing.weightInGrams) {
                 finalWeightInGrams = new Prisma.Decimal(ing.weightInGrams);
@@ -741,7 +643,6 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        // [核心修改] 成本计算应基于理论值，不含损耗
         const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
@@ -772,7 +673,6 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        // [核心修改] 成本分解同样基于理论值
         const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
