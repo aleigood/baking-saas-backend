@@ -449,18 +449,37 @@ export class CostingService {
         return totalWaterWeight.div(totalFlourWeight);
     }
 
+    /**
+     * [核心修改] 增强此函数，使其同时处理百分比语法糖和@注释
+     * @param procedure 原始步骤数组
+     * @param baseWeightForPercentage 用于计算百分比的基准重量 (例如总粉量)
+     * @returns 一个包含处理后步骤和提取出的注释信息的对象
+     */
     private _parseProcedureForNotes(
         procedure: string[] | undefined | null,
-        ingredientNotes: Map<string, string>,
-    ): string[] {
+        baseWeightForPercentage: Prisma.Decimal,
+    ): {
+        cleanedProcedure: string[];
+        ingredientNotes: Map<string, string>;
+    } {
         if (!procedure) {
-            return [];
+            return { cleanedProcedure: [], ingredientNotes: new Map() };
         }
+        const ingredientNotes = new Map<string, string>();
         const noteRegex = /@(?:\[)?(.*?)(?:\])?[(（](.*?)[)）]/g;
+        const percentageRegex = /\[(\d+(?:\.\d+)?)%\]/g;
 
         const cleanedProcedure = procedure
             .map((step) => {
-                const stepMatches = [...step.matchAll(noteRegex)];
+                // 第一步：替换百分比
+                const processedStep = step.replace(percentageRegex, (match: string, p1: string) => {
+                    const percentage = new Prisma.Decimal(p1);
+                    const calculatedWeight = baseWeightForPercentage.mul(percentage.div(100));
+                    return `${calculatedWeight.toDP(1).toNumber()}克`;
+                });
+
+                // 第二步：提取注释
+                const stepMatches = [...processedStep.matchAll(noteRegex)];
                 for (const match of stepMatches) {
                     const [, ingredientName, note] = match;
                     if (ingredientName && note) {
@@ -468,17 +487,18 @@ export class CostingService {
                     }
                 }
 
-                const cleanedStep = step.replace(noteRegex, '').trim();
+                // 第三步：清理步骤文本中的注释
+                const cleanedStepText = processedStep.replace(noteRegex, '').trim();
 
-                if (cleanedStep === '') {
+                if (cleanedStepText === '') {
                     return null;
                 }
 
-                return cleanedStep;
+                return cleanedStepText;
             })
             .filter((step): step is string => step !== null);
 
-        return cleanedProcedure;
+        return { cleanedProcedure, ingredientNotes };
     }
 
     async getCalculatedProductDetails(tenantId: string, productId: string): Promise<CalculatedProductCostDetails> {
@@ -509,18 +529,12 @@ export class CostingService {
             isBaseComponent: boolean,
             flourWeightReference: Prisma.Decimal,
         ): CalculatedComponentGroup => {
-            const ingredientNotes = new Map<string, string>();
-            const cleanedProcedure = this._parseProcedureForNotes(component.procedure, ingredientNotes);
-
             const group: CalculatedComponentGroup = {
                 name: isBaseComponent ? '基础组件' : component.name,
                 ingredients: [],
-                procedure: cleanedProcedure,
+                procedure: [],
                 totalCost: 0,
             };
-
-            // [核心修改] 理论计算，不考虑损耗，所以直接使用 componentWeight
-            const adjustedComponentWeight = componentWeight;
 
             const totalRatio = component.ingredients.reduce(
                 (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
@@ -529,7 +543,14 @@ export class CostingService {
 
             if (totalRatio.isZero() && !isBaseComponent) return group;
 
-            const currentFlourWeight = isBaseComponent ? flourWeightReference : adjustedComponentWeight.div(totalRatio);
+            const currentFlourWeight = isBaseComponent ? flourWeightReference : componentWeight.div(totalRatio);
+
+            // [核心修改] 使用增强后的函数，并传入当前组件的总粉量作为计算基准
+            const { cleanedProcedure, ingredientNotes } = this._parseProcedureForNotes(
+                component.procedure,
+                currentFlourWeight,
+            );
+            group.procedure = cleanedProcedure;
 
             for (const ingredient of component.ingredients) {
                 const preDough = ingredient.linkedPreDough?.versions?.[0];
