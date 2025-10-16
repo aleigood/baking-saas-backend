@@ -741,15 +741,13 @@
 
                     <div v-if="currentRecipe.type === 'MAIN'">
                         <template v-if="currentRecipe.category === 'BREAD'">
-                            <div
-                                v-for="(dough, doughIndex) in currentRecipe.doughs.filter(d => d.type === 'PRE_DOUGH')"
-                                :key="dough.id"
-                                class="card"
-                            >
+                            <div v-for="(dough, doughIndex) in processedPreDoughs" :key="dough.id" class="card">
                                 <button class="btn-delete-dough" @click="removePreDough(doughIndex)">
                                     <svg><use href="#icon-close"></use></svg>
                                 </button>
-                                <div class="card-title-wrapper"><span class="card-title">{{ dough.name }}</span></div>
+                                <div class="card-title-wrapper">
+                                    <span class="card-title">{{ dough.name }}</span>
+                                </div>
                                 <div class="form-item">
                                     <label class="form-item-label">面种中面粉占总面粉的百分比 (%)</label>
                                     <input
@@ -759,14 +757,25 @@
                                         placeholder="例如: 20"
                                     />
                                 </div>
+
+                                <div class="ingredient-header" style="opacity: 0.7; padding: 0 5px; margin-top: 0">
+                                    <span class="col-name">原料 (换算后，基于主面团总面粉)</span>
+                                    <span class="col-ratio">比例 %</span>
+                                </div>
+
                                 <div
-                                    v-for="(ing, ingIndex) in dough.ingredients"
+                                    v-for="ing in dough.calculatedIngredients"
                                     :key="ing.id"
                                     class="ingredient-row"
                                     style="opacity: 0.7"
                                 >
                                     <input class="input-field" :value="ing.name" readonly />
-                                    <input class="input-field ratio-input" type="number" :value="ing.ratio" readonly />
+                                    <input
+                                        class="input-field ratio-input"
+                                        type="number"
+                                        :value="ing.calculatedRatio"
+                                        readonly
+                                    />
                                 </div>
                             </div>
                             <button
@@ -1279,6 +1288,51 @@
                             ? currentRecipe.value.doughs.find((d) => d.type === 'MAIN_DOUGH')
                             : null,
                     );
+
+                    // [新增] 创建一个计算属性来处理预发酵面团的显示比例
+                    const processedPreDoughs = computed(() => {
+                        if (!currentRecipe.value || currentRecipe.value.type !== 'MAIN') {
+                            return [];
+                        }
+                        const preDoughs = currentRecipe.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
+
+                        return preDoughs.map((dough) => {
+                            // 计算此面种配方中所有面粉的总比例
+                            const totalFlourRatioInPreDough = dough.ingredients
+                                .filter((ing) => ing.isFlour)
+                                .reduce((sum, ing) => sum + (ing.ratio || 0), 0);
+
+                            // 如果面种中没有面粉(总比例为0)，则无法进行换算，直接返回原始比例
+                            if (totalFlourRatioInPreDough === 0) {
+                                return {
+                                    ...dough,
+                                    calculatedIngredients: dough.ingredients.map((ing) => ({
+                                        ...ing,
+                                        calculatedRatio: ing.ratio, // 使用原始比例
+                                    })),
+                                };
+                            }
+
+                            const flourRatioInMainDough = dough.flourRatioInMainDough || 0;
+
+                            const calculatedIngredients = dough.ingredients.map((ing) => {
+                                // 计算公式: (原料在面种中的比例 / 面种总面粉比例) * 该面种面粉在主面团中的占比
+                                const calculatedRatio =
+                                    ((ing.ratio || 0) / totalFlourRatioInPreDough) * flourRatioInMainDough;
+
+                                return {
+                                    ...ing,
+                                    // 将结果处理为数字，并保留最多3位小数
+                                    calculatedRatio: parseFloat(calculatedRatio.toFixed(3)),
+                                };
+                            });
+
+                            return {
+                                ...dough,
+                                calculatedIngredients,
+                            };
+                        });
+                    });
 
                     const recipeContentTitle = computed(() => {
                         if (!currentRecipe.value) return '';
@@ -1867,6 +1921,7 @@
                         tabScrollState,
                         suggestionState,
                         suggestionBoxStyle,
+                        processedPreDoughs, // [新增] 导出计算属性
                         addRecipe,
                         selectRecipe,
                         deleteRecipe,
