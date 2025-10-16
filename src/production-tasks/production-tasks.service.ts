@@ -1007,6 +1007,63 @@ export class ProductionTasksService {
         };
     }
 
+    /**
+     * [新增] 解析配方步骤，处理所有@注释，并计算其中含百分比的语法糖
+     * @param procedure 原始步骤数组
+     * @param totalFlourWeight 用于计算百分比的总粉量基准
+     * @returns 一个包含处理后步骤和提取出的注释信息的对象
+     */
+    private _parseAndCalculateProcedureNotes(
+        procedure: string[] | undefined | null,
+        totalFlourWeight: Prisma.Decimal,
+    ): { processedProcedure: string[]; ingredientNotes: Map<string, string> } {
+        if (!procedure) {
+            return { processedProcedure: [], ingredientNotes: new Map() };
+        }
+
+        const tempNotes = new Map<string, string[]>();
+        // 正则表达式匹配内容中的 [百分比]
+        const percentageRegex = /\[(\d+(?:\.\d+)?)%\]/g;
+
+        // 1. 遍历所有步骤，计算百分比并替换
+        const processedProcedure = procedure.map((step) => {
+            let newStep = step;
+            const matches = [...step.matchAll(percentageRegex)];
+            if (matches.length > 0 && !totalFlourWeight.isZero()) {
+                for (const match of matches) {
+                    const percentageStr = match[1];
+                    const percentage = new Prisma.Decimal(percentageStr);
+                    const calculatedWeight = totalFlourWeight.mul(percentage.div(100));
+                    const replacementText = `${calculatedWeight.toDP(2).toNumber()}克`;
+                    newStep = newStep.replace(match[0], replacementText);
+                }
+            }
+            return newStep;
+        });
+
+        // 2. 从处理后的步骤中提取所有注释内容
+        const anyNoteRegex = /@([^（(]+?)\s*?[（(]([^)）]+?)[)）]/g;
+        processedProcedure.forEach((step) => {
+            const noteMatches = [...step.matchAll(anyNoteRegex)];
+            for (const noteMatch of noteMatches) {
+                const ingredientName = noteMatch[1].trim();
+                const content = noteMatch[2].trim();
+                if (!tempNotes.has(ingredientName)) {
+                    tempNotes.set(ingredientName, []);
+                }
+                tempNotes.get(ingredientName)!.push(content);
+            }
+        });
+
+        // 3. 合并同一原料的多个注释
+        const ingredientNotes = new Map<string, string>();
+        tempNotes.forEach((notes, name) => {
+            ingredientNotes.set(name, notes.join(' '));
+        });
+
+        return { processedProcedure, ingredientNotes };
+    }
+
     private _parseProcedureForNotes(
         procedure: string[] | undefined | null,
         ingredientNotes: Map<string, string>,
@@ -1014,7 +1071,8 @@ export class ProductionTasksService {
         if (!procedure) {
             return [];
         }
-        const noteRegex = /@(?:\[)?(.*?)(?:\])?[(（](.*?)[)）]/g;
+        // [修复] 移除正则表达式中不必要的转义符
+        const noteRegex = /@(?:\[)?(.*?)(?:\])?[（(](.*?)[)）]/g;
 
         const cleanedProcedure = procedure
             .map((step) => {
@@ -1073,11 +1131,6 @@ export class ProductionTasksService {
             const versionNotes = (firstItem.product.recipeVersion as unknown as { notes: string | null }).notes;
 
             const baseComponentInfo = firstItem.product.recipeVersion.components[0];
-            const ingredientNotes = new Map<string, string>();
-            const cleanedProcedure = this._parseProcedureForNotes(baseComponentInfo.procedure, ingredientNotes);
-
-            const baseComponentIngredientsMap = new Map<string, TaskIngredientDetail>();
-            let totalComponentWeight = new Prisma.Decimal(0);
 
             let totalFlourForFamily = new Prisma.Decimal(0);
             for (const item of data.items) {
@@ -1087,17 +1140,21 @@ export class ProductionTasksService {
                 totalFlourForFamily = totalFlourForFamily.add(flourPerUnit.mul(quantity));
             }
 
+            // [修改] 调用新的统一处理函数，获取计算后的步骤和所有注释
+            const { processedProcedure, ingredientNotes } = this._parseAndCalculateProcedureNotes(
+                baseComponentInfo.procedure,
+                totalFlourForFamily,
+            );
+
+            const baseComponentIngredientsMap = new Map<string, TaskIngredientDetail>();
+            let totalComponentWeight = new Prisma.Decimal(0);
+
             let totalWaterForFamily = new Prisma.Decimal(0);
             let waterIngredientId: string | null = null;
-            for (const item of data.items) {
-                const originalItem = originalItemsMap.get(item.productId);
-                const quantity = originalItem?.quantity ?? 0;
-                const flattened = this._flattenIngredientsForProduct(item.product);
-                for (const [, ingData] of flattened.entries()) {
-                    if (ingData.waterContent && ingData.waterContent.gt(0)) {
-                        const waterWeight = ingData.weight.mul(ingData.waterContent);
-                        totalWaterForFamily = totalWaterForFamily.add(waterWeight.mul(quantity));
-                    }
+            for (const ing of baseComponentInfo.ingredients) {
+                if (ing.ingredient?.waterContent?.gt(0) && ing.ratio) {
+                    const waterWeight = totalFlourForFamily.mul(ing.ratio).mul(ing.ingredient.waterContent);
+                    totalWaterForFamily = totalWaterForFamily.add(waterWeight);
                 }
             }
 
@@ -1151,6 +1208,7 @@ export class ProductionTasksService {
                             brand,
                             weightInGrams: currentTotalWeight.toNumber(),
                             isRecipe,
+                            // [修改] 从新的注释 map 中获取附加信息
                             extraInfo: ingredientNotes.get(name) || null,
                         };
                         baseComponentIngredientsMap.set(id, newIngredient);
@@ -1185,24 +1243,12 @@ export class ProductionTasksService {
                         autoCalculatedParts.push(`需要替换 ${new Prisma.Decimal(iceWeight).toDP(1).toNumber()}g 冰`);
                     }
 
-                    if (!totalFlourForFamily.isZero()) {
-                        const trueHydrationRatio = totalWaterForFamily.div(totalFlourForFamily);
-                        if (trueHydrationRatio.gt(0.65)) {
-                            const holdBackWater = totalWaterForFamily.sub(totalFlourForFamily.mul(0.65));
-                            const holdBackWaterDisplay = holdBackWater.toDP(1);
-                            if (holdBackWaterDisplay.gt(0)) {
-                                autoCalculatedParts.push(
-                                    `需要保留 ${holdBackWaterDisplay.toNumber()}g 水在搅拌过程中加入`,
-                                );
-                            }
-                        }
-                    }
-
                     const finalInfoParts: string[] = [];
                     if (autoCalculatedParts.length > 0) {
                         finalInfoParts.push(...autoCalculatedParts);
                     }
 
+                    // [修改] 确保 extraInfo 总是从 ingredient 对象中获取，它已经包含了所有注释
                     if (waterIngredient.extraInfo) {
                         finalInfoParts.push(waterIngredient.extraInfo);
                     }
@@ -1309,7 +1355,7 @@ export class ProductionTasksService {
                 baseComponentIngredients: Array.from(baseComponentIngredientsMap.values()).sort(
                     (a, b) => (b.isRecipe ? 1 : 0) - (a.isRecipe ? 1 : 0),
                 ),
-                baseComponentProcedure: cleanedProcedure,
+                baseComponentProcedure: processedProcedure, // 使用处理后的步骤
                 products,
                 productDetails,
             });
