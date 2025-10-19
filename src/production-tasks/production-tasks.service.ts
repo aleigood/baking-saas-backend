@@ -1297,9 +1297,6 @@ export class ProductionTasksService {
                 const { product } = item;
 
                 // [核心修复] 此处应该使用包含损耗的面粉量作为基准来计算 mixIn 原料的重量, 以便向操作员展示正确的称重数量。
-                // 错误地使用了 _calculateTheoreticalTotalFlourWeightForProduct (理论值)。
-                // const theoreticalFlourWeightPerUnit = this._calculateTheoreticalTotalFlourWeightForProduct(product);
-                // [核心修复] 修正为使用 _calculateTotalFlourWeightForProduct，它会正确计算包含主面团损耗后的面粉投入量。
                 const flourWeightPerUnitWithLoss = this._calculateTotalFlourWeightForProduct(product);
 
                 const flattenedProductIngredients = this._flattenIngredientsForProduct(product, false);
@@ -1371,7 +1368,8 @@ export class ProductionTasksService {
                     name: product.name,
                     quantity: quantity,
                     totalBaseComponentWeight: totalBaseComponentWeightWithLoss.toNumber(),
-                    divisionWeight: correctedDivisionWeight.toDP(2).toNumber(),
+                    // [核心修复] 移除 .toDP()，返回完整精度的 number
+                    divisionWeight: correctedDivisionWeight.toNumber(),
                 });
 
                 productDetails.push({

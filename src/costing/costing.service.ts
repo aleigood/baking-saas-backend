@@ -67,9 +67,7 @@ export interface CalculatedRecipeDetails {
     id: string;
     name: string;
     type: RecipeType;
-    // [核心修复] 字段名改回 totalWeight，代表为达成目标产量，需要投入的原料总重 (含损耗)
     totalWeight: number;
-    // [核心修复] 字段名改回 targetWeight，代表目标产出净重 (不含损耗)
     targetWeight: number;
     procedure: string[];
     ingredients: CalculatedRecipeIngredient[];
@@ -212,9 +210,9 @@ export class CostingService {
             id: recipeFamily.id,
             name: recipeFamily.name,
             type: recipeFamily.type,
-            // [核心修复] 返回值清晰区分 totalWeight 和 targetWeight
-            totalWeight: requiredInputWeight.toDP(2).toNumber(),
-            targetWeight: outputWeightTarget.toDP(2).toNumber(),
+            // [核心修复] 移除 .toDP()，返回完整精度的 number
+            totalWeight: requiredInputWeight.toNumber(),
+            targetWeight: outputWeightTarget.toNumber(),
             procedure: mainComponent.procedure,
             ingredients: calculatedIngredients,
         };
@@ -284,7 +282,7 @@ export class CostingService {
                 }
             }
             costHistory.push({
-                cost: snapshotTotalCost.toDP(4).toNumber(),
+                cost: snapshotTotalCost.toNumber(), // [核心修复] 移除 .toDP()
                 date: date.toISOString().split('T')[0],
             });
         }
@@ -338,7 +336,7 @@ export class CostingService {
             }
             const costPerKg = pricePerPackage.div(specWeightInGrams).mul(1000);
             return {
-                cost: costPerKg.toDP(2).toNumber(),
+                cost: costPerKg.toNumber(), // [核心修复] 移除 .toDP()
             };
         });
 
@@ -391,7 +389,7 @@ export class CostingService {
                 const processedStep = step.replace(percentageRegex, (match: string, p1: string) => {
                     const percentage = new Prisma.Decimal(p1);
                     const calculatedWeight = baseWeightForPercentage.mul(percentage.div(100));
-                    return `${calculatedWeight.toDP(1).toNumber()}克`;
+                    return `${calculatedWeight.toDP(1).toNumber()}克`; // 保留此处的 toDP(1) 以便在UI上显示
                 });
 
                 // 第二步：提取注释
@@ -423,14 +421,13 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        // [核心修改] 调用“理论计算”方法，用于成本核算，忽略所有损耗率
         const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
 
         const getPricePerKg = (id: string) => {
             const pricePerGram = pricePerGramMap.get(id);
-            return pricePerGram ? pricePerGram.mul(1000).toDP(2).toNumber() : 0;
+            return pricePerGram ? pricePerGram.mul(1000).toNumber() : 0; // [核心修复] 移除 .toDP()
         };
 
         const componentGroups: CalculatedComponentGroup[] = [];
@@ -524,7 +521,7 @@ export class CostingService {
                         ratio: effectiveRatio.toNumber(),
                         weightInGrams: weight.toNumber(),
                         pricePerKg: pricePerKg,
-                        cost: cost.toDP(2).toNumber(),
+                        cost: cost.toNumber(), // [核心修复] 移除 .toDP()
                         extraInfo: extraInfoParts.length > 0 ? extraInfoParts.join('\n') : undefined,
                     });
                     group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
@@ -597,7 +594,7 @@ export class CostingService {
                 id: ing.id,
                 name: name,
                 type: getProductIngredientTypeName(ing.type),
-                cost: cost.toDP(2).toNumber(),
+                cost: cost.toNumber(), // [核心修复] 移除 .toDP()
                 weightInGrams: finalWeightInGrams.toNumber(),
                 ratio: ing.ratio ? ing.ratio.toNumber() : undefined,
                 extraInfo: undefined,
@@ -629,7 +626,7 @@ export class CostingService {
         );
 
         return {
-            totalCost: totalCost.toDP(2).toNumber(),
+            totalCost: totalCost.toNumber(), // [核心修复] 移除 .toDP()
             componentGroups: componentGroups,
             extraIngredients: allExtraIngredients,
             groupedExtraIngredients,
@@ -660,7 +657,7 @@ export class CostingService {
         return {
             productId: product.id,
             productName: product.name,
-            totalCost: totalCost.toDP(4).toNumber(),
+            totalCost: totalCost.toNumber(), // [核心修复] 移除 .toDP()
         };
     }
 
@@ -688,7 +685,7 @@ export class CostingService {
                 const cost = pricePerGram.mul(weight);
                 costBreakdown.push({
                     name: ingredient.name,
-                    value: cost.toDP(4).toNumber(),
+                    value: cost.toNumber(), // [核心修复] 移除 .toDP()
                 });
             }
         }
