@@ -303,7 +303,6 @@
                 flex-shrink: 0;
             }
 
-            /* [新增] 为输入框和选择器添加焦点样式 */
             .input-field:focus,
             .picker:focus {
                 outline: none;
@@ -316,7 +315,7 @@
                 justify-content: center;
                 align-items: center;
                 padding: 10px 15px;
-                min-height: 54px;
+                min-height: 44px;
                 box-sizing: border-box;
                 border-radius: 15px;
                 font-size: 16px;
@@ -330,6 +329,12 @@
             }
             .btn:active {
                 transform: scale(0.97);
+            }
+            .btn:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+                box-shadow: none;
+                transform: none;
             }
             .btn-primary {
                 background-image: linear-gradient(135deg, var(--accent-color) 0%, var(--primary-color) 100%);
@@ -636,7 +641,7 @@
             <aside class="sidebar">
                 <header class="sidebar-header">
                     <h1>配方工作区</h1>
-                    <p>管理并批量导入/导出配方</p>
+                    <p>打开、编辑并保存您的配方</p>
                 </header>
 
                 <div class="sidebar-tabs">
@@ -681,24 +686,45 @@
                         @click="selectRecipe(recipe.id)"
                     >
                         <div class="recipe-info">
-                            <strong>{{ recipe.name || `未命名配方` }}</strong>
+                            <strong>
+                                {{ recipe.name || `未命名配方` }}
+                                <span v-if="isRecipeDirty(recipe)" style="color: var(--danger-color); margin-left: 4px"
+                                    >*</span
+                                >
+                            </strong>
                         </div>
                         <button class="btn-delete-recipe" @click.stop="deleteRecipe(recipe.id)">
                             <svg><use href="#icon-trash"></use></svg>
                         </button>
                     </div>
                 </div>
+
                 <footer class="sidebar-footer">
                     <button class="btn btn-dashed btn-full-width" @click="addRecipe()">+ 新增配方</button>
-                    <button class="btn btn-secondary btn-full-width" @click="triggerImport">导入 JSON</button>
+                    <button class="btn btn-secondary btn-full-width" @click="openFile" v-if="isFSApiSupported">
+                        打开文件
+                    </button>
                     <button
                         class="btn btn-primary btn-full-width"
-                        @click="exportAllJson"
-                        :disabled="recipes.length === 0"
+                        @click="saveFile"
+                        v-if="isFSApiSupported"
+                        :disabled="!fileHandle"
                         style="grid-column: 1 / -1"
                     >
-                        导出全部配方
+                        保存文件
                     </button>
+
+                    <template v-if="!isFSApiSupported">
+                        <button class="btn btn-secondary btn-full-width" @click="triggerImport">导入JSON</button>
+                        <button
+                            class="btn btn-primary btn-full-width"
+                            @click="exportAllJson"
+                            :disabled="recipes.length === 0"
+                            style="grid-column: 1 / -1"
+                        >
+                            导出JSON
+                        </button>
+                    </template>
                     <input
                         type="file"
                         ref="fileInput"
@@ -806,6 +832,15 @@
                                     class="input-field"
                                     type="number"
                                     v-model.number="mainDough.lossRatio"
+                                    placeholder="例如: 1"
+                                />
+                            </div>
+                            <div class="form-item">
+                                <label class="form-item-label">分割损耗 (g)</label
+                                ><input
+                                    class="input-field"
+                                    type="number"
+                                    v-model.number="mainDough.divisionLoss"
                                     placeholder="例如: 2"
                                 />
                             </div>
@@ -1179,6 +1214,20 @@
                     const activeCategory = ref('MAIN');
                     const mainContentRef = ref(null);
                     const productTabsRef = ref(null);
+                    const fileHandle = ref(null);
+
+                    // [修改] 使用 Map 来存储每个配方的快照
+                    const savedRecipeSnapshots = ref(new Map());
+                    const isFSApiSupported = computed(() => 'showOpenFilePicker' in window);
+
+                    // [修改] isDirty 变为一个计算属性，更精确地反映全局状态
+                    const isDirty = computed(() => {
+                        if (recipes.value.length !== savedRecipeSnapshots.value.size) {
+                            return true; // 如果配方数量不一致，则肯定有变动
+                        }
+                        // 检查是否有任何一个配方被修改过
+                        return recipes.value.some((recipe) => isRecipeDirty(recipe));
+                    });
 
                     const tabScrollState = ref({
                         showLeft: false,
@@ -1289,7 +1338,6 @@
                             : null,
                     );
 
-                    // [新增] 创建一个计算属性来处理预发酵面团的显示比例
                     const processedPreDoughs = computed(() => {
                         if (!currentRecipe.value || currentRecipe.value.type !== 'MAIN') {
                             return [];
@@ -1297,18 +1345,16 @@
                         const preDoughs = currentRecipe.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
 
                         return preDoughs.map((dough) => {
-                            // 计算此面种配方中所有面粉的总比例
                             const totalFlourRatioInPreDough = dough.ingredients
                                 .filter((ing) => ing.isFlour)
                                 .reduce((sum, ing) => sum + (ing.ratio || 0), 0);
 
-                            // 如果面种中没有面粉(总比例为0)，则无法进行换算，直接返回原始比例
                             if (totalFlourRatioInPreDough === 0) {
                                 return {
                                     ...dough,
                                     calculatedIngredients: dough.ingredients.map((ing) => ({
                                         ...ing,
-                                        calculatedRatio: ing.ratio, // 使用原始比例
+                                        calculatedRatio: ing.ratio,
                                     })),
                                 };
                             }
@@ -1316,13 +1362,11 @@
                             const flourRatioInMainDough = dough.flourRatioInMainDough || 0;
 
                             const calculatedIngredients = dough.ingredients.map((ing) => {
-                                // 计算公式: (原料在面种中的比例 / 面种总面粉比例) * 该面种面粉在主面团中的占比
                                 const calculatedRatio =
                                     ((ing.ratio || 0) / totalFlourRatioInPreDough) * flourRatioInMainDough;
 
                                 return {
                                     ...ing,
-                                    // 将结果处理为数字，并保留最多3位小数
                                     calculatedRatio: parseFloat(calculatedRatio.toFixed(3)),
                                 };
                             });
@@ -1396,13 +1440,6 @@
                         }
                     });
 
-                    onMounted(() => {
-                        window.addEventListener('resize', updateTabScrollButtons);
-                    });
-                    onUnmounted(() => {
-                        window.removeEventListener('resize', updateTabScrollButtons);
-                    });
-
                     const updateTabScrollButtons = () => {
                         const el = productTabsRef.value;
                         if (!el) {
@@ -1443,7 +1480,8 @@
                                         id: nextIngredientId++,
                                         name: '主面团',
                                         type: 'MAIN_DOUGH',
-                                        lossRatio: null,
+                                        lossRatio: 1,
+                                        divisionLoss: 2,
                                         ingredients: [JSON.parse(JSON.stringify(commonIngredient))],
                                         procedure: [''],
                                     },
@@ -1461,7 +1499,6 @@
                                 ],
                             };
                         }
-                        // [修改] 为非产品配方(面种/其他)添加 lossRatio 属性
                         return {
                             id,
                             name: '',
@@ -1490,6 +1527,9 @@
                         if (index === -1) return;
                         if (!confirm(`确定要删除 "${recipes.value[index].name || '未命名配方'}" 吗？`)) return;
                         if (currentRecipeId.value === id) currentRecipeId.value = null;
+
+                        // [修改] 从快照中也删除
+                        savedRecipeSnapshots.value.delete(id);
                         recipes.value.splice(index, 1);
                     };
 
@@ -1633,6 +1673,44 @@
                     const toPercentage = (decimal) =>
                         decimal === null || decimal === undefined ? null : parseFloat((decimal * 100).toPrecision(12));
 
+                    // [修改] 更新数据快照，并重置'dirty'状态
+                    const updateSnapshot = () => {
+                        savedRecipeSnapshots.value.clear();
+                        for (const recipe of recipes.value) {
+                            savedRecipeSnapshots.value.set(recipe.id, JSON.stringify(recipe));
+                        }
+                    };
+
+                    const loadRecipesFromJson = (jsonString) => {
+                        try {
+                            const importedData = JSON.parse(jsonString);
+                            if (!Array.isArray(importedData)) throw new Error('JSON文件格式不正确，根节点应为数组。');
+
+                            const preDoughMap = new Map();
+                            importedData.filter((r) => r.type !== 'MAIN').forEach((r) => preDoughMap.set(r.name, r));
+
+                            const normalizedRecipes = importedData.map((recipe) =>
+                                normalizeRecipe(recipe, preDoughMap),
+                            );
+
+                            recipes.value = normalizedRecipes;
+
+                            if (recipes.value.length > 0) {
+                                nextTick(() => {
+                                    currentRecipeId.value = recipes.value[0].id;
+                                    activeCategory.value = recipes.value[0].type;
+                                });
+                            } else {
+                                currentRecipeId.value = null;
+                            }
+                            alert(`成功加载 ${normalizedRecipes.length} 个配方！`);
+                            nextTick(updateSnapshot);
+                        } catch (err) {
+                            console.error('Load Error:', err);
+                            alert(`加载失败：${err.message}`);
+                        }
+                    };
+
                     const triggerImport = () => fileInput.value.click();
                     const handleFileImport = (event) => {
                         const file = event.target.files[0];
@@ -1640,35 +1718,9 @@
 
                         const reader = new FileReader();
                         reader.onload = (e) => {
-                            try {
-                                const importedData = JSON.parse(e.target.result);
-                                if (!Array.isArray(importedData))
-                                    throw new Error('JSON文件格式不正确，根节点应为数组。');
-
-                                const preDoughMap = new Map();
-                                importedData
-                                    .filter((r) => r.type !== 'MAIN')
-                                    .forEach((r) => preDoughMap.set(r.name, r));
-
-                                const normalizedRecipes = importedData.map((recipe) =>
-                                    normalizeRecipe(recipe, preDoughMap),
-                                );
-
-                                recipes.value.push(...normalizedRecipes);
-
-                                if (currentRecipeId.value === null && recipes.value.length > 0) {
-                                    nextTick(() => {
-                                        currentRecipeId.value = recipes.value[0].id;
-                                        activeCategory.value = recipes.value[0].type;
-                                    });
-                                }
-                                alert(`成功导入 ${normalizedRecipes.length} 个配方！`);
-                            } catch (err) {
-                                console.error('Import Error:', err);
-                                alert(`导入失败：${err.message}`);
-                            } finally {
-                                event.target.value = '';
-                            }
+                            fileHandle.value = null;
+                            loadRecipesFromJson(e.target.result);
+                            event.target.value = '';
                         };
                         reader.readAsText(file);
                     };
@@ -1681,7 +1733,7 @@
                             category: recipe.category || (recipe.type === 'MAIN' ? 'BREAD' : 'OTHER'),
                             notes: recipe.notes || '',
                             targetTemp: null,
-                            lossRatio: null, // [新增] 为基础配方对象添加 lossRatio
+                            lossRatio: null,
                             doughs: [],
                             products: [],
                             ingredients: [],
@@ -1729,6 +1781,7 @@
                                 name: '主面团',
                                 type: 'MAIN_DOUGH',
                                 lossRatio: toPercentage(recipe.lossRatio),
+                                divisionLoss: recipe.divisionLoss === undefined ? 2 : recipe.divisionLoss,
                                 procedure: recipe.procedure && recipe.procedure.length > 0 ? recipe.procedure : [''],
                                 ingredients:
                                     mainDoughIngredients.length > 0
@@ -1790,7 +1843,6 @@
                                           },
                                       ];
                         } else {
-                            // [修改] 导入时为非产品配方(面种/其他)设置 lossRatio
                             baseRecipe.lossRatio = toPercentage(recipe.lossRatio) || null;
                             baseRecipe.ingredients =
                                 recipe.ingredients && recipe.ingredients.length > 0
@@ -1811,8 +1863,11 @@
                         return baseRecipe;
                     };
 
-                    const exportAllJson = () => {
-                        if (recipes.value.length === 0) return alert('请先添加至少一个配方');
+                    const getRecipesAsJsonString = () => {
+                        if (recipes.value.length === 0) {
+                            alert('请先添加至少一个配方');
+                            return null;
+                        }
                         try {
                             const processedRecipes = recipes.value.map((recipe) => {
                                 if (!recipe.name || !recipe.name.trim())
@@ -1851,6 +1906,7 @@
                                         category: recipe.category,
                                         targetTemp: recipe.targetTemp,
                                         lossRatio: toDecimal(md.lossRatio),
+                                        divisionLoss: md.divisionLoss,
                                         procedure: md.procedure.filter((p) => p.trim()),
                                         ingredients: finalIngredients,
                                         products: recipe.products.map((p) => ({
@@ -1873,7 +1929,7 @@
                                         name: recipe.name,
                                         type: recipe.type,
                                         category: recipe.category,
-                                        lossRatio: toDecimal(recipe.lossRatio), // [修改] 导出时添加 lossRatio
+                                        lossRatio: toDecimal(recipe.lossRatio),
                                         ingredients: recipe.ingredients
                                             .filter((ing) => ing.name.trim() && ing.ratio !== null)
                                             .map(formatIngredient),
@@ -1882,20 +1938,87 @@
                                     };
                                 }
                             });
-                            const jsonString = JSON.stringify(processedRecipes, null, 4);
-                            const blob = new Blob([jsonString], { type: 'application/json' });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = `recipes_batch_export.json`;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                            URL.revokeObjectURL(url);
+                            return JSON.stringify(processedRecipes, null, 4);
                         } catch (err) {
-                            alert(`导出失败: ${err.message}`);
+                            alert(`处理数据失败: ${err.message}`);
+                            return null;
                         }
                     };
+
+                    const exportAllJson = () => {
+                        const jsonString = getRecipesAsJsonString();
+                        if (!jsonString) return;
+
+                        const blob = new Blob([jsonString], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `recipes_batch_export.json`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    };
+
+                    const openFile = async () => {
+                        try {
+                            const [handle] = await window.showOpenFilePicker({
+                                types: [{ description: 'JSON Files', accept: { 'application/json': ['.json'] } }],
+                            });
+                            const file = await handle.getFile();
+                            const content = await file.text();
+                            fileHandle.value = handle;
+                            loadRecipesFromJson(content);
+                        } catch (err) {
+                            console.error('Failed to open file:', err);
+                            if (err.name !== 'AbortError') {
+                                alert(`打开文件失败: ${err.message}`);
+                            }
+                        }
+                    };
+
+                    const saveFile = async () => {
+                        if (!fileHandle.value) {
+                            alert('没有可保存的文件句柄。请先“打开文件”。');
+                            return;
+                        }
+                        try {
+                            const jsonString = getRecipesAsJsonString();
+                            if (!jsonString) return;
+
+                            const writable = await fileHandle.value.createWritable();
+                            await writable.write(jsonString);
+                            await writable.close();
+                            alert('文件保存成功！');
+                            updateSnapshot();
+                        } catch (err) {
+                            console.error('Failed to save file:', err);
+                            alert(`保存文件失败: ${err.message}`);
+                        }
+                    };
+
+                    // [新增] 检查单个配方是否被修改过
+                    const isRecipeDirty = (recipe) => {
+                        const savedSnapshot = savedRecipeSnapshots.value.get(recipe.id);
+                        if (!savedSnapshot) {
+                            return true; // 如果没有快照（比如是新增的），则为 dirty
+                        }
+                        return JSON.stringify(recipe) !== savedSnapshot;
+                    };
+
+                    const handleBeforeUnload = (event) => {
+                        if (isDirty.value) {
+                            event.preventDefault();
+                            event.returnValue = '';
+                        }
+                    };
+
+                    onMounted(() => {
+                        window.addEventListener('beforeunload', handleBeforeUnload);
+                    });
+                    onUnmounted(() => {
+                        window.removeEventListener('beforeunload', handleBeforeUnload);
+                    });
 
                     return {
                         recipes,
@@ -1921,7 +2044,10 @@
                         tabScrollState,
                         suggestionState,
                         suggestionBoxStyle,
-                        processedPreDoughs, // [新增] 导出计算属性
+                        processedPreDoughs,
+                        isFSApiSupported,
+                        fileHandle,
+                        isRecipeDirty, // [新增] 导出函数给模板使用
                         addRecipe,
                         selectRecipe,
                         deleteRecipe,
@@ -1950,6 +2076,8 @@
                         addProductProcedureStep,
                         removeProductProcedureStep,
                         exportAllJson,
+                        openFile,
+                        saveFile,
                     };
                 },
             }).mount('#app');
