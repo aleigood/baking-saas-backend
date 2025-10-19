@@ -809,6 +809,15 @@ export class ProductionTasksService {
         const mainComponent = product.recipeVersion.components[0];
         if (!mainComponent) return flattenedIngredients;
 
+        // [核心修改] 引入分割损耗，先计算出因分割损耗导致的基础面团增量系数
+        const baseDoughWeight = new Prisma.Decimal(product.baseDoughWeight);
+        // [核心修改] 从主组件(mainComponent)中获取分割损耗
+        const divisionLoss = new Prisma.Decimal(mainComponent.divisionLoss || 0);
+        // [核心修改] 基于主组件的分割损耗计算增量系数
+        const divisionLossFactor = baseDoughWeight.isZero()
+            ? new Prisma.Decimal(1)
+            : baseDoughWeight.add(divisionLoss).div(baseDoughWeight);
+
         // 辅助函数：递归地展开一个组件，计算其所有基础原料的投入量
         const processComponentWithLoss = (
             component: ComponentWithIngredients,
@@ -865,8 +874,8 @@ export class ProductionTasksService {
                 continue;
             }
 
-            // 应用主面团损耗，得到“成品需求量”
-            const requiredOutputWeight = theoreticalWeight.div(mainDoughLossDivisor);
+            // [核心修改] 应用主面团的过程损耗 和 产品的分割损耗，得到“成品需求量”
+            const requiredOutputWeight = theoreticalWeight.mul(divisionLossFactor).div(mainDoughLossDivisor);
 
             // 展开原料
             if (ing.linkedPreDough) {
@@ -892,9 +901,9 @@ export class ProductionTasksService {
             }
 
             let requiredOutputWeight = theoreticalWeight;
-            // mixIn 和主面团一样，需要考虑主面团的损耗
+            // [核心修改] mixIn 和主面团一样，需要同时考虑主面团的过程损耗 和 产品的分割损耗
             if (pIng.type === 'MIX_IN') {
-                requiredOutputWeight = theoreticalWeight.div(mainDoughLossDivisor);
+                requiredOutputWeight = theoreticalWeight.mul(divisionLossFactor).div(mainDoughLossDivisor);
             }
 
             if (pIng.linkedExtra) {
@@ -1341,11 +1350,20 @@ export class ProductionTasksService {
 
                 const lossRatio = new Prisma.Decimal(baseComponentInfo.lossRatio || 0);
                 const divisor = new Prisma.Decimal(1).sub(lossRatio);
+
+                // [核心修改] 从主组件(baseComponentInfo)中获取分割损耗
+                const divisionLoss = new Prisma.Decimal(baseComponentInfo.divisionLoss || 0);
+
+                // 计算单个产品需要的、包含分割损耗的目标面团重量
+                const targetBaseDoughWeight = new Prisma.Decimal(product.baseDoughWeight).add(divisionLoss);
+
+                // 计算单个产品需要的、包含两种损耗的总投料重量
                 const singleUnitInputWeight =
                     divisor.isZero() || divisor.isNegative()
-                        ? new Prisma.Decimal(product.baseDoughWeight)
-                        : new Prisma.Decimal(product.baseDoughWeight).div(divisor);
+                        ? targetBaseDoughWeight // Should not happen, but for safety
+                        : targetBaseDoughWeight.div(divisor);
 
+                // 乘以数量得到该产品的总面团投料量
                 const totalBaseComponentWeightWithLoss = singleUnitInputWeight.mul(quantity);
 
                 products.push({
@@ -1513,7 +1531,12 @@ export class ProductionTasksService {
         const lossRatio = new Prisma.Decimal(mainDough.lossRatio || 0);
         const divisor = new Prisma.Decimal(1).sub(lossRatio);
         if (divisor.isZero() || divisor.isNegative()) return new Prisma.Decimal(0);
-        const adjustedDoughWeight = new Prisma.Decimal(product.baseDoughWeight).div(divisor);
+
+        // [核心修改] 从主组件(mainDough)获取分割损耗
+        const divisionLoss = new Prisma.Decimal(mainDough.divisionLoss || 0);
+        // [核心修改] 计算包含分割损耗后的目标面团重量,再除以过程损耗,得到调整后的面团重量
+        const targetBaseDoughWeight = new Prisma.Decimal(product.baseDoughWeight).add(divisionLoss);
+        const adjustedDoughWeight = targetBaseDoughWeight.div(divisor);
 
         const calculateTotalRatio = (dough: ComponentWithRecursiveIngredients): Prisma.Decimal => {
             return dough.ingredients.reduce((sum, i) => {

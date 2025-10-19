@@ -131,6 +131,11 @@ export class CreateRecipeDto {
     @IsOptional()
     lossRatio?: number;
 
+    // [核心新增] 新增分割定额损耗字段，与 lossRatio 平级
+    @IsNumber()
+    @IsOptional()
+    divisionLoss?: number;
+
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => ComponentIngredientDto) // [核心重命名] DoughIngredientDto -> ComponentIngredientDto

@@ -113,6 +113,8 @@ export class RecipesService {
                         notes: recipeDto.notes,
                         targetTemp: recipeDto.targetTemp,
                         lossRatio: recipeDto.lossRatio,
+                        // [核心修改] 确保 DTO 转换时包含 divisionLoss
+                        divisionLoss: recipeDto.divisionLoss,
                         procedure: recipeDto.procedure,
                         ingredients: recipeDto.ingredients.map(
                             (ing): ComponentIngredientDto => ({
@@ -155,7 +157,8 @@ export class RecipesService {
                     await this.create(tenantId, createDto);
                     overallResult.importedCount++;
                 } catch (error) {
-                    console.error(`向店铺 ${tenantName} 导入配方 "${recipeDto.name}" 失败:`, error);
+                    const typedError = error as Error; // 类型断言以修复 a-unsafe-assignment 错误
+                    console.error(`向店铺 ${tenantName} 导入配方 "${recipeDto.name}" 失败:`, typedError);
                     overallResult.skippedCount++;
                     overallResult.skippedRecipes.push(`${recipeDto.name} (在店铺 "${tenantName}" 导入失败)`);
                 }
@@ -232,6 +235,8 @@ export class RecipesService {
                 products,
                 targetTemp,
                 lossRatio,
+                // [核心修改] 从 DTO 中获取 divisionLoss
+                divisionLoss,
                 procedure,
                 name,
                 type = 'MAIN',
@@ -265,6 +270,8 @@ export class RecipesService {
                     name: name,
                     targetTemp: type === 'MAIN' ? targetTemp : undefined,
                     lossRatio: lossRatio,
+                    // [核心修改] 保存 divisionLoss 到 RecipeComponent
+                    divisionLoss: divisionLoss,
                     procedure: procedure,
                 },
             });
@@ -479,6 +486,8 @@ export class RecipesService {
             products,
             targetTemp,
             lossRatio,
+            // [核心修改] 从 DTO 中获取 divisionLoss
+            divisionLoss,
             procedure,
             category = 'BREAD',
         } = recipeDto;
@@ -505,6 +514,9 @@ export class RecipesService {
             targetTemp === null || targetTemp === undefined ? undefined : new Prisma.Decimal(targetTemp);
         const lossRatioForDb =
             lossRatio === null || lossRatio === undefined ? undefined : new Prisma.Decimal(lossRatio);
+        // [核心修改] 转换 divisionLoss 以便存入数据库
+        const divisionLossForDb =
+            divisionLoss === null || divisionLoss === undefined ? undefined : new Prisma.Decimal(divisionLoss);
 
         const component = await tx.recipeComponent.create({
             data: {
@@ -512,6 +524,8 @@ export class RecipesService {
                 name: name,
                 targetTemp: type === 'MAIN' ? targetTempForDb : undefined,
                 lossRatio: lossRatioForDb,
+                // [核心修改] 保存 divisionLoss 到 RecipeComponent
+                divisionLoss: divisionLossForDb,
                 procedure: procedure,
             },
         });
@@ -979,6 +993,8 @@ export class RecipesService {
                 name: componentSource.name,
                 type: 'BASE_COMPONENT',
                 lossRatio: toCleanPercent(componentSource.lossRatio) ?? undefined,
+                // [核心修改] 增加 divisionLoss 到模板
+                divisionLoss: componentSource.divisionLoss?.toNumber(),
                 ingredients: componentSource.ingredients.map((ing) => ({
                     id: ing.ingredient!.id,
                     name: ing.ingredient!.name,
@@ -1057,6 +1073,8 @@ export class RecipesService {
                 name: '主面团',
                 type: 'MAIN_DOUGH',
                 lossRatio: toCleanPercent(mainComponentSource.lossRatio) ?? undefined,
+                // [核心修改] 增加 divisionLoss 到模板
+                divisionLoss: mainComponentSource.divisionLoss?.toNumber(),
                 ingredients: mainComponentIngredientsForForm,
                 procedure: mainComponentSource.procedure || [],
             };
@@ -1071,6 +1089,8 @@ export class RecipesService {
                 name: componentSource.name,
                 type: 'BASE_COMPONENT',
                 lossRatio: toCleanPercent(componentSource.lossRatio) ?? undefined,
+                // [核心修改] 增加 divisionLoss 到模板
+                divisionLoss: componentSource.divisionLoss?.toNumber(),
                 ingredients: componentSource.ingredients.map((ing) => ({
                     id: ing.ingredient!.id,
                     name: ing.ingredient!.name,

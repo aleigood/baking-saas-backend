@@ -105,6 +105,11 @@ export class BatchImportRecipeDto {
     @IsOptional()
     lossRatio?: number;
 
+    // [核心新增] 新增分割定额损耗字段
+    @IsNumber()
+    @IsOptional()
+    divisionLoss?: number;
+
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => BatchComponentIngredientDto)

@@ -203,6 +203,7 @@ model RecipeComponent {
   name            String // 组件名称，如“主面团”、“烫种”、“卡仕达酱”
   targetTemp      Decimal? // [核心修改] 出缸温度
   lossRatio       Decimal               @default(0) // [核心修改] 损耗率
+  divisionLoss    Decimal               @default(0) // [核心新增] 分割定额损耗(克)
   procedure       String[] // 制作流程要点
   recipeVersion   RecipeVersion         @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
   ingredients     ComponentIngredient[] // 组件包含的原料

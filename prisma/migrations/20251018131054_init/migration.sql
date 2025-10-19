@@ -112,6 +112,7 @@ CREATE TABLE "RecipeComponent" (
     "name" TEXT NOT NULL,
     "targetTemp" DECIMAL(65,30),
     "lossRatio" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "divisionLoss" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "procedure" TEXT[],
 
     CONSTRAINT "RecipeComponent_pkey" PRIMARY KEY ("id")

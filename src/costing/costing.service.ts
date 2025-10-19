@@ -825,8 +825,13 @@ export class CostingService {
         // 从产品的主面团开始，进行第一次递归计算
         const mainComponent = product.recipeVersion.components[0];
         if (mainComponent) {
-            // Product.baseDoughWeight 是最终产品需要的面团“净重”，作为递归的起点
-            processComponentRecursively(mainComponent, new Prisma.Decimal(product.baseDoughWeight));
+            // [核心修改] 从主组件(mainComponent)获取单次分割损耗
+            const divisionLoss = new Prisma.Decimal(mainComponent.divisionLoss || 0);
+
+            // [核心修改] Product.baseDoughWeight 是最终产品需要的面团“净重”，
+            // 在计算总投料时，需要先加上分割损耗，再进行后续计算。
+            const requiredBaseDoughOutput = new Prisma.Decimal(product.baseDoughWeight).add(divisionLoss);
+            processComponentRecursively(mainComponent, requiredBaseDoughOutput);
         }
 
         // [核心逻辑] 计算用于 MIX_IN 按比例计算的总面粉量

@@ -40,6 +40,7 @@ export interface ComponentTemplate {
     name: string;
     type: 'MAIN_DOUGH' | 'PRE_DOUGH' | 'BASE_COMPONENT'; // 新增 BASE_COMPONENT 类型
     lossRatio?: number;
+    divisionLoss?: number; // [核心新增] 新增分割定额损耗字段
     flourRatioInMainDough?: number;
     ingredients: ComponentIngredientTemplate[];
     procedure: string[];
