@@ -920,8 +920,90 @@ export class RecipesService {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
-        // [核心修改] 直接返回从数据库查询到的原始数据，不做任何处理
-        return family;
+        // [核心修改] 使用新的辅助函数来处理步骤和注释
+        const processedFamily = {
+            ...family,
+            versions: family.versions.map((version) => {
+                return {
+                    ...version,
+                    components: version.components.map((component) => {
+                        // [核心修改] 调用简化后的辅助函数，只传入 procedure
+                        const { cleanedProcedure, ingredientNotes } = this._processProcedureNotes(component.procedure);
+
+                        return {
+                            ...component,
+                            // [核心修改] 使用处理后的步骤
+                            procedure: cleanedProcedure,
+                            ingredients: component.ingredients.map((ing) => {
+                                if (ing.ingredient) {
+                                    const extraInfo = ingredientNotes.get(ing.ingredient.name);
+                                    return {
+                                        ...ing,
+                                        ingredient: {
+                                            ...ing.ingredient,
+                                            extraInfo: extraInfo || undefined,
+                                        },
+                                    };
+                                }
+                                if (ing.linkedPreDough) {
+                                    const extraInfo = ingredientNotes.get(ing.linkedPreDough.name);
+                                    return {
+                                        ...ing,
+                                        linkedPreDough: {
+                                            ...ing.linkedPreDough,
+                                            extraInfo: extraInfo || undefined,
+                                        },
+                                    };
+                                }
+                                return ing;
+                            }),
+                        };
+                    }),
+                };
+            }),
+        };
+
+        return processedFamily;
+    }
+
+    /**
+     * [核心修改] 简化辅助函数，只解析配方步骤中的@注释语法糖
+     * @param procedure 原始步骤数组
+     * @returns 清理后的步骤和提取的注释
+     */
+    private _processProcedureNotes(procedure: string[] | undefined | null): {
+        cleanedProcedure: string[];
+        ingredientNotes: Map<string, string>;
+    } {
+        if (!procedure) {
+            return { cleanedProcedure: [], ingredientNotes: new Map() };
+        }
+
+        const ingredientNotes = new Map<string, string>();
+        const noteRegex = /@(?:\[)?(.*?)(?:\])?[(（](.*?)[)）]/g;
+
+        const cleanedProcedure = procedure
+            .map((step) => {
+                // 第一步：提取注释
+                const stepMatches = [...step.matchAll(noteRegex)];
+                for (const match of stepMatches) {
+                    const [, ingredientName, note] = match;
+                    if (ingredientName && note) {
+                        ingredientNotes.set(ingredientName.trim(), note.trim());
+                    }
+                }
+
+                // 第二步：清理步骤文本中的注释
+                const cleanedStep = step.replace(noteRegex, '').trim();
+
+                if (cleanedStep === '') {
+                    return null;
+                }
+                return cleanedStep;
+            })
+            .filter((step): step is string => step !== null);
+
+        return { cleanedProcedure, ingredientNotes };
     }
 
     async getRecipeVersionFormTemplate(
