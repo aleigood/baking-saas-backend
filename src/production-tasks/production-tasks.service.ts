@@ -459,7 +459,7 @@ export class ProductionTasksService {
             const procedure = mainComponent?.procedure;
 
             if (procedure && mainComponent && details.ingredients && details.ingredients.length > 0) {
-                // [核心修改] 根据配方类型，计算用于步骤中百分比语法糖的基准重量
+                // 根据配方类型，计算用于步骤中百分比语法糖的基准重量
                 let baseForPercentageCalc = new Prisma.Decimal(data.totalWeight.toNumber());
                 if (
                     (recipeFamily.type === RecipeType.PRE_DOUGH || recipeFamily.category === RecipeCategory.BREAD) &&
@@ -1047,14 +1047,14 @@ export class ProductionTasksService {
     }
 
     /**
-     * [新增] 解析配方步骤，处理所有@注释，并计算其中含百分比的语法糖
+     * [核心修复] 解析配方步骤，处理@注释并计算百分比，然后从步骤中移除语法糖。
      * @param procedure 原始步骤数组
-     * @param totalFlourWeight 用于计算百分比的总粉量基准
+     * @param baseForPercentageCalc 用于计算百分比的基准重量
      * @returns 一个包含处理后步骤和提取出的注释信息的对象
      */
     private _parseAndCalculateProcedureNotes(
         procedure: string[] | undefined | null,
-        totalFlourWeight: Prisma.Decimal,
+        baseForPercentageCalc: Prisma.Decimal,
     ): { processedProcedure: string[]; ingredientNotes: Map<string, string> } {
         if (!procedure) {
             return { processedProcedure: [], ingredientNotes: new Map() };
@@ -1062,31 +1062,40 @@ export class ProductionTasksService {
 
         const tempNotes = new Map<string, string[]>();
         const percentageRegex = /\[(\d+(?:\.\d+)?)%\]/g;
+        const noteRegex = /@([^（(]+?)\s*?[（(]([^)）]+?)[)）]/g;
 
-        const processedProcedure = procedure.map((step) => {
-            let newStep = step;
-            if (!totalFlourWeight.isZero()) {
-                newStep = step.replace(percentageRegex, (match: string, p1: string) => {
-                    const percentage = new Prisma.Decimal(p1);
-                    const calculatedWeight = totalFlourWeight.mul(percentage.div(100));
-                    return `${calculatedWeight.toDP(2).toNumber()}克`;
-                });
-            }
-            return newStep;
-        });
-
-        const anyNoteRegex = /@([^（(]+?)\s*?[（(]([^)）]+?)[)）]/g;
-        processedProcedure.forEach((step) => {
-            const noteMatches = [...step.matchAll(anyNoteRegex)];
-            for (const noteMatch of noteMatches) {
-                const ingredientName = noteMatch[1].trim();
-                const content = noteMatch[2].trim();
-                if (!tempNotes.has(ingredientName)) {
-                    tempNotes.set(ingredientName, []);
+        const processedProcedure = procedure
+            .map((step) => {
+                // 步骤1: 替换百分比
+                let currentStep = step;
+                if (!baseForPercentageCalc.isZero()) {
+                    currentStep = step.replace(percentageRegex, (match: string, p1: string) => {
+                        const percentage = new Prisma.Decimal(p1);
+                        const calculatedWeight = baseForPercentageCalc.mul(percentage.div(100));
+                        return `${calculatedWeight.toDP(2).toNumber()}克`;
+                    });
                 }
-                tempNotes.get(ingredientName)!.push(content);
-            }
-        });
+
+                // 步骤2: 提取注释
+                const noteMatches = [...currentStep.matchAll(noteRegex)];
+                for (const noteMatch of noteMatches) {
+                    const ingredientName = noteMatch[1].trim();
+                    const content = noteMatch[2].trim();
+                    if (!tempNotes.has(ingredientName)) {
+                        tempNotes.set(ingredientName, []);
+                    }
+                    tempNotes.get(ingredientName)!.push(content);
+                }
+
+                // 步骤3: 从步骤文本中移除注释语法糖
+                const cleanedStep = currentStep.replace(noteRegex, '').trim();
+
+                if (cleanedStep === '') {
+                    return null;
+                }
+                return cleanedStep;
+            })
+            .filter((step): step is string => step !== null);
 
         const ingredientNotes = new Map<string, string>();
         tempNotes.forEach((notes, name) => {
