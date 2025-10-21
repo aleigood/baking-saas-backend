@@ -1188,12 +1188,22 @@ export class ProductionTasksService {
             const baseComponentIngredientsMap = new Map<string, TaskIngredientDetail>();
             let totalComponentWeight = new Prisma.Decimal(0);
 
+            // [核心修复] 采用新的、更准确的方法计算家族内所有产品的总用水量
             let totalWaterForFamily = new Prisma.Decimal(0);
+            for (const item of data.items) {
+                const originalItem = originalItemsMap.get(item.productId);
+                const quantity = originalItem?.quantity ?? 0;
+                // [核心修复] 调用新的辅助函数，递归计算单个产品（包含面种）的总用水量
+                const waterPerUnit = this._calculateTotalWaterWeightForProduct(item.product);
+                totalWaterForFamily = totalWaterForFamily.add(waterPerUnit.mul(quantity));
+            }
+
+            // [核心修复] 找到主面团中的“水”这个原料，以便后续附加冰量计算信息
             let waterIngredientId: string | null = null;
             for (const ing of baseComponentInfo.ingredients) {
-                if (ing.ingredient?.waterContent?.gt(0) && ing.ratio) {
-                    const waterWeight = totalFlourForFamily.mul(ing.ratio).mul(ing.ingredient.waterContent);
-                    totalWaterForFamily = totalWaterForFamily.add(waterWeight);
+                if (ing.ingredient?.name === '水') {
+                    waterIngredientId = ing.ingredient.id;
+                    break;
                 }
             }
 
@@ -1226,10 +1236,6 @@ export class ProductionTasksService {
                         id = ing.ingredient.id;
                         name = ing.ingredient.name;
                         brand = ing.ingredient.activeSku?.brand || null;
-
-                        if (name === '水') {
-                            waterIngredientId = id;
-                        }
                     } else {
                         continue;
                     }
@@ -1529,6 +1535,45 @@ export class ProductionTasksService {
 
         // 返回每单位产品的理论面粉量
         return theoreticalDoughWeight.div(totalRatio);
+    }
+
+    /**
+     * [新增的辅助函数] 递归计算一个产品中所有含水原料的总重量 (包含面种类)。
+     * 用于精确计算冰块用量。
+     * @param product 包含完整配方信息的产品对象
+     * @returns 单个产品的总用水量 (包含损耗调整)
+     */
+    private _calculateTotalWaterWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
+        // 以包含损耗的总粉量作为基准，确保水量也与损耗匹配
+        const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
+        let totalWaterWeight = new Prisma.Decimal(0);
+
+        // 定义一个内部递归函数来查找并累加水分
+        const findWaterRecursively = (component: ComponentWithRecursiveIngredients, flourRef: Prisma.Decimal) => {
+            for (const ing of component.ingredients) {
+                // 情况1: 原料是一个面种，需要递归进入
+                if (ing.linkedPreDough && ing.flourRatio) {
+                    const preDoughComponent = ing.linkedPreDough.versions?.find((v) => v.isActive)?.components[0];
+                    if (preDoughComponent) {
+                        // 为这个面种计算其对应的粉量基准
+                        const flourForPreDough = flourRef.mul(ing.flourRatio);
+                        findWaterRecursively(preDoughComponent as ComponentWithRecursiveIngredients, flourForPreDough);
+                    }
+                }
+                // 情况2: 原料是一个普通原料，且定义了含水量
+                else if (ing.ingredient?.waterContent?.gt(0) && ing.ratio) {
+                    const waterWeight = flourRef.mul(ing.ratio).mul(ing.ingredient.waterContent);
+                    totalWaterWeight = totalWaterWeight.add(waterWeight);
+                }
+            }
+        };
+
+        const mainComponent = product.recipeVersion.components[0];
+        if (mainComponent) {
+            findWaterRecursively(mainComponent, totalFlourWeight);
+        }
+
+        return totalWaterWeight;
     }
 
     private _calculateTotalFlourWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
