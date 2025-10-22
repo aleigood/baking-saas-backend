@@ -4,11 +4,10 @@ import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
-import { SkuStatus, Prisma, IngredientType } from '@prisma/client'; // [修改] 导入Prisma和IngredientType
+import { SkuStatus, Prisma, IngredientType } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
-// [核心修改] 导入 LedgerEntry 接口
 import { QueryLedgerDto, LedgerEntryType, LedgerEntry } from './dto/query-ledger.dto';
 
 @Injectable()
@@ -29,7 +28,7 @@ export class IngredientsService {
 
         if (name === '水') {
             data.type = IngredientType.UNTRACKED;
-            data.waterContent = new Prisma.Decimal(1); // [核心修复] 转换为 Decimal
+            data.waterContent = new Prisma.Decimal(1);
             data.isFlour = false;
         }
 
@@ -141,13 +140,10 @@ export class IngredientsService {
                 ? priceMap.get(ingredient.activeSkuId) || new Prisma.Decimal(0)
                 : new Prisma.Decimal(0);
 
-            // [修改] 对 UNTRACKED 和 NON_INVENTORIED 类型的原料做特殊处理
             if (ingredient.type === IngredientType.UNTRACKED || ingredient.type === IngredientType.NON_INVENTORIED) {
-                // [修改] 如果是 NON_INVENTORIED 类型，则可用天数为0，表示不管理库存
                 const daysOfSupply = ingredient.type === IngredientType.UNTRACKED ? Infinity : 0;
                 return {
                     ...ingredient,
-                    // [修改] UNTRACKED 类型成本为0，NON_INVENTORIED 成本按最新采购价计算
                     currentPricePerPackage:
                         ingredient.type === IngredientType.UNTRACKED ? new Prisma.Decimal(0) : currentPricePerPackage,
                     daysOfSupply: daysOfSupply,
@@ -191,7 +187,6 @@ export class IngredientsService {
             (a, b) => b.totalConsumptionInGrams - a.totalConsumptionInGrams,
         );
         const lowStockIngredients = [...processedIngredients]
-            // [修改] 在过滤低库存原料时，排除 NON_INVENTORIED 类型
             .filter(
                 (ing) =>
                     ing.type === 'STANDARD' &&
@@ -260,16 +255,27 @@ export class IngredientsService {
             }
         }
 
+        // [核心修正] 返回给前端前，将所有 Decimal 类型转换为 number，确保数据类型一致
         return {
             ...ingredient,
             currentPricePerPackage: currentPricePerPackage.toNumber(),
+            currentStockInGrams: ingredient.currentStockInGrams.toNumber(),
+            currentStockValue: ingredient.currentStockValue.toNumber(),
+            waterContent: ingredient.waterContent.toNumber(),
+            skus: ingredient.skus.map((sku) => ({
+                ...sku,
+                specWeightInGrams: sku.specWeightInGrams.toNumber(),
+                procurementRecords: sku.procurementRecords.map((rec) => ({
+                    ...rec,
+                    pricePerPackage: rec.pricePerPackage.toNumber(),
+                })),
+            })),
         };
     }
 
     async update(tenantId: string, id: string, updateIngredientDto: UpdateIngredientDto) {
         await this.findOne(tenantId, id);
 
-        // [核心修复] 对所有 number 类型的 Decimal 字段进行转换
         const data: Prisma.IngredientUpdateInput = { ...updateIngredientDto };
         if (updateIngredientDto.waterContent !== undefined) {
             data.waterContent = new Prisma.Decimal(updateIngredientDto.waterContent);
@@ -305,7 +311,7 @@ export class IngredientsService {
                 data: {
                     ingredientId: id,
                     userId,
-                    changeInGrams: new Prisma.Decimal(changeInGrams), // [核心修复] 转换为 Decimal
+                    changeInGrams: new Prisma.Decimal(changeInGrams),
                     reason,
                 },
             });
@@ -526,7 +532,7 @@ export class IngredientsService {
         return this.prisma.ingredientSKU.create({
             data: {
                 ...createSkuDto,
-                specWeightInGrams: new Prisma.Decimal(createSkuDto.specWeightInGrams), // [核心修复] 转换为 Decimal
+                specWeightInGrams: new Prisma.Decimal(createSkuDto.specWeightInGrams),
                 ingredientId,
                 status: SkuStatus.INACTIVE,
             },
@@ -578,14 +584,16 @@ export class IngredientsService {
             throw new NotFoundException('指定的SKU不存在或不属于该原料');
         }
 
-        if (ingredient.activeSkuId === skuId) {
+        // [修改] findOne 已经返回 number，无需再比较
+        const activeSkuId = ingredient.activeSkuId;
+        if (activeSkuId === skuId) {
             return ingredient;
         }
 
         return this.prisma.$transaction(async (tx) => {
-            if (ingredient.activeSkuId) {
+            if (activeSkuId) {
                 await tx.ingredientSKU.update({
-                    where: { id: ingredient.activeSkuId },
+                    where: { id: activeSkuId },
                     data: { status: SkuStatus.INACTIVE },
                 });
             }
@@ -631,7 +639,7 @@ export class IngredientsService {
                 data: {
                     skuId,
                     packagesPurchased: createProcurementDto.packagesPurchased,
-                    pricePerPackage: new Prisma.Decimal(createProcurementDto.pricePerPackage), // [核心修复] 转换为 Decimal
+                    pricePerPackage: new Prisma.Decimal(createProcurementDto.pricePerPackage),
                     purchaseDate: new Date(),
                     userId: userId,
                 },
@@ -695,7 +703,7 @@ export class IngredientsService {
             return tx.procurementRecord.update({
                 where: { id: procurementId },
                 data: {
-                    pricePerPackage: newPrice, // [核心修复] 使用 Decimal 对象进行更新
+                    pricePerPackage: newPrice,
                 },
             });
         });
