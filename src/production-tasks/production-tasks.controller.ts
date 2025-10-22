@@ -30,38 +30,30 @@ export class ProductionTasksController {
 
     @Post()
     create(@GetUser() user: UserPayload, @Body() createProductionTaskDto: CreateProductionTaskDto) {
-        // [核心修正] 将 user.sub (用户ID) 传递给 service 方法
         return this.productionTasksService.create(user.tenantId, user.sub, createProductionTaskDto);
     }
 
-    /**
-     * [核心改造] 新增：专门用于获取生产主页的活动任务（进行中、待开始）
-     * [修改] 增加 date 查询参数，用于按日期筛选
-     */
     @Get('active')
     findActive(@GetUser() user: UserPayload, @Query('date') date?: string) {
         return this.productionTasksService.findActive(user.tenantId, date);
     }
 
-    /**
-     * [新增] 获取所有存在任务的日期
-     */
+    // [新增] 为前置任务详情页创建专属接口
+    @Get('prep-task-details')
+    getPrepTaskDetails(@GetUser() user: UserPayload, @Query('date') date?: string) {
+        return this.productionTasksService.getPrepTaskDetails(user.tenantId, date);
+    }
+
     @Get('task-dates')
     getTaskDates(@GetUser() user: UserPayload) {
         return this.productionTasksService.getTaskDates(user.tenantId);
     }
 
-    /**
-     * [核心新增] 获取预设的损耗阶段列表
-     */
     @Get('spoilage-stages')
     getSpoilageStages() {
         return this.productionTasksService.getSpoilageStages();
     }
 
-    /**
-     * [核心改造] 新增：专门用于获取历史任务（已完成、已取消），支持分页
-     */
     @Get('history')
     findHistory(
         @GetUser() user: UserPayload,
@@ -81,12 +73,6 @@ export class ProductionTasksController {
         return this.productionTasksService.findOne(user.tenantId, id, query);
     }
 
-    /**
-     * [核心新增] 修改一个未开始的任务详情
-     * @param user 当前用户
-     * @param id 任务ID
-     * @param updateTaskDetailsDto 更新的数据
-     */
     @Put(':id')
     updateTaskDetails(
         @GetUser() user: UserPayload,
@@ -112,11 +98,10 @@ export class ProductionTasksController {
 
     @Post(':id/complete')
     complete(
-        @GetUser() user: UserPayload, // [核心修改] 注入当前用户信息
+        @GetUser() user: UserPayload,
         @Param('id', ParseUUIDPipe) id: string,
         @Body() completeProductionTaskDto: CompleteProductionTaskDto,
     ) {
-        // [核心修改] 将 tenantId 和 userId 传递给 service 层
         return this.productionTasksService.complete(user.tenantId, user.sub, id, completeProductionTaskDto);
     }
 }

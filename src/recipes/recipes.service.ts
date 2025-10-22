@@ -28,9 +28,89 @@ type PreloadedRecipeFamily = RecipeFamily & {
     })[];
 };
 
+const recipeFamilyWithDetailsInclude = {
+    versions: {
+        include: {
+            components: {
+                include: {
+                    ingredients: {
+                        include: {
+                            ingredient: true,
+                            linkedPreDough: true,
+                        },
+                    },
+                },
+            },
+            products: {
+                include: {
+                    ingredients: {
+                        include: {
+                            ingredient: true,
+                            linkedExtra: true,
+                        },
+                    },
+                },
+            },
+        },
+        orderBy: { version: 'desc' },
+    },
+} satisfies Prisma.RecipeFamilyInclude;
+
+type RecipeFamilyWithDetails = Prisma.RecipeFamilyGetPayload<{
+    include: typeof recipeFamilyWithDetailsInclude;
+}>;
+
 @Injectable()
 export class RecipesService {
     constructor(private prisma: PrismaService) {}
+
+    private _sanitizeFamily(family: RecipeFamilyWithDetails | null) {
+        if (!family) {
+            return null;
+        }
+        return {
+            ...family,
+            versions: family.versions.map((version) => ({
+                ...version,
+                components: version.components.map((component) => ({
+                    ...component,
+                    targetTemp: component.targetTemp?.toNumber(),
+                    lossRatio: component.lossRatio?.toNumber(),
+                    divisionLoss: component.divisionLoss?.toNumber(),
+                    ingredients: component.ingredients.map((ing) => ({
+                        ...ing,
+                        ratio: ing.ratio?.toNumber(),
+                        flourRatio: ing.flourRatio?.toNumber(),
+                        ingredient: ing.ingredient
+                            ? {
+                                  ...ing.ingredient,
+                                  waterContent: ing.ingredient.waterContent.toNumber(),
+                                  currentStockInGrams: ing.ingredient.currentStockInGrams.toNumber(),
+                                  currentStockValue: ing.ingredient.currentStockValue.toNumber(),
+                              }
+                            : null,
+                    })),
+                })),
+                products: version.products.map((product) => ({
+                    ...product,
+                    baseDoughWeight: product.baseDoughWeight.toNumber(),
+                    ingredients: product.ingredients.map((pIng) => ({
+                        ...pIng,
+                        ratio: pIng.ratio?.toNumber(),
+                        weightInGrams: pIng.weightInGrams?.toNumber(),
+                        ingredient: pIng.ingredient
+                            ? {
+                                  ...pIng.ingredient,
+                                  waterContent: pIng.ingredient.waterContent.toNumber(),
+                                  currentStockInGrams: pIng.ingredient.currentStockInGrams.toNumber(),
+                                  currentStockValue: pIng.ingredient.currentStockValue.toNumber(),
+                              }
+                            : null,
+                    })),
+                })),
+            })),
+        };
+    }
 
     async batchImportRecipes(
         userId: string,
@@ -105,7 +185,6 @@ export class RecipesService {
                 }
 
                 try {
-                    // [核心修复] 彻底修正 DTO 转换逻辑，确保类型完全匹配
                     const createDto: CreateRecipeDto = {
                         name: recipeDto.name,
                         type: recipeDto.type,
@@ -113,19 +192,17 @@ export class RecipesService {
                         notes: recipeDto.notes,
                         targetTemp: recipeDto.targetTemp,
                         lossRatio: recipeDto.lossRatio,
-                        // [核心修改] 确保 DTO 转换时包含 divisionLoss
                         divisionLoss: recipeDto.divisionLoss,
                         procedure: recipeDto.procedure,
                         ingredients: recipeDto.ingredients.map(
                             (ing): ComponentIngredientDto => ({
                                 ...ing,
-                                ingredientId: undefined, // 确保 ingredientId 属性存在
+                                ingredientId: undefined,
                             }),
                         ),
                         products: recipeDto.products?.map(
                             (p): ProductDto => ({
                                 ...p,
-                                // 使用正确的 ProductIngredientDto 类型进行转换
                                 mixIn:
                                     p.mixIn?.map(
                                         (i): ProductIngredientDto => ({
@@ -157,7 +234,7 @@ export class RecipesService {
                     await this.create(tenantId, createDto);
                     overallResult.importedCount++;
                 } catch (error) {
-                    const typedError = error as Error; // 类型断言以修复 a-unsafe-assignment 错误
+                    const typedError = error as Error;
                     console.error(`向店铺 ${tenantName} 导入配方 "${recipeDto.name}" 失败:`, typedError);
                     overallResult.skippedCount++;
                     overallResult.skippedRecipes.push(`${recipeDto.name} (在店铺 "${tenantName}" 导入失败)`);
@@ -235,7 +312,6 @@ export class RecipesService {
                 products,
                 targetTemp,
                 lossRatio,
-                // [核心修改] 从 DTO 中获取 divisionLoss
                 divisionLoss,
                 procedure,
                 name,
@@ -270,7 +346,6 @@ export class RecipesService {
                     name: name,
                     targetTemp: type === 'MAIN' ? targetTemp : undefined,
                     lossRatio: lossRatio,
-                    // [核心修改] 保存 divisionLoss 到 RecipeComponent
                     divisionLoss: divisionLoss,
                     procedure: procedure,
                 },
@@ -307,22 +382,12 @@ export class RecipesService {
                 data: { notes: updateRecipeDto.notes },
             });
 
-            return this.prisma.recipeVersion.findUnique({
-                where: { id: versionId },
-                include: {
-                    family: true,
-                    components: {
-                        include: {
-                            ingredients: { include: { ingredient: true, linkedPreDough: true } },
-                        },
-                    },
-                    products: {
-                        include: {
-                            ingredients: { include: { ingredient: true, linkedExtra: true } },
-                        },
-                    },
-                },
+            const updatedFamily = await this.prisma.recipeFamily.findUnique({
+                where: { id: familyId },
+                include: recipeFamilyWithDetailsInclude,
             });
+
+            return this._sanitizeFamily(updatedFamily);
         });
     }
 
@@ -465,7 +530,9 @@ export class RecipesService {
                         isActive: !hasActiveVersion,
                     },
                 });
-                return this.createVersionContents(tenantId, recipeVersion.id, createRecipeDto, tx);
+
+                const finalFamily = await this.createVersionContents(tenantId, recipeVersion.id, createRecipeDto, tx);
+                return this._sanitizeFamily(finalFamily);
             },
             {
                 isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -486,7 +553,6 @@ export class RecipesService {
             products,
             targetTemp,
             lossRatio,
-            // [核心修改] 从 DTO 中获取 divisionLoss
             divisionLoss,
             procedure,
             category = 'BREAD',
@@ -514,7 +580,6 @@ export class RecipesService {
             targetTemp === null || targetTemp === undefined ? undefined : new Prisma.Decimal(targetTemp);
         const lossRatioForDb =
             lossRatio === null || lossRatio === undefined ? undefined : new Prisma.Decimal(lossRatio);
-        // [核心修改] 转换 divisionLoss 以便存入数据库
         const divisionLossForDb =
             divisionLoss === null || divisionLoss === undefined ? undefined : new Prisma.Decimal(divisionLoss);
 
@@ -524,7 +589,6 @@ export class RecipesService {
                 name: name,
                 targetTemp: type === 'MAIN' ? targetTempForDb : undefined,
                 lossRatio: lossRatioForDb,
-                // [核心修改] 保存 divisionLoss 到 RecipeComponent
                 divisionLoss: divisionLossForDb,
                 procedure: procedure,
             },
@@ -568,48 +632,10 @@ export class RecipesService {
             }
         }
 
-        return tx.recipeVersion.findUnique({
-            where: { id: versionId },
-            include: {
-                family: true,
-                components: {
-                    include: {
-                        ingredients: {
-                            include: {
-                                ingredient: true,
-                                linkedPreDough: {
-                                    include: {
-                                        versions: {
-                                            where: { isActive: true },
-                                            include: {
-                                                components: {
-                                                    include: {
-                                                        ingredients: {
-                                                            include: {
-                                                                ingredient: true,
-                                                            },
-                                                        },
-                                                    },
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                products: {
-                    include: {
-                        ingredients: {
-                            include: {
-                                ingredient: true,
-                                linkedExtra: true,
-                            },
-                        },
-                    },
-                },
-            },
+        const version = await tx.recipeVersion.findUnique({ where: { id: versionId } });
+        return tx.recipeFamily.findUnique({
+            where: { id: version?.familyId },
+            include: recipeFamilyWithDetailsInclude,
         });
     }
 
@@ -768,15 +794,29 @@ export class RecipesService {
             }),
         );
 
-        const mainRecipes = familiesWithCounts
+        // [核心修正] 在此进行局部的、专门的数据转换，而不是调用通用的 _sanitizeFamily
+        const sanitizedFamilies = familiesWithCounts.map((family) => {
+            return {
+                ...family,
+                versions: family.versions.map((v) => ({
+                    ...v,
+                    products: v.products.map((p) => ({
+                        ...p,
+                        baseDoughWeight: p.baseDoughWeight.toNumber(),
+                    })),
+                })),
+            };
+        });
+
+        const mainRecipes = sanitizedFamilies
             .filter((family) => family.type === 'MAIN')
             .sort((a, b) => (b.productionTaskCount || 0) - (a.productionTaskCount || 0));
 
-        const preDoughs = familiesWithCounts
+        const preDoughs = sanitizedFamilies
             .filter((family) => family.type === 'PRE_DOUGH')
             .sort((a, b) => a.name.localeCompare(b.name));
 
-        const extras = familiesWithCounts
+        const extras = sanitizedFamilies
             .filter((family) => family.type === 'EXTRA')
             .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -870,69 +910,23 @@ export class RecipesService {
             where: {
                 id: familyId,
             },
-            include: {
-                versions: {
-                    include: {
-                        components: {
-                            include: {
-                                ingredients: {
-                                    include: {
-                                        ingredient: true,
-                                        linkedPreDough: {
-                                            include: {
-                                                versions: {
-                                                    where: { isActive: true },
-                                                    include: {
-                                                        components: {
-                                                            include: {
-                                                                ingredients: {
-                                                                    include: {
-                                                                        ingredient: true,
-                                                                    },
-                                                                },
-                                                            },
-                                                        },
-                                                    },
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                        products: {
-                            include: {
-                                ingredients: {
-                                    include: {
-                                        ingredient: true,
-                                        linkedExtra: true,
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    orderBy: { version: 'desc' },
-                },
-            },
+            include: recipeFamilyWithDetailsInclude,
         });
 
         if (!family) {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
-        // [核心修改] 使用新的辅助函数来处理步骤和注释
         const processedFamily = {
             ...family,
             versions: family.versions.map((version) => {
                 return {
                     ...version,
                     components: version.components.map((component) => {
-                        // [核心修改] 调用简化后的辅助函数，只传入 procedure
                         const { cleanedProcedure, ingredientNotes } = this._processProcedureNotes(component.procedure);
 
                         return {
                             ...component,
-                            // [核心修改] 使用处理后的步骤
                             procedure: cleanedProcedure,
                             ingredients: component.ingredients.map((ing) => {
                                 if (ing.ingredient) {
@@ -963,14 +957,9 @@ export class RecipesService {
             }),
         };
 
-        return processedFamily;
+        return this._sanitizeFamily(processedFamily as RecipeFamilyWithDetails);
     }
 
-    /**
-     * [核心修改] 简化辅助函数，只解析配方步骤中的@注释语法糖
-     * @param procedure 原始步骤数组
-     * @returns 清理后的步骤和提取的注释
-     */
     private _processProcedureNotes(procedure: string[] | undefined | null): {
         cleanedProcedure: string[];
         ingredientNotes: Map<string, string>;
@@ -984,7 +973,6 @@ export class RecipesService {
 
         const cleanedProcedure = procedure
             .map((step) => {
-                // 第一步：提取注释
                 const stepMatches = [...step.matchAll(noteRegex)];
                 for (const match of stepMatches) {
                     const [, ingredientName, note] = match;
@@ -993,7 +981,6 @@ export class RecipesService {
                     }
                 }
 
-                // 第二步：清理步骤文本中的注释
                 const cleanedStep = step.replace(noteRegex, '').trim();
 
                 if (cleanedStep === '') {
@@ -1075,7 +1062,6 @@ export class RecipesService {
                 name: componentSource.name,
                 type: 'BASE_COMPONENT',
                 lossRatio: toCleanPercent(componentSource.lossRatio) ?? undefined,
-                // [核心修改] 增加 divisionLoss 到模板
                 divisionLoss: componentSource.divisionLoss?.toNumber(),
                 ingredients: componentSource.ingredients.map((ing) => ({
                     id: ing.ingredient!.id,
@@ -1155,7 +1141,6 @@ export class RecipesService {
                 name: '主面团',
                 type: 'MAIN_DOUGH',
                 lossRatio: toCleanPercent(mainComponentSource.lossRatio) ?? undefined,
-                // [核心修改] 增加 divisionLoss 到模板
                 divisionLoss: mainComponentSource.divisionLoss?.toNumber(),
                 ingredients: mainComponentIngredientsForForm,
                 procedure: mainComponentSource.procedure || [],
@@ -1171,7 +1156,6 @@ export class RecipesService {
                 name: componentSource.name,
                 type: 'BASE_COMPONENT',
                 lossRatio: toCleanPercent(componentSource.lossRatio) ?? undefined,
-                // [核心修改] 增加 divisionLoss 到模板
                 divisionLoss: componentSource.divisionLoss?.toNumber(),
                 ingredients: componentSource.ingredients.map((ing) => ({
                     id: ing.ingredient!.id,
