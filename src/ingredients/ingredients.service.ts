@@ -255,7 +255,6 @@ export class IngredientsService {
             }
         }
 
-        // [核心修正] 返回给前端前，将所有 Decimal 类型转换为 number，确保数据类型一致
         return {
             ...ingredient,
             currentPricePerPackage: currentPricePerPackage.toNumber(),
@@ -307,6 +306,11 @@ export class IngredientsService {
 
             const { changeInGrams, reason, initialCostPerKg } = adjustStockDto;
 
+            // [核心修改] 强制要求必须提供调整原因
+            if (!reason || reason.trim() === '') {
+                throw new BadRequestException('必须提供一个有效的库存调整原因。');
+            }
+
             await tx.ingredientStockAdjustment.create({
                 data: {
                     ingredientId: id,
@@ -320,19 +324,29 @@ export class IngredientsService {
             const oldStockValue = new Prisma.Decimal(ingredient.currentStockValue);
             let valueChange = new Prisma.Decimal(0);
 
-            if (oldStock.isZero() && changeInGrams > 0) {
-                if (!initialCostPerKg || initialCostPerKg <= 0) {
-                    throw new BadRequestException('期初库存录入必须提供一个有效的初始单价(元/kg)。');
+            // [核心修改] 将判断逻辑从 oldStock.isZero() 改为 reason === '初次录入'
+            if (reason === '初次录入') {
+                // [新增] 增加一层保护，仅当库存确实为0时才允许“初次录入”
+                if (!oldStock.isZero()) {
+                    throw new BadRequestException('只有库存为0的原料才能进行“初次录入”操作。');
                 }
+                if (!initialCostPerKg || initialCostPerKg <= 0) {
+                    throw new BadRequestException('“初次录入”必须提供一个有效的初期单价(元/kg)。');
+                }
+                // [中文注释] 根据初期单价计算本次入库的库存总价值
                 valueChange = new Prisma.Decimal(initialCostPerKg).mul(changeInGrams).div(1000);
             } else if (!oldStock.isZero()) {
+                // [中文注释] 对于非初次录入（如盘盈盘亏），使用加权平均价计算库存价值变动
                 const avgCostPerGram = oldStockValue.div(oldStock);
                 valueChange = avgCostPerGram.mul(changeInGrams);
             } else {
+                // [中文注释] 如果库存为0，且不是“初次录入”（如盘盈了一个已清零的原料），则不改变其库存价值，仅增加数量。
+                // 这样做的目的是等待下一次采购时，再为这个原料引入新的成本。
                 valueChange = new Prisma.Decimal(0);
             }
 
             const newStockValue = oldStockValue.add(valueChange);
+            // [中文注释] 防止盘亏等操作导致库存价值变为负数
             if (newStockValue.isNegative()) {
                 await tx.ingredient.update({
                     where: { id },
@@ -495,7 +509,7 @@ export class IngredientsService {
 
             let adjustmentLedger: LedgerEntry[] = adjustments.map((a) => ({
                 date: a.createdAt,
-                type: a.reason?.startsWith('生产损耗') ? '生产损耗' : '库存调整',
+                type: a.reason?.startsWith('生产报损') || a.reason?.startsWith('工艺损耗') ? '生产损耗' : '库存调整',
                 change: a.changeInGrams.toNumber(),
                 details: a.reason || '无原因',
                 operator: a.user.name || a.user.phone,
@@ -584,16 +598,14 @@ export class IngredientsService {
             throw new NotFoundException('指定的SKU不存在或不属于该原料');
         }
 
-        // [修改] findOne 已经返回 number，无需再比较
-        const activeSkuId = ingredient.activeSkuId;
-        if (activeSkuId === skuId) {
+        if (ingredient.activeSkuId === skuId) {
             return ingredient;
         }
 
         return this.prisma.$transaction(async (tx) => {
-            if (activeSkuId) {
+            if (ingredient.activeSkuId) {
                 await tx.ingredientSKU.update({
-                    where: { id: activeSkuId },
+                    where: { id: ingredient.activeSkuId },
                     data: { status: SkuStatus.INACTIVE },
                 });
             }
