@@ -118,6 +118,7 @@ const taskListItemsInclude = {
             quantity: true,
             product: {
                 select: {
+                    id: true, // [核心修复] 为产品选择加上 id，确保修改任务功能可以正常获取 productId
                     name: true,
                 },
             },
