@@ -118,7 +118,7 @@ const taskListItemsInclude = {
             quantity: true,
             product: {
                 select: {
-                    id: true, // [核心修复] 为产品选择加上 id，确保修改任务功能可以正常获取 productId
+                    id: true,
                     name: true,
                 },
             },
@@ -561,27 +561,29 @@ export class ProductionTasksService {
         const endOfDay = new Date(targetDate);
         endOfDay.setHours(23, 59, 59, 999);
 
-        const activeTasks = await this.prisma.productionTask.findMany({
+        // [核心修改] 查询逻辑变更为只查找在指定日期“开始”的任务
+        const tasksStartingToday = await this.prisma.productionTask.findMany({
             where: {
                 tenantId,
                 deletedAt: null,
                 status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
-                startDate: { lte: endOfDay },
-                OR: [{ endDate: { gte: startOfDay } }, { endDate: null }],
+                startDate: {
+                    gte: startOfDay,
+                    lte: endOfDay,
+                },
             },
             include: taskWithDetailsInclude,
         });
 
-        if (activeTasks.length === 0) {
+        if (tasksStartingToday.length === 0) {
             return null;
         }
 
         const combinedTaskItems = {
-            ...activeTasks[0],
-            items: activeTasks.flatMap((task) => task.items),
+            ...tasksStartingToday[0],
+            items: tasksStartingToday.flatMap((task) => task.items),
         };
 
-        // [修改] 此处 getBillOfMaterialsForDate 现在会自己获取完整数据，不再依赖外部传入
         const [prepItems, billOfMaterials] = await Promise.all([
             this._getPrepItemsForTask(tenantId, combinedTaskItems),
             this.getBillOfMaterialsForDate(tenantId, date),
@@ -627,24 +629,27 @@ export class ProductionTasksService {
         const endOfDay = new Date(targetDate);
         endOfDay.setHours(23, 59, 59, 999);
 
-        const activeTasks = await this.prisma.productionTask.findMany({
+        // [核心修改] 查询逻辑同样变更为只查找在指定日期“开始”的任务
+        const tasksStartingToday = await this.prisma.productionTask.findMany({
             where: {
                 tenantId,
                 deletedAt: null,
                 status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
-                startDate: { lte: endOfDay },
-                OR: [{ endDate: { gte: startOfDay } }, { endDate: null }],
+                startDate: {
+                    gte: startOfDay,
+                    lte: endOfDay,
+                },
             },
             include: taskWithDetailsInclude,
         });
 
-        if (activeTasks.length === 0) {
+        if (tasksStartingToday.length === 0) {
             return null;
         }
 
         const combinedTaskItems = {
-            ...activeTasks[0],
-            items: activeTasks.flatMap((task) => task.items),
+            ...tasksStartingToday[0],
+            items: tasksStartingToday.flatMap((task) => task.items),
         };
 
         const [prepItems, billOfMaterials] = await Promise.all([
@@ -1061,7 +1066,6 @@ export class ProductionTasksService {
     }
 
     async getBillOfMaterialsForDate(tenantId: string, date?: string): Promise<BillOfMaterialsResponseDto> {
-        // [核心修复] 此函数不再依赖 findTasksForDate，而是自己获取完整的任务数据
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
@@ -1077,22 +1081,25 @@ export class ProductionTasksService {
         const endOfDay = new Date(targetDate);
         endOfDay.setHours(23, 59, 59, 999);
 
-        const tasksForDate = await this.prisma.productionTask.findMany({
+        // [核心修改] 查询逻辑变更为只查找在指定日期“开始”的任务
+        const tasksStartingToday = await this.prisma.productionTask.findMany({
             where: {
                 tenantId,
                 deletedAt: null,
                 status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
-                startDate: { lte: endOfDay },
-                OR: [{ endDate: { gte: startOfDay } }, { endDate: null }],
+                startDate: {
+                    gte: startOfDay,
+                    lte: endOfDay,
+                },
             },
-            include: taskWithDetailsInclude, // 使用“大而全”的 include
+            include: taskWithDetailsInclude,
         });
 
-        if (tasksForDate.length === 0) {
+        if (tasksStartingToday.length === 0) {
             return { standardItems: [], nonInventoriedItems: [] };
         }
 
-        return this._calculateBillOfMaterialsForTasks(tenantId, tasksForDate);
+        return this._calculateBillOfMaterialsForTasks(tenantId, tasksStartingToday);
     }
 
     async findOne(tenantId: string, id: string, query: QueryTaskDetailDto): Promise<TaskDetailResponseDto> {
