@@ -512,10 +512,61 @@ export class RecipesService {
                     if (!existingFamily) throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
                     recipeFamily = existingFamily;
                 } else {
+                    // [核心修正] 检查是否存在同名的孤立原料
+                    const existingIngredient = await tx.ingredient.findFirst({
+                        where: {
+                            tenantId,
+                            name: name,
+                            deletedAt: null,
+                        },
+                        select: { id: true },
+                    });
+
+                    // 无论如何都创建配方族
                     recipeFamily = await tx.recipeFamily.create({
                         data: { name, tenantId, type, category: finalCategory },
                         include: { versions: true },
                     });
+
+                    // [核心修正] 如果确实存在同名原料，则执行数据迁移
+                    if (existingIngredient) {
+                        const newFamilyId = recipeFamily.id;
+                        const oldIngredientId = existingIngredient.id;
+
+                        // 1. 迁移 ComponentIngredient (如果新配方是面种)
+                        // 这会将所有之前错误关联到“原料”上的面种，转为关联到新的“面种配方”
+                        if (type === 'PRE_DOUGH') {
+                            await tx.componentIngredient.updateMany({
+                                where: { ingredientId: oldIngredientId },
+                                data: {
+                                    ingredientId: null,
+                                    linkedPreDoughId: newFamilyId,
+                                },
+                            });
+                        }
+
+                        // 2. 迁移 ProductIngredient (如果新配方是馅料/装饰)
+                        // 这会将所有之前错误关联到“原料”上的馅料/装饰，转为关联到新的“附加项配方”
+                        if (type === 'EXTRA') {
+                            await tx.productIngredient.updateMany({
+                                where: { ingredientId: oldIngredientId },
+                                data: {
+                                    ingredientId: null,
+                                    linkedExtraId: newFamilyId,
+                                },
+                            });
+                        }
+
+                        // 3. 软删除已迁移的孤立原料
+                        // 这样它就不会再出现在 `ingredients.service.ts` 的查询中（即使没有notIn逻辑）
+                        // 也不会在 `_ensureIngredientsExist` 中被找到
+                        await tx.ingredient.update({
+                            where: { id: oldIngredientId },
+                            data: {
+                                deletedAt: new Date(),
+                            },
+                        });
+                    }
                 }
 
                 const hasActiveVersion = recipeFamily.versions.some((v) => v.isActive);
@@ -656,7 +707,7 @@ export class RecipesService {
             where: {
                 tenantId,
                 name: { in: Array.from(newIngredientNames) },
-                deletedAt: null,
+                deletedAt: null, // [核心修正] 确保我们只查找未被软删除的原料
             },
         });
 
@@ -669,6 +720,7 @@ export class RecipesService {
                 tenantId,
                 name: { in: Array.from(newIngredientNames) },
                 type: { in: ['PRE_DOUGH', 'EXTRA'] },
+                deletedAt: null, // [核心修正] 确保我们只查找未被软删除的配方
             },
         });
         const existingFamilyNames = new Set(existingFamilies.map((f) => f.name));
