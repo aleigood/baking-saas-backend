@@ -25,6 +25,8 @@ import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 // [核心新增] 导入分页查询 DTO
 import { QueryLedgerDto } from './dto/query-ledger.dto';
+// [新增] 导入 UpdateSkuDto
+import { UpdateSkuDto } from './dto/update-sku.dto';
 
 @ApiTags('Ingredients')
 @ApiBearerAuth()
@@ -97,6 +99,14 @@ export class IngredientsController {
         @Body() createSkuDto: CreateSkuDto,
     ) {
         return this.ingredientsService.createSku(user.tenantId, ingredientId, createSkuDto);
+    }
+
+    // [新增] 更新 SKU 路由
+    @Patch('skus/:skuId')
+    @ApiOperation({ summary: 'Update a SKU' })
+    updateSku(@GetUser() user: UserPayload, @Param('skuId') skuId: string, @Body() updateSkuDto: UpdateSkuDto) {
+        // [中文注释] 调用 service 层的方法
+        return this.ingredientsService.updateSku(user.tenantId, skuId, updateSkuDto);
     }
 
     @Delete('skus/:skuId')

@@ -7,6 +7,7 @@ import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { SkuStatus, Prisma, IngredientType } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
+import { UpdateSkuDto } from './dto/update-sku.dto'; // [修复] 移除 .ts 后缀
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { QueryLedgerDto, LedgerEntryType, LedgerEntry } from './dto/query-ledger.dto';
 
@@ -550,6 +551,59 @@ export class IngredientsService {
                 ingredientId,
                 status: SkuStatus.INACTIVE,
             },
+        });
+    }
+
+    // [新增] 更新SKU的方法
+    async updateSku(tenantId: string, skuId: string, updateSkuDto: UpdateSkuDto) {
+        const skuToUpdate = await this.prisma.ingredientSKU.findFirst({
+            where: {
+                id: skuId,
+                ingredient: {
+                    tenantId: tenantId,
+                },
+            },
+            include: {
+                _count: {
+                    select: { procurementRecords: true },
+                },
+            },
+        });
+
+        if (!skuToUpdate) {
+            throw new NotFoundException('SKU不存在');
+        }
+
+        const { specWeightInGrams } = updateSkuDto;
+        const hasProcurementRecords = skuToUpdate._count.procurementRecords > 0;
+
+        // [中文注释] 检查是否尝试修改规格重量
+        if (
+            specWeightInGrams !== undefined &&
+            // [修复] 使用 !.equals() 替代 .neq()
+            !new Prisma.Decimal(specWeightInGrams).equals(skuToUpdate.specWeightInGrams)
+        ) {
+            // [中文注释] 如果该SKU已有采购记录，则不允许修改其规格重量，因为这会影响历史成本和库存计算
+            if (hasProcurementRecords) {
+                throw new BadRequestException('该SKU已有采购记录，无法修改其规格重量。');
+            }
+        }
+
+        const data: Prisma.IngredientSKUUpdateInput = {
+            ...updateSkuDto,
+            ...(specWeightInGrams !== undefined && {
+                specWeightInGrams: new Prisma.Decimal(specWeightInGrams),
+            }),
+        };
+
+        // [中文注释] 从 DTO 中移除 specWeightInGrams，如果它未定义的话，以防止 Prisma 尝试更新它
+        if (specWeightInGrams === undefined) {
+            delete data.specWeightInGrams;
+        }
+
+        return this.prisma.ingredientSKU.update({
+            where: { id: skuId },
+            data: data,
         });
     }
 
