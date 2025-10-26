@@ -66,6 +66,7 @@ type RecipeFamilyWithDetails = Prisma.RecipeFamilyGetPayload<{
 export class RecipesService {
     constructor(private prisma: PrismaService) {}
 
+    // [核心重命名] 修改 _sanitizeFamily 方法内部变量名
     private _sanitizeFamily(family: RecipeFamilyWithDetails | null) {
         if (!family) {
             return null;
@@ -79,16 +80,17 @@ export class RecipesService {
                     targetTemp: component.targetTemp?.toNumber(),
                     lossRatio: component.lossRatio?.toNumber(),
                     divisionLoss: component.divisionLoss?.toNumber(),
-                    ingredients: component.ingredients.map((ing) => ({
-                        ...ing,
-                        ratio: ing.ratio?.toNumber(),
-                        flourRatio: ing.flourRatio?.toNumber(),
-                        ingredient: ing.ingredient
+                    // [核心重命名] ing -> componentIngredient
+                    ingredients: component.ingredients.map((componentIngredient) => ({
+                        ...componentIngredient,
+                        ratio: componentIngredient.ratio?.toNumber(),
+                        flourRatio: componentIngredient.flourRatio?.toNumber(),
+                        ingredient: componentIngredient.ingredient
                             ? {
-                                  ...ing.ingredient,
-                                  waterContent: ing.ingredient.waterContent.toNumber(),
-                                  currentStockInGrams: ing.ingredient.currentStockInGrams.toNumber(),
-                                  currentStockValue: ing.ingredient.currentStockValue.toNumber(),
+                                  ...componentIngredient.ingredient,
+                                  waterContent: componentIngredient.ingredient.waterContent.toNumber(),
+                                  currentStockInGrams: componentIngredient.ingredient.currentStockInGrams.toNumber(),
+                                  currentStockValue: componentIngredient.ingredient.currentStockValue.toNumber(),
                               }
                             : null,
                     })),
@@ -96,16 +98,17 @@ export class RecipesService {
                 products: version.products.map((product) => ({
                     ...product,
                     baseDoughWeight: product.baseDoughWeight.toNumber(),
-                    ingredients: product.ingredients.map((pIng) => ({
-                        ...pIng,
-                        ratio: pIng.ratio?.toNumber(),
-                        weightInGrams: pIng.weightInGrams?.toNumber(),
-                        ingredient: pIng.ingredient
+                    // [核心重命名] pIng -> productIngredient
+                    ingredients: product.ingredients.map((productIngredient) => ({
+                        ...productIngredient,
+                        ratio: productIngredient.ratio?.toNumber(),
+                        weightInGrams: productIngredient.weightInGrams?.toNumber(),
+                        ingredient: productIngredient.ingredient
                             ? {
-                                  ...pIng.ingredient,
-                                  waterContent: pIng.ingredient.waterContent.toNumber(),
-                                  currentStockInGrams: pIng.ingredient.currentStockInGrams.toNumber(),
-                                  currentStockValue: pIng.ingredient.currentStockValue.toNumber(),
+                                  ...productIngredient.ingredient,
+                                  waterContent: productIngredient.ingredient.waterContent.toNumber(),
+                                  currentStockInGrams: productIngredient.ingredient.currentStockInGrams.toNumber(),
+                                  currentStockValue: productIngredient.ingredient.currentStockValue.toNumber(),
                               }
                             : null,
                     })),
