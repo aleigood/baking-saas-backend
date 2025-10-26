@@ -235,6 +235,7 @@ model Product {
   name               String // 产品名称，如“熊掌卡仕达”
   baseDoughWeight    Decimal // [核心修改] 基础面团克重
   procedure          String[] // 制作流程要点 (如烘烤参数)
+  deletedAt          DateTime? // [核心新增] 用于支持软删除
   recipeVersion      RecipeVersion                     @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
   ingredients        ProductIngredient[] // 产品的附加原料 (搅拌、馅料、装饰)
   productionTasks    ProductionTaskItem[]
@@ -242,6 +243,7 @@ model Product {
   overproductionLogs ProductionTaskOverproductionLog[]
 
   @@index([recipeVersionId])
+  @@index([deletedAt]) // [核心新增] 为软删除增加索引
 }
 
 // 产品的附加原料：搅拌、馅料、装饰
@@ -368,7 +370,7 @@ model ProductionTaskItem {
   productId String
   quantity  Int
   task      ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Restrict) // [核心修改] Cascade -> Restrict
 
   @@index([taskId])
   @@index([productId])
@@ -397,13 +399,14 @@ model ProductionLog {
 model ProductionTaskSpoilageLog {
   id              String        @id @default(uuid())
   productionLogId String
-  productId       String
+  productId       String? // [核心修改] 改为可选
+  productName     String // [核心新增] 冗余存储产品名称
   stage           String // e.g., 'kneading', 'fermentation', 'baking'
   quantity        Int
   notes           String?
   createdAt       DateTime      @default(now())
   productionLog   ProductionLog @relation(fields: [productionLogId], references: [id], onDelete: Cascade)
-  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product         Product?      @relation(fields: [productId], references: [id], onDelete: SetNull) // [核心修改] 改为可选，onDelete: SetNull
 
   @@index([productionLogId])
   @@index([productId])
@@ -413,11 +416,12 @@ model ProductionTaskSpoilageLog {
 model ProductionTaskOverproductionLog {
   id              String        @id @default(uuid())
   productionLogId String
-  productId       String
+  productId       String? // [核心修改] 改为可选
+  productName     String // [核心新增] 冗余存储产品名称
   quantity        Int // 超产数量
   createdAt       DateTime      @default(now())
   productionLog   ProductionLog @relation(fields: [productionLogId], references: [id], onDelete: Cascade)
-  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product         Product?      @relation(fields: [productId], references: [id], onDelete: SetNull) // [核心修改] 改为可选，onDelete: SetNull
 
   @@index([productionLogId])
   @@index([productId])

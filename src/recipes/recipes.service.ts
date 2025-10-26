@@ -28,6 +28,7 @@ type PreloadedRecipeFamily = RecipeFamily & {
     })[];
 };
 
+// [核心修改] 在 products 的 include 中增加了 where: { deletedAt: null }，确保不返回已软删除的产品
 const recipeFamilyWithDetailsInclude = {
     versions: {
         include: {
@@ -42,6 +43,7 @@ const recipeFamilyWithDetailsInclude = {
                 },
             },
             products: {
+                where: { deletedAt: null }, // [核心修改] 过滤掉软删除的产品
                 include: {
                     ingredients: {
                         include: {
@@ -203,6 +205,7 @@ export class RecipesService {
                         products: recipeDto.products?.map(
                             (p): ProductDto => ({
                                 ...p,
+                                id: undefined, // [核心修改] 确保导入时ID是undefined (假设ProductDto有id)
                                 mixIn:
                                     p.mixIn?.map(
                                         (i): ProductIngredientDto => ({
@@ -283,7 +286,9 @@ export class RecipesService {
                 family: { tenantId },
             },
             include: {
-                products: true,
+                products: {
+                    where: { deletedAt: null }, // [核心修改] 只包括未软删除的产品
+                },
             },
         });
 
@@ -291,20 +296,23 @@ export class RecipesService {
             throw new NotFoundException('指定的配方版本不存在');
         }
 
+        // [核心修改] 检查是否正在 "进行中" 的任务
         const productIds = versionToUpdate.products.map((p) => p.id);
         if (productIds.length > 0) {
-            const usageCount = await this.prisma.productionTaskItem.count({
+            const inProgressUsageCount = await this.prisma.productionTaskItem.count({
                 where: {
                     productId: { in: productIds },
                     task: {
-                        status: 'COMPLETED',
+                        status: 'IN_PROGRESS', // [核心修改] 只检查 "进行中"
                     },
                 },
             });
-            if (usageCount > 0) {
-                throw new BadRequestException('此配方版本已在生产任务中使用，无法直接修改。请创建一个新版本。');
+            if (inProgressUsageCount > 0) {
+                // 如果正在生产中，则抛出错误
+                throw new BadRequestException('此配方版本正在生产中，无法修改。请等待任务完成后再试。');
             }
         }
+        // [核心修改] 原先检查 COMPLETED 任务的逻辑 (原 335-348 行) 已被删除
 
         return this.prisma.$transaction(async (tx) => {
             const {
@@ -375,6 +383,7 @@ export class RecipesService {
                 });
             }
 
+            // [核心修改] 调用重写后的产品同步方法
             await this._syncProductsForVersion(tenantId, versionId, versionToUpdate.products, products || [], tx);
 
             await tx.recipeVersion.update({
@@ -391,6 +400,7 @@ export class RecipesService {
         });
     }
 
+    // [核心重构] 重写 _syncProductsForVersion 方法，实现 "按ID匹配" 和 "软删除"
     private async _syncProductsForVersion(
         tenantId: string,
         versionId: string,
@@ -398,49 +408,73 @@ export class RecipesService {
         newProductsDto: ProductDto[],
         tx: Prisma.TransactionClient,
     ) {
-        const existingProductsMap = new Map(existingProducts.map((p) => [p.name, p]));
-        const newProductsDtoMap = new Map(newProductsDto.map((p) => [p.name, p]));
+        const existingProductsMap = new Map(existingProducts.map((p) => [p.id, p]));
+        // 假设 ProductDto 中有 id?: string
+        const newProductIds = new Set(newProductsDto.filter((p) => p.id).map((p) => p.id!));
 
-        const productsToDelete = existingProducts.filter((p) => !newProductsDtoMap.has(p.name));
-        if (productsToDelete.length > 0) {
-            const productIdsToDelete = productsToDelete.map((p) => p.id);
+        // 1. 找出需要软删除的产品
+        const productsToSoftDelete = existingProducts.filter((p) => !newProductIds.has(p.id));
+
+        if (productsToSoftDelete.length > 0) {
+            const productIdsToSoftDelete = productsToSoftDelete.map((p) => p.id);
+
+            // 2. 检查这些产品是否在 "待开始" 或 "进行中" 的任务里
             const usageCount = await tx.productionTaskItem.count({
                 where: {
-                    productId: { in: productIdsToDelete },
+                    productId: { in: productIdsToSoftDelete },
+                    // [核心修改] 只检查 "待开始" 和 "进行中" 的任务
+                    task: {
+                        status: { in: ['PENDING', 'IN_PROGRESS'] },
+                    },
                 },
             });
+
             if (usageCount > 0) {
+                // 如果在活动任务中，则阻止删除
+                const productNames = productsToSoftDelete.map((p) => p.name).join(', ');
                 throw new BadRequestException(
-                    `无法删除产品: ${productsToDelete
-                        .map((p) => p.name)
-                        .join(', ')}，因为它已被一个或多个生产任务使用。`,
+                    `无法删除产品: ${productNames}，因为它已被一个“待开始”或“进行中”的生产任务使用。`,
                 );
             }
 
-            await tx.productIngredient.deleteMany({ where: { productId: { in: productIdsToDelete } } });
-            await tx.product.deleteMany({ where: { id: { in: productIdsToDelete } } });
+            // 3. 执行软删除 (对已完成或已取消任务中使用的产品是安全的)
+            await tx.product.updateMany({
+                where: { id: { in: productIdsToSoftDelete } },
+                data: { deletedAt: new Date() },
+            });
+            // 注意：我们不再硬删除 productIngredient，因为产品只是被隐藏
+            // 但如果需要，可以清除它们：
+            // await tx.productIngredient.deleteMany({ where: { productId: { in: productIdsToSoftDelete } } });
         }
 
+        // 4. 遍历提交的 DTO，执行更新或创建
         for (const productDto of newProductsDto) {
-            const existingProduct = existingProductsMap.get(productDto.name);
+            // [核心假定] productDto.id 是从前端传递过来的
+            const existingProduct = productDto.id ? existingProductsMap.get(productDto.id) : undefined;
 
             if (existingProduct) {
+                // 4a. 更新现有产品 (ID匹配成功)
                 await tx.product.update({
                     where: { id: existingProduct.id },
                     data: {
+                        name: productDto.name, // 允许修改名称
                         baseDoughWeight: new Prisma.Decimal(productDto.weight),
                         procedure: productDto.procedure,
+                        deletedAt: null, // [核心修改] 确保如果产品是重新添加的（或之前是软删除的），恢复其状态
                     },
                 });
+                // 同步原料
                 await tx.productIngredient.deleteMany({ where: { productId: existingProduct.id } });
                 await this._createProductIngredients(tenantId, existingProduct.id, productDto, tx);
             } else {
+                // 4b. 创建新产品 (没有 ID 或 ID 不匹配)
                 const newProduct = await tx.product.create({
                     data: {
                         recipeVersionId: versionId,
                         name: productDto.name,
                         baseDoughWeight: new Prisma.Decimal(productDto.weight),
                         procedure: productDto.procedure,
+                        // deletedAt 默认为 null
                     },
                 });
                 await this._createProductIngredients(tenantId, newProduct.id, productDto, tx);
@@ -779,12 +813,15 @@ export class RecipesService {
         const recipeFamilies = await this.prisma.recipeFamily.findMany({
             where: {
                 tenantId,
+                deletedAt: null, // [核心修改] 只查找未弃用的配方
             },
             include: {
                 versions: {
                     where: { isActive: true },
                     include: {
-                        products: true,
+                        products: {
+                            where: { deletedAt: null }, // [核心修改] 只包括未软删除的产品
+                        },
                         components: {
                             include: {
                                 _count: {
@@ -884,12 +921,14 @@ export class RecipesService {
             where: {
                 tenantId,
                 type: 'MAIN',
-                deletedAt: null,
+                deletedAt: null, // [核心修改]
                 versions: {
                     some: {
                         isActive: true,
                         products: {
-                            some: {},
+                            some: {
+                                deletedAt: null, // [核心修改] 确保版本下有未删除的产品
+                            },
                         },
                     },
                 },
@@ -899,6 +938,7 @@ export class RecipesService {
                     where: { isActive: true },
                     include: {
                         products: {
+                            where: { deletedAt: null }, // [核心修改] 只拉取未删除的产品
                             orderBy: {
                                 name: 'asc',
                             },
@@ -911,6 +951,13 @@ export class RecipesService {
         const familiesWithProductionCount = await Promise.all(
             recipeFamilies.map(async (family) => {
                 const activeVersion = family.versions[0];
+                if (!activeVersion || activeVersion.products.length === 0) {
+                    // [核心修正] 增加一个安全检查，如果活跃版本没有产品
+                    return {
+                        ...family,
+                        productionTaskCount: 0,
+                    };
+                }
                 const productIds = activeVersion.products.map((p) => p.id);
 
                 const taskCount = await this.prisma.productionTaskItem.count({
@@ -961,6 +1008,7 @@ export class RecipesService {
         const family = await this.prisma.recipeFamily.findFirst({
             where: {
                 id: familyId,
+                deletedAt: null, // [核心修改] 确保不能访问已弃用的配方
             },
             include: recipeFamilyWithDetailsInclude,
         });
@@ -1054,7 +1102,10 @@ export class RecipesService {
             where: {
                 id: versionId,
                 familyId: familyId,
-                family: { tenantId },
+                family: {
+                    tenantId,
+                    deletedAt: null, // [核心修改] 确保配方族未被弃用
+                },
             },
             include: {
                 family: true,
@@ -1082,6 +1133,7 @@ export class RecipesService {
                     },
                 },
                 products: {
+                    where: { deletedAt: null }, // [核心修改] 只加载未软删除的产品
                     include: {
                         ingredients: {
                             include: {
@@ -1247,6 +1299,7 @@ export class RecipesService {
                         });
                 };
                 return {
+                    id: p.id, // [核心修改] 传递产品ID到前端
                     name: p.name,
                     baseDoughWeight: p.baseDoughWeight.toNumber(),
                     mixIns: processIngredients(ProductIngredientType.MIX_IN),
@@ -1306,6 +1359,8 @@ export class RecipesService {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
+        // [核心修改] 更新检查逻辑，因为产品现在是软删除的
+        // 我们只检查是否有 *任何* 任务项，因为 `onDelete: Restrict` 会阻止删除
         const productIds = family.versions.flatMap((version) => version.products.map((product) => product.id));
 
         if (productIds.length > 0) {
@@ -1318,10 +1373,13 @@ export class RecipesService {
             });
 
             if (taskCount > 0) {
-                throw new BadRequestException('该配方已被生产任务使用，无法删除。');
+                // [核心修改] 更新错误信息
+                throw new BadRequestException('该配方已被生产任务使用，无法（物理）删除。请改用“弃用”操作。');
             }
         }
 
+        // [核心修改] 此处是物理删除，只有在 taskCount 为 0 时才能执行
+        // 由于 schema 中设置了级联删除，这将删除所有 versions, components, products
         return this.prisma.recipeFamily.delete({
             where: { id: familyId },
         });
@@ -1431,7 +1489,7 @@ export class RecipesService {
                 name: { in: preDoughNames },
                 tenantId,
                 type: 'PRE_DOUGH',
-                deletedAt: null,
+                deletedAt: null, // [核心修改] 确保只查找未弃用的
             },
             include: {
                 versions: {

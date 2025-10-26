@@ -244,6 +244,7 @@ export class ProductionTasksService {
             where: {
                 id: { in: productIds },
                 recipeVersion: { family: { tenantId } },
+                deletedAt: null, // [核心修改] 确保只查找未被软删除的产品
             },
             include: {
                 recipeVersion: {
@@ -418,6 +419,8 @@ export class ProductionTasksService {
         for (const item of task.items) {
             const product = item.product;
             if (!product) continue;
+            // [核心修改] 跳过已软删除的产品（尽管它们不应该出现在新任务中，但这是个安全校验）
+            if (product.deletedAt) continue;
 
             const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
             if (!product.recipeVersion) continue; // 安全检查
@@ -571,6 +574,11 @@ export class ProductionTasksService {
                     gte: startOfDay,
                     lte: endOfDay,
                 },
+                items: {
+                    some: {
+                        product: { deletedAt: null }, // [核心修改] 确保任务中的产品未被软删除
+                    },
+                },
             },
             include: taskWithDetailsInclude,
         });
@@ -638,6 +646,11 @@ export class ProductionTasksService {
                 startDate: {
                     gte: startOfDay,
                     lte: endOfDay,
+                },
+                items: {
+                    some: {
+                        product: { deletedAt: null }, // [核心修改] 确保任务中的产品未被软删除
+                    },
                 },
             },
             include: taskWithDetailsInclude,
@@ -729,6 +742,11 @@ export class ProductionTasksService {
                     endDate: null,
                 },
             ],
+            items: {
+                some: {
+                    product: { deletedAt: null }, // [核心修改] 只显示产品未被删除的任务
+                },
+            },
         };
 
         return this.prisma.productionTask.findMany({
@@ -782,6 +800,11 @@ export class ProductionTasksService {
                         endDate: null,
                     },
                 ],
+                items: {
+                    some: {
+                        product: { deletedAt: null }, // [核心修改] 只统计产品未被删除的任务
+                    },
+                },
             },
             include: {
                 items: true,
@@ -804,6 +827,11 @@ export class ProductionTasksService {
                 deletedAt: null,
                 status: {
                     in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
+                },
+                items: {
+                    some: {
+                        product: { deletedAt: null }, // [核心修改] 只统计产品未被删除的任务
+                    },
                 },
             },
             select: {
@@ -883,7 +911,8 @@ export class ProductionTasksService {
 
     private _getFlattenedIngredientsForBOM(product: ProductWithDetails): Map<string, Prisma.Decimal> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>();
-        if (!product.recipeVersion) {
+        if (!product.recipeVersion || product.deletedAt) {
+            // [核心修改] 增加软删除检查
             return flattenedIngredients;
         }
 
@@ -998,6 +1027,7 @@ export class ProductionTasksService {
 
         for (const task of tasks) {
             for (const item of task.items) {
+                if (item.product.deletedAt) continue; // [核心修改] 跳过已软删除的产品
                 const consumptions = this._getFlattenedIngredientsForBOM(item.product);
 
                 for (const [ingredientId, weight] of consumptions.entries()) {
@@ -1090,6 +1120,11 @@ export class ProductionTasksService {
                 startDate: {
                     gte: startOfDay,
                     lte: endOfDay,
+                },
+                items: {
+                    some: {
+                        product: { deletedAt: null }, // [核心修改] 确保任务中的产品未被软删除
+                    },
                 },
             },
             include: taskWithDetailsInclude,
@@ -1241,6 +1276,7 @@ export class ProductionTasksService {
             { familyName: string; category: RecipeCategory; items: TaskItemWithDetails[] }
         >();
         task.items.forEach((item) => {
+            if (item.product.deletedAt) return; // [核心修改] 跳过已软删除的产品
             const family = item.product.recipeVersion.family;
             if (!componentsMap.has(family.id)) {
                 componentsMap.set(family.id, {
@@ -1512,7 +1548,8 @@ export class ProductionTasksService {
     ): Map<string, FlattenedIngredient> {
         const flattened = new Map<string, FlattenedIngredient>();
         // [修复] 增加安全检查
-        if (!product.recipeVersion) {
+        if (!product.recipeVersion || product.deletedAt) {
+            // [核心修改] 增加软删除检查
             return flattened;
         }
 
@@ -1584,7 +1621,8 @@ export class ProductionTasksService {
     }
 
     private _calculateTheoreticalTotalFlourWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
-        if (!product.recipeVersion) {
+        if (!product.recipeVersion || product.deletedAt) {
+            // [核心修改] 增加软删除检查
             return new Prisma.Decimal(0);
         }
         const mainDough = product.recipeVersion.components[0];
@@ -1615,7 +1653,8 @@ export class ProductionTasksService {
     }
 
     private _calculateTotalWaterWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
-        if (!product.recipeVersion) {
+        if (!product.recipeVersion || product.deletedAt) {
+            // [核心修改] 增加软删除检查
             return new Prisma.Decimal(0);
         }
         const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
@@ -1645,7 +1684,8 @@ export class ProductionTasksService {
     }
 
     private _calculateTotalFlourWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
-        if (!product.recipeVersion) {
+        if (!product.recipeVersion || product.deletedAt) {
+            // [核心修改] 增加软删除检查
             return new Prisma.Decimal(0);
         }
         const mainDough = product.recipeVersion.components[0];
@@ -1685,6 +1725,7 @@ export class ProductionTasksService {
         const totalIngredientsMap = new Map<string, { name: string; totalWeight: number }>();
         await Promise.all(
             task.items.map(async (item) => {
+                if (item.product.deletedAt) return; // [核心修改] 跳过已软删除的产品
                 // 库存预警应基于最完整的备料清单计算
                 const consumptions = this._getFlattenedIngredientsForBOM(item.product);
                 for (const [ingredientId, weight] of consumptions.entries()) {
@@ -1762,6 +1803,7 @@ export class ProductionTasksService {
                 where: {
                     id: { in: productIds },
                     recipeVersion: { family: { tenantId } },
+                    deletedAt: null, // [核心修改] 确保只选择未被软删除的产品
                 },
                 include: {
                     recipeVersion: {
@@ -1954,8 +1996,11 @@ export class ProductionTasksService {
             for (const completedItem of completedItems) {
                 const { productId, completedQuantity, spoilageDetails } = completedItem;
                 const plannedQuantity = plannedQuantities.get(productId);
+                const taskItem = task.items.find((i) => i.productId === productId); // [核心新增] 获取任务项
+                const productName = taskItem?.product.name || '未知产品'; // [核心新增] 获取产品名称
 
-                if (plannedQuantity === undefined) {
+                if (plannedQuantity === undefined || !taskItem) {
+                    // [核心修正] 修复此处的判断逻辑
                     throw new BadRequestException(`产品ID ${productId} 不在任务中。`);
                 }
 
@@ -1965,7 +2010,7 @@ export class ProductionTasksService {
                 if (calculatedSpoilage !== actualSpoilage) {
                     throw new BadRequestException(
                         `产品 ${
-                            task.items.find((i) => i.productId === productId)?.product.name
+                            task.items.find((i) => i.productId === productId)?.product.name // [核心修正] 修复这里的拼写错误
                         } 的损耗数量计算不一致。计划: ${plannedQuantity}, 完成: ${completedQuantity}, 上报损耗: ${calculatedSpoilage}，差额应为 ${actualSpoilage}`,
                     );
                 }
@@ -1983,6 +2028,7 @@ export class ProductionTasksService {
                             data: {
                                 productionLogId: productionLog.id,
                                 productId,
+                                productName: productName, // [核心新增] 写入产品名称
                                 stage: spoilage.stage,
                                 quantity: spoilage.quantity,
                                 notes: spoilage.notes,
@@ -1995,8 +2041,8 @@ export class ProductionTasksService {
                         const currentSpoiled = totalSpoiledConsumption.get(cons.ingredientId) || new Prisma.Decimal(0);
                         totalSpoiledConsumption.set(cons.ingredientId, currentSpoiled.add(cons.totalConsumed));
 
-                        const productName =
-                            task.items.find((i) => i.productId === productId)?.product.name || '未知产品';
+                        // const productName =
+                        //     task.items.find((i) => i.productId === productId)?.product.name || '未知产品'; // [核心修改] 移到循环外
                         // 显式报损直接通过库存调整扣减，因为它是一种直接损失
                         await tx.ingredientStockAdjustment.create({
                             data: {
@@ -2016,6 +2062,7 @@ export class ProductionTasksService {
                         data: {
                             productionLogId: productionLog.id,
                             productId,
+                            productName: productName, // [核心新增] 写入产品名称
                             quantity: calculatedOverproduction,
                         },
                     });
@@ -2095,8 +2142,11 @@ export class ProductionTasksService {
     }
 
     private _buildRecipeSnapshot(task: TaskWithDetails): Prisma.JsonObject {
+        // [核心修改] 修正快照逻辑，使其保存整个任务对象，并过滤掉已软删除的产品
+        // 这与 findOne 中加载快照的逻辑 (as unknown as TaskWithDetails) 保持一致
         const snapshot = {
-            items: task.items,
+            ...task,
+            items: task.items.filter((item) => !item.product.deletedAt),
         };
 
         return snapshot as unknown as Prisma.JsonObject;

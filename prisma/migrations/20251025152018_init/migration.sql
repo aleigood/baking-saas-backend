@@ -137,6 +137,7 @@ CREATE TABLE "Product" (
     "name" TEXT NOT NULL,
     "baseDoughWeight" DECIMAL(65,30) NOT NULL,
     "procedure" TEXT[],
+    "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "Product_pkey" PRIMARY KEY ("id")
 );
@@ -251,7 +252,8 @@ CREATE TABLE "ProductionLog" (
 CREATE TABLE "ProductionTaskSpoilageLog" (
     "id" TEXT NOT NULL,
     "productionLogId" TEXT NOT NULL,
-    "productId" TEXT NOT NULL,
+    "productId" TEXT,
+    "productName" TEXT NOT NULL,
     "stage" TEXT NOT NULL,
     "quantity" INTEGER NOT NULL,
     "notes" TEXT,
@@ -264,7 +266,8 @@ CREATE TABLE "ProductionTaskSpoilageLog" (
 CREATE TABLE "ProductionTaskOverproductionLog" (
     "id" TEXT NOT NULL,
     "productionLogId" TEXT NOT NULL,
-    "productId" TEXT NOT NULL,
+    "productId" TEXT,
+    "productName" TEXT NOT NULL,
     "quantity" INTEGER NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -314,6 +317,9 @@ CREATE INDEX "ComponentIngredient_ingredientId_idx" ON "ComponentIngredient"("in
 
 -- CreateIndex
 CREATE INDEX "Product_recipeVersionId_idx" ON "Product"("recipeVersionId");
+
+-- CreateIndex
+CREATE INDEX "Product_deletedAt_idx" ON "Product"("deletedAt");
 
 -- CreateIndex
 CREATE INDEX "ProductIngredient_productId_idx" ON "ProductIngredient"("productId");
@@ -445,7 +451,7 @@ ALTER TABLE "ProductionTask" ADD CONSTRAINT "ProductionTask_tenantId_fkey" FOREI
 ALTER TABLE "ProductionTaskItem" ADD CONSTRAINT "ProductionTaskItem_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "ProductionTask"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ProductionTaskItem" ADD CONSTRAINT "ProductionTaskItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ProductionTaskItem" ADD CONSTRAINT "ProductionTaskItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductionLog" ADD CONSTRAINT "ProductionLog_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "ProductionTask"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -454,13 +460,13 @@ ALTER TABLE "ProductionLog" ADD CONSTRAINT "ProductionLog_taskId_fkey" FOREIGN K
 ALTER TABLE "ProductionTaskSpoilageLog" ADD CONSTRAINT "ProductionTaskSpoilageLog_productionLogId_fkey" FOREIGN KEY ("productionLogId") REFERENCES "ProductionLog"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ProductionTaskSpoilageLog" ADD CONSTRAINT "ProductionTaskSpoilageLog_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ProductionTaskSpoilageLog" ADD CONSTRAINT "ProductionTaskSpoilageLog_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductionTaskOverproductionLog" ADD CONSTRAINT "ProductionTaskOverproductionLog_productionLogId_fkey" FOREIGN KEY ("productionLogId") REFERENCES "ProductionLog"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ProductionTaskOverproductionLog" ADD CONSTRAINT "ProductionTaskOverproductionLog_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ProductionTaskOverproductionLog" ADD CONSTRAINT "ProductionTaskOverproductionLog_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "IngredientConsumptionLog" ADD CONSTRAINT "IngredientConsumptionLog_productionLogId_fkey" FOREIGN KEY ("productionLogId") REFERENCES "ProductionLog"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

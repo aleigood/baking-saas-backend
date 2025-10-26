@@ -42,6 +42,10 @@ export class ProductIngredientDto {
 // [核心修正] 导出 ProductDto 以在其他文件中使用
 // 用于最终产品的DTO
 export class ProductDto {
+    @IsUUID()
+    @IsOptional()
+    id?: string; // [核心新增] 增加产品ID字段，用于更新时匹配
+
     @IsString()
     @IsNotEmpty()
     name: string;
