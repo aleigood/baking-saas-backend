@@ -2094,8 +2094,30 @@ export class ProductionTasksService {
     }
 
     async remove(tenantId: string, id: string) {
-        // [核心修改] 此处调用 findOne 会自动处理快照检查
-        await this.findOne(tenantId, id, {});
+        // [核心修改] 根据新需求调整删除逻辑
+        const task = await this.prisma.productionTask.findFirst({
+            where: {
+                id,
+                tenantId,
+                deletedAt: null, // 确保我们操作的是未删除的任务
+            },
+            select: {
+                status: true,
+            },
+        });
+
+        if (!task) {
+            throw new NotFoundException('生产任务不存在');
+        }
+
+        // 只有“待开始”的任务才能被删除
+        if (task.status !== ProductionTaskStatus.PENDING) {
+            throw new BadRequestException(
+                `无法删除任务：该任务状态为 ${task.status}。只有“待开始”的任务才能被删除，进行中的任务请使用“取消”操作。`,
+            );
+        }
+
+        // 执行软删除
         return this.prisma.productionTask.update({
             where: { id },
             data: {
