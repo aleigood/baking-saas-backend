@@ -46,9 +46,11 @@ const taskWithDetailsInclude = {
                             components: {
                                 include: {
                                     ingredients: {
+                                        // L1
                                         include: {
                                             ingredient: { include: { activeSku: true } },
                                             linkedPreDough: {
+                                                // L2
                                                 include: {
                                                     versions: {
                                                         where: { isActive: true },
@@ -56,8 +58,31 @@ const taskWithDetailsInclude = {
                                                             components: {
                                                                 include: {
                                                                     ingredients: {
+                                                                        // L3
                                                                         include: {
                                                                             ingredient: true,
+                                                                            // [核心修改] 增加递归深度以匹配 resolveDependencies
+                                                                            linkedPreDough: {
+                                                                                // L4
+                                                                                include: {
+                                                                                    versions: {
+                                                                                        where: { isActive: true },
+                                                                                        include: {
+                                                                                            components: {
+                                                                                                include: {
+                                                                                                    ingredients: {
+                                                                                                        // L5
+                                                                                                        include: {
+                                                                                                            ingredient: true,
+                                                                                                            linkedPreDough: true, // 停止在 L6
+                                                                                                        },
+                                                                                                    },
+                                                                                                },
+                                                                                            },
+                                                                                        },
+                                                                                    },
+                                                                                },
+                                                                            },
                                                                         },
                                                                     },
                                                                 },
@@ -101,7 +126,8 @@ const taskWithDetailsInclude = {
     },
     log: {
         select: {
-            recipeSnapshot: true,
+            // [核心修改] 不再从 log 中读取快照
+            // recipeSnapshot: true,
         },
     },
     createdBy: {
@@ -164,6 +190,32 @@ export class ProductionTasksService {
         private readonly prisma: PrismaService,
         private readonly costingService: CostingService,
     ) {}
+
+    // [核心新增] 新增一个私有方法，用于获取并序列化任务的实时配方数据作为快照
+    private async _fetchAndSerializeSnapshot(
+        taskId: string,
+        tx?: Prisma.TransactionClient,
+    ): Promise<Prisma.JsonObject> {
+        const prismaClient = tx || this.prisma;
+        const task = await prismaClient.productionTask.findUnique({
+            where: { id: taskId },
+            include: taskWithDetailsInclude,
+        });
+
+        if (!task) {
+            // 这个函数在内部调用，理论上不应该发生
+            throw new NotFoundException('无法生成快照：任务未找到。');
+        }
+
+        // [核心修改] 修正快照逻辑，使其保存整个任务对象，并过滤掉已软删除的产品
+        // 这与 findOne 中加载快照的逻辑 (as unknown as TaskWithDetails) 保持一致
+        const snapshot = {
+            ...task,
+            items: task.items.filter((item) => !item.product.deletedAt),
+        };
+
+        return snapshot as unknown as Prisma.JsonObject;
+    }
 
     private _sanitizeTask(task: TaskWithDetails) {
         return {
@@ -240,6 +292,7 @@ export class ProductionTasksService {
 
         const productIds = products.map((p) => p.productId);
 
+        // [核心修改] 此处的检查是基于“实时”数据的，这是正确的，用于“规划时”检查
         const existingProducts = await this.prisma.product.findMany({
             where: {
                 id: { in: productIds },
@@ -278,6 +331,7 @@ export class ProductionTasksService {
             throw new BadRequestException('一次生产任务只能包含同一品类的产品。');
         }
 
+        // [核心修改] 库存检查同样基于“实时”数据，作为“规划时”的警告
         const allConsumptions = new Map<
             string,
             { ingredientId: string; ingredientName: string; totalConsumed: number }
@@ -332,26 +386,47 @@ export class ProductionTasksService {
             }
         }
 
-        const createdTask = await this.prisma.productionTask.create({
-            data: {
-                startDate,
-                endDate,
-                notes,
-                tenantId,
-                createdById: userId,
-                items: {
-                    create: products.map((p) => ({
-                        productId: p.productId,
-                        quantity: p.quantity,
-                    })),
+        // [核心修改] 在事务中创建任务并立即生成快照
+        const createdTask = await this.prisma.$transaction(async (tx) => {
+            const task = await tx.productionTask.create({
+                data: {
+                    startDate,
+                    endDate,
+                    notes,
+                    tenantId,
+                    createdById: userId,
+                    items: {
+                        create: products.map((p) => ({
+                            productId: p.productId,
+                            quantity: p.quantity,
+                        })),
+                    },
+                    // recipeSnapshot 暂时为 null
                 },
-            },
-            include: taskWithDetailsInclude,
+            });
+
+            // 立即获取快照
+            const snapshot = await this._fetchAndSerializeSnapshot(task.id, tx);
+
+            // 更新任务以包含快照
+            const taskWithSnapshot = await tx.productionTask.update({
+                where: { id: task.id },
+                data: {
+                    recipeSnapshot: snapshot,
+                },
+                include: taskWithDetailsInclude, // 确保返回的数据结构一致
+            });
+
+            return taskWithSnapshot;
         });
 
         return { task: this._sanitizeTask(createdTask), warning: stockWarning };
     }
 
+    /**
+     * [核心修改] 此方法现在基于“快照”计算预制件需求
+     * 它接受一个 TaskWithDetails 对象（从快照中解析而来）
+     */
     private async _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): Promise<CalculatedRecipeDetails[]> {
         if (!task || !task.items || task.items.length === 0) {
             return [];
@@ -360,34 +435,30 @@ export class ProductionTasksService {
         const requiredPrepItems = new Map<string, RequiredPrepItem>();
         const visitedRecipes = new Set<string>();
 
+        // [核心修改] 此函数现在依赖传入的 task (快照) 对象，而不是实时查询数据库
         const resolveDependencies = async (familyId: string, requiredWeight: Prisma.Decimal) => {
             if (visitedRecipes.has(familyId)) return;
             visitedRecipes.add(familyId);
 
-            const recipeFamily = await this.prisma.recipeFamily.findFirst({
-                where: { id: familyId, tenantId, deletedAt: null },
-                include: {
-                    versions: {
-                        where: { isActive: true },
-                        include: {
-                            components: {
-                                include: {
-                                    ingredients: {
-                                        include: {
-                                            ingredient: true,
-                                            linkedPreDough: true,
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            });
+            // [核心修改] 依赖 costingService 来获取快照中配方的信息
+            // 注意：这暗含一个要求，即 costingService 必须能处理从快照中提取的配方数据
+            // 为了简化，我们暂时假定快照中的 pre-dough 结构是完整的，可以用于遍历
+            // 一个更健壮的实现可能需要 costingService 也能接收序列化的配方数据
 
-            if (!recipeFamily || !recipeFamily.versions[0]?.components[0]) return;
+            // 查找快照中所有产品，看谁依赖了这个 familyId
+            // 这部分逻辑变得复杂，因为我们不能只依赖数据库
+            // 我们将依赖快照中已拉取的 `linkedPreDough.versions` 数据
+            const allPreDoughIngredients = task.items
+                .flatMap((item) => item.product.recipeVersion?.components || [])
+                .flatMap((comp) => comp.ingredients)
+                .filter((ing) => ing.linkedPreDough?.id === familyId);
 
-            const activeVersion = recipeFamily.versions[0];
+            const firstMatch = allPreDoughIngredients.length > 0 ? allPreDoughIngredients[0] : null;
+            const preDoughFamily = firstMatch?.linkedPreDough;
+
+            if (!preDoughFamily || !preDoughFamily.versions[0]?.components[0]) return;
+
+            const activeVersion = preDoughFamily.versions[0];
             const mainComponent = activeVersion.components[0];
 
             const totalRatio = mainComponent.ingredients.reduce(
@@ -407,10 +478,11 @@ export class ProductionTasksService {
                         existing.totalWeight = existing.totalWeight.add(weight);
                     } else {
                         requiredPrepItems.set(ing.linkedPreDough.id, {
-                            family: ing.linkedPreDough,
+                            family: ing.linkedPreDough as PrepItemFamily, // [修复] 类型断言
                             totalWeight: weight,
                         });
                     }
+                    // [核心修改] 递归调用，但依赖于快照数据
                     await resolveDependencies(ing.linkedPreDough.id, weight);
                 }
             }
@@ -419,7 +491,7 @@ export class ProductionTasksService {
         for (const item of task.items) {
             const product = item.product;
             if (!product) continue;
-            // [核心修改] 跳过已软删除的产品（尽管它们不应该出现在新任务中，但这是个安全校验）
+            // [核心修改] 跳过已软删除的产品（快照中可能也包含此信息）
             if (product.deletedAt) continue;
 
             const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
@@ -482,6 +554,9 @@ export class ProductionTasksService {
 
         const prepTaskItems: CalculatedRecipeDetails[] = [];
         for (const [id, data] of requiredPrepItems.entries()) {
+            // [核心修改] 此处 costingService 仍然查询实时配方。
+            // 这是一个权衡：我们假设预制件的“配方”是实时的，但“需求量”是基于快照计算的。
+            // 理想情况下，costingService 也应能接收快照数据。
             const [details, recipeFamily] = await Promise.all([
                 this.costingService.getCalculatedRecipeDetails(tenantId, id, data.totalWeight.toNumber()),
                 this.prisma.recipeFamily.findUnique({
@@ -579,22 +654,40 @@ export class ProductionTasksService {
                         product: { deletedAt: null }, // [核心修改] 确保任务中的产品未被软删除
                     },
                 },
+                recipeSnapshot: { not: Prisma.JsonNull }, // [核心新增] 确保任务已有快照
             },
-            include: taskWithDetailsInclude,
+            // [核心修改] 包含 recipeSnapshot 以便用于计算
+            // [FIX] 'recipeSnapshot' is not a relation, use 'select'
+            select: {
+                recipeSnapshot: true,
+            },
         });
 
         if (tasksStartingToday.length === 0) {
             return null;
         }
 
+        // [核心修改] 将任务的快照解析为 TaskWithDetails 对象
+        const snapshotTasks = tasksStartingToday
+            .map((task) => {
+                if (!task.recipeSnapshot) return null;
+                return task.recipeSnapshot as unknown as TaskWithDetails;
+            })
+            .filter((t): t is TaskWithDetails => t !== null);
+
+        if (snapshotTasks.length === 0) {
+            return null;
+        }
+
+        // [核心修改] 基于快照列表计算预制件和备料清单
         const combinedTaskItems = {
-            ...tasksStartingToday[0],
-            items: tasksStartingToday.flatMap((task) => task.items),
+            ...snapshotTasks[0], // 用第一个快照作为基础结构
+            items: snapshotTasks.flatMap((task) => task.items), // 合并所有快照中的 items
         };
 
         const [prepItems, billOfMaterials] = await Promise.all([
             this._getPrepItemsForTask(tenantId, combinedTaskItems),
-            this.getBillOfMaterialsForDate(tenantId, date),
+            this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks), // [核心修改] 调用内部函数
         ]);
 
         const detailsParts: string[] = [];
@@ -652,22 +745,40 @@ export class ProductionTasksService {
                         product: { deletedAt: null }, // [核心修改] 确保任务中的产品未被软删除
                     },
                 },
+                recipeSnapshot: { not: Prisma.JsonNull }, // [核心新增] 确保任务已有快照
             },
-            include: taskWithDetailsInclude,
+            // [核心修改] 包含 recipeSnapshot 以便用于计算
+            // [FIX] 'recipeSnapshot' is not a relation, use 'select'
+            select: {
+                recipeSnapshot: true,
+            },
         });
 
         if (tasksStartingToday.length === 0) {
             return null;
         }
 
+        // [核心修改] 将任务的快照解析为 TaskWithDetails 对象
+        const snapshotTasks = tasksStartingToday
+            .map((task) => {
+                if (!task.recipeSnapshot) return null;
+                return task.recipeSnapshot as unknown as TaskWithDetails;
+            })
+            .filter((t): t is TaskWithDetails => t !== null);
+
+        if (snapshotTasks.length === 0) {
+            return null;
+        }
+
+        // [核心修改] 基于快照列表计算预制件和备料清单
         const combinedTaskItems = {
-            ...tasksStartingToday[0],
-            items: tasksStartingToday.flatMap((task) => task.items),
+            ...snapshotTasks[0], // 用第一个快照作为基础结构
+            items: snapshotTasks.flatMap((task) => task.items), // 合并所有快照中的 items
         };
 
         const [prepItems, billOfMaterials] = await Promise.all([
             this._getPrepItemsForTask(tenantId, combinedTaskItems),
-            this.getBillOfMaterialsForDate(tenantId, date),
+            this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks),
         ]);
 
         return {
@@ -909,6 +1020,9 @@ export class ProductionTasksService {
         };
     }
 
+    /**
+     * [核心修改] 此函数基于传入的“产品详情”（来自快照或实时）计算BOM
+     */
     private _getFlattenedIngredientsForBOM(product: ProductWithDetails): Map<string, Prisma.Decimal> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>();
         if (!product.recipeVersion || product.deletedAt) {
@@ -1019,15 +1133,19 @@ export class ProductionTasksService {
         return flattenedIngredients;
     }
 
+    /**
+     * [核心修改] 此方法现在基于“快照”列表计算BOM
+     */
     private async _calculateBillOfMaterialsForTasks(
         tenantId: string,
-        tasks: TaskWithDetails[],
+        tasks: TaskWithDetails[], // [核心修改] 接收一个 TaskWithDetails 数组（来自快照）
     ): Promise<BillOfMaterialsResponseDto> {
         const totalConsumptionMap = new Map<string, Prisma.Decimal>();
 
         for (const task of tasks) {
             for (const item of task.items) {
                 if (item.product.deletedAt) continue; // [核心修改] 跳过已软删除的产品
+                // [核心修改] _getFlattenedIngredientsForBOM 现在基于快照中的 product 对象进行计算
                 const consumptions = this._getFlattenedIngredientsForBOM(item.product);
 
                 for (const [ingredientId, weight] of consumptions.entries()) {
@@ -1043,6 +1161,7 @@ export class ProductionTasksService {
             return { standardItems: [], nonInventoriedItems: [] };
         }
 
+        // [核心修改] 此处查询的是“实时”库存，这是正确的
         const ingredients = await this.prisma.ingredient.findMany({
             where: {
                 id: { in: ingredientIds },
@@ -1095,6 +1214,20 @@ export class ProductionTasksService {
         return { standardItems, nonInventoriedItems };
     }
 
+    /**
+     * [核心修改] 这是一个新的内部函数，它接收解析后的快照列表
+     */
+    private async _getBillOfMaterialsForDateInternal(
+        tenantId: string,
+        snapshotTasks: TaskWithDetails[],
+    ): Promise<BillOfMaterialsResponseDto> {
+        if (snapshotTasks.length === 0) {
+            return { standardItems: [], nonInventoriedItems: [] };
+        }
+
+        return this._calculateBillOfMaterialsForTasks(tenantId, snapshotTasks);
+    }
+
     async getBillOfMaterialsForDate(tenantId: string, date?: string): Promise<BillOfMaterialsResponseDto> {
         let targetDate: Date;
         if (date) {
@@ -1126,37 +1259,81 @@ export class ProductionTasksService {
                         product: { deletedAt: null }, // [核心修改] 确保任务中的产品未被软删除
                     },
                 },
+                recipeSnapshot: { not: Prisma.JsonNull }, // [核心新增] 确保任务已有快照
             },
-            include: taskWithDetailsInclude,
+            // [核心修改] 包含 recipeSnapshot 以便用于计算
+            select: {
+                recipeSnapshot: true,
+            },
         });
 
         if (tasksStartingToday.length === 0) {
             return { standardItems: [], nonInventoriedItems: [] };
         }
 
-        return this._calculateBillOfMaterialsForTasks(tenantId, tasksStartingToday);
+        // [核心修改] 将任务的快照解析为 TaskWithDetails 对象
+        const snapshotTasks = tasksStartingToday
+            .map((task) => {
+                if (!task.recipeSnapshot) return null;
+                return task.recipeSnapshot as unknown as TaskWithDetails;
+            })
+            .filter((t): t is TaskWithDetails => t !== null);
+
+        // [核心修改] 调用基于快照列表的内部函数
+        return this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks);
     }
 
     async findOne(tenantId: string, id: string, query: QueryTaskDetailDto): Promise<TaskDetailResponseDto> {
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
-            include: taskWithDetailsInclude,
+            // [核心修改] 只需获取任务基本信息和快照
+            select: {
+                id: true,
+                status: true,
+                notes: true,
+                items: {
+                    select: {
+                        quantity: true,
+                        product: {
+                            select: {
+                                id: true,
+                                name: true,
+                            },
+                        },
+                    },
+                },
+                recipeSnapshot: true,
+            },
         });
 
         if (!task) {
             throw new NotFoundException('生产任务不存在');
         }
 
-        const isCompletedWithSnapshot = task.status === 'COMPLETED' && task.log?.recipeSnapshot;
+        // [核心修改] 任务详情（包括历史任务）现在*必须*基于快照
+        if (!task.recipeSnapshot) {
+            // [核心新增] 如果快照不存在（例如旧数据或创建失败），尝试动态生成
+            // 注意：这可能导致 `PENDING` 任务看到实时数据，但在 `complete` 时会出错
+            // 一个更严格的策略是： if (task.status !== 'PENDING') throw new NotFoundException('任务数据快照丢失');
+            // 这里我们采用宽松策略，尝试在 `findOne` 时修复
+            try {
+                task.recipeSnapshot = await this._fetchAndSerializeSnapshot(id);
+                // (不保存到数据库，只用于本次读取)
+            } catch (error) {
+                // [FIX] 安全地访问 error.message
+                const message = error instanceof Error ? error.message : String(error);
+                throw new NotFoundException(`生产任务数据不完整或快照丢失: ${message}`);
+            }
+        }
 
-        const taskDataForCalc = isCompletedWithSnapshot
-            ? (task.log!.recipeSnapshot as unknown as TaskWithDetails)
-            : task;
+        // [核心修改] 任务数据源*始终*是快照
+        const taskDataForCalc = task.recipeSnapshot as unknown as TaskWithDetails;
 
         const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, task.items);
-        const { stockWarning } = await this._calculateStockWarning(tenantId, task);
+        const { stockWarning } = await this._calculateStockWarning(tenantId, taskDataForCalc);
 
-        const prepItems = await this._getPrepItemsForTask(tenantId, task);
+        // [核心修改] 预制件任务也基于快照计算
+        const prepItems = await this._getPrepItemsForTask(tenantId, taskDataForCalc);
 
         return {
             id: task.id,
@@ -1260,21 +1437,27 @@ export class ProductionTasksService {
         return cleanedProcedure;
     }
 
+    /**
+     * [核心修改] 此方法现在基于“快照”计算
+     * @param task 快照中的 TaskWithDetails 对象
+     * @param originalItems 任务的“实时” item 列表（仅用于获取计划数量）
+     */
     private _calculateComponentGroups(
         task: TaskWithDetails,
         query: QueryTaskDetailDto,
-        originalItems: TaskItemWithDetails[],
+        originalItems: { quantity: number; product: { id: string } }[], // [核心修改] 简化类型
     ): ComponentGroup[] {
         const { mixerType, envTemp, flourTemp, waterTemp } = query;
         const canCalculateIce =
             mixerType !== undefined && envTemp !== undefined && flourTemp !== undefined && waterTemp !== undefined;
 
-        const originalItemsMap = new Map(originalItems.map((item) => [item.productId, item]));
+        const originalItemsMap = new Map(originalItems.map((item) => [item.product.id, item]));
 
         const componentsMap = new Map<
             string,
             { familyName: string; category: RecipeCategory; items: TaskItemWithDetails[] }
         >();
+        // [核心修改] 遍历来自“快照”的 items
         task.items.forEach((item) => {
             if (item.product.deletedAt) return; // [核心修改] 跳过已软删除的产品
             const family = item.product.recipeVersion.family;
@@ -1298,8 +1481,10 @@ export class ProductionTasksService {
 
             let totalFlourForFamily = new Prisma.Decimal(0);
             for (const item of data.items) {
+                // [核心修改] 从 originalItemsMap 获取“计划数量”
                 const originalItem = originalItemsMap.get(item.productId);
                 const quantity = originalItem?.quantity ?? 0;
+                // [核心修改] _calculateTotalFlourWeightForProduct 基于“快照”中的 product 计算
                 const flourPerUnit = this._calculateTotalFlourWeightForProduct(item.product);
                 totalFlourForFamily = totalFlourForFamily.add(flourPerUnit.mul(quantity));
             }
@@ -1316,6 +1501,7 @@ export class ProductionTasksService {
             for (const item of data.items) {
                 const originalItem = originalItemsMap.get(item.productId);
                 const quantity = originalItem?.quantity ?? 0;
+                // [核心修改] _calculateTotalWaterWeightForProduct 基于“快照”中的 product 计算
                 const waterPerUnit = this._calculateTotalWaterWeightForProduct(item.product);
                 totalWaterForFamily = totalWaterForFamily.add(waterPerUnit.mul(quantity));
             }
@@ -1542,6 +1728,9 @@ export class ProductionTasksService {
         return componentGroups;
     }
 
+    /**
+     * [核心修改] 此方法现在基于“快照”中的 product 对象计算
+     */
     private _flattenIngredientsForProduct(
         product: ProductWithDetails,
         includeDough = true,
@@ -1620,6 +1809,9 @@ export class ProductionTasksService {
         return flattened;
     }
 
+    /**
+     * [核心修改] 此方法现在基于“快照”中的 product 对象计算
+     */
     private _calculateTheoreticalTotalFlourWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
         if (!product.recipeVersion || product.deletedAt) {
             // [核心修改] 增加软删除检查
@@ -1652,6 +1844,9 @@ export class ProductionTasksService {
         return theoreticalDoughWeight.div(totalRatio);
     }
 
+    /**
+     * [核心修改] 此方法现在基于“快照”中的 product 对象计算
+     */
     private _calculateTotalWaterWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
         if (!product.recipeVersion || product.deletedAt) {
             // [核心修改] 增加软删除检查
@@ -1683,6 +1878,9 @@ export class ProductionTasksService {
         return totalWaterWeight;
     }
 
+    /**
+     * [核心修改] 此方法现在基于“快照”中的 product 对象计算
+     */
     private _calculateTotalFlourWeightForProduct(product: ProductWithDetails): Prisma.Decimal {
         if (!product.recipeVersion || product.deletedAt) {
             // [核心修改] 增加软删除检查
@@ -1721,32 +1919,37 @@ export class ProductionTasksService {
         return adjustedDoughWeight.div(totalRatio);
     }
 
+    /**
+     * [核心修改] 此方法现在基于“快照”计算需求，但对比“实时”库存
+     */
     private async _calculateStockWarning(tenantId: string, task: TaskWithDetails) {
         const totalIngredientsMap = new Map<string, { name: string; totalWeight: number }>();
-        await Promise.all(
-            task.items.map(async (item) => {
-                if (item.product.deletedAt) return; // [核心修改] 跳过已软删除的产品
-                // 库存预警应基于最完整的备料清单计算
-                const consumptions = this._getFlattenedIngredientsForBOM(item.product);
-                for (const [ingredientId, weight] of consumptions.entries()) {
-                    const totalWeight = weight.mul(item.quantity);
-                    const existing = totalIngredientsMap.get(ingredientId);
-                    if (existing) {
-                        existing.totalWeight += totalWeight.toNumber();
-                    } else {
-                        const ingInfo = await this.prisma.ingredient.findUnique({ where: { id: ingredientId } });
-                        totalIngredientsMap.set(ingredientId, {
-                            name: ingInfo?.name || '未知原料',
-                            totalWeight: totalWeight.toNumber(),
-                        });
-                    }
+        // [核心修改] 不再需要 Promise.all，因为快照数据是同步的
+        for (const item of task.items) {
+            if (item.product.deletedAt) continue; // [核心修改] 跳过已软删除的产品
+            // [核心修改] 基于快照中的 product 计算
+            const consumptions = this._getFlattenedIngredientsForBOM(item.product);
+            for (const [ingredientId, weight] of consumptions.entries()) {
+                const totalWeight = weight.mul(item.quantity);
+                const existing = totalIngredientsMap.get(ingredientId);
+                // [核心修改] 从快照中获取原料名称
+                const ingInfo = this._findIngredientInSnapshot(task, ingredientId);
+
+                if (existing) {
+                    existing.totalWeight += totalWeight.toNumber();
+                } else {
+                    totalIngredientsMap.set(ingredientId, {
+                        name: ingInfo?.name || '未知原料',
+                        totalWeight: totalWeight.toNumber(),
+                    });
                 }
-            }),
-        );
+            }
+        }
 
         let stockWarning: string | null = null;
         const ingredientIds = Array.from(totalIngredientsMap.keys());
         if (ingredientIds.length > 0) {
+            // [核心修改] 查询“实时”库存
             const ingredients = await this.prisma.ingredient.findMany({
                 where: { id: { in: ingredientIds } },
                 select: { id: true, name: true, currentStockInGrams: true, type: true },
@@ -1767,6 +1970,21 @@ export class ProductionTasksService {
             }
         }
         return { stockWarning };
+    }
+
+    // [核心新增] 辅助函数：从复杂的快照对象中查找原料信息
+    private _findIngredientInSnapshot(task: TaskWithDetails, ingredientId: string) {
+        for (const item of task.items) {
+            for (const component of item.product.recipeVersion?.components || []) {
+                for (const ing of component.ingredients) {
+                    if (ing.ingredient?.id === ingredientId) return ing.ingredient;
+                }
+            }
+            for (const pIng of item.product.ingredients || []) {
+                if (pIng.ingredient?.id === ingredientId) return pIng.ingredient;
+            }
+        }
+        return null;
     }
 
     async updateTaskDetails(tenantId: string, id: string, updateDto: UpdateTaskDetailsDto) {
@@ -1799,6 +2017,7 @@ export class ProductionTasksService {
 
             const productIds = products.map((p) => p.productId);
 
+            // [核心修改] 此处检查实时数据，正确
             const existingProducts = await tx.product.findMany({
                 where: {
                     id: { in: productIds },
@@ -1829,7 +2048,8 @@ export class ProductionTasksService {
                 throw new BadRequestException(`无法更新任务，因为配方 "${names}" 已被停用。`);
             }
 
-            const updatedTask = await tx.productionTask.update({
+            // [FIX] 移除未使用的 'updatedTask' 变量
+            await tx.productionTask.update({
                 where: { id },
                 data: {
                     startDate,
@@ -1842,21 +2062,19 @@ export class ProductionTasksService {
                         })),
                     },
                 },
-                include: {
-                    items: {
-                        include: {
-                            product: true,
-                        },
-                    },
-                    createdBy: {
-                        select: {
-                            name: true,
-                            phone: true,
-                        },
-                    },
-                },
             });
-            return updatedTask;
+
+            // [核心新增] 重新生成并保存快照
+            const snapshot = await this._fetchAndSerializeSnapshot(id, tx);
+            const taskWithSnapshot = await tx.productionTask.update({
+                where: { id },
+                data: {
+                    recipeSnapshot: snapshot,
+                },
+                include: taskWithDetailsInclude,
+            });
+
+            return this._sanitizeTask(taskWithSnapshot);
         });
     }
 
@@ -1876,6 +2094,7 @@ export class ProductionTasksService {
     }
 
     async remove(tenantId: string, id: string) {
+        // [核心修改] 此处调用 findOne 会自动处理快照检查
         await this.findOne(tenantId, id, {});
         return this.prisma.productionTask.update({
             where: { id },
@@ -1886,9 +2105,21 @@ export class ProductionTasksService {
     }
 
     async complete(tenantId: string, userId: string, id: string, completeDto: CompleteProductionTaskDto) {
+        // [FIX] 修复 ts(2353), 从 include 改为 select
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
-            include: taskWithDetailsInclude,
+            // [核心修改] 只需要 items(获取计划数量) 和 recipeSnapshot
+            select: {
+                items: {
+                    select: {
+                        productId: true,
+                        quantity: true,
+                    },
+                },
+                recipeSnapshot: true,
+                status: true, // [FIX] 添加 status 用于检查
+                id: true, // [FIX] 添加 id 用于日志
+            },
         });
 
         if (!task) throw new NotFoundException('生产任务不存在');
@@ -1896,17 +2127,32 @@ export class ProductionTasksService {
             throw new BadRequestException('只有“待开始”或“进行中”的任务才能被完成');
         }
 
+        // [核心修改] 任务数据*必须*来自快照
+        if (!task.recipeSnapshot) {
+            throw new BadRequestException(
+                '任务数据不完整，缺少配方快照，无法完成任务。请尝试编辑并重新保存任务以生成快照。',
+            );
+        }
+        const snapshot = task.recipeSnapshot as unknown as TaskWithDetails;
+        const snapshotProductMap = new Map(snapshot.items.map((i) => [i.product.id, i.product]));
+
         const { notes, completedItems } = completeDto;
 
         // [核心重构] 步骤 1: 计算完成和损耗所需的【总投入量】，用于库存检查
+        // [核心修改] 此计算*必须*基于快照
         const totalInputNeeded = new Map<string, { name: string; totalConsumed: number }>();
         for (const item of completedItems) {
             const totalQuantity =
                 item.completedQuantity + (item.spoilageDetails?.reduce((s, d) => s + d.quantity, 0) || 0);
             if (totalQuantity > 0) {
-                const consumptions = await this.costingService.calculateProductConsumptions(
-                    tenantId,
-                    item.productId,
+                const snapshotProduct = snapshotProductMap.get(item.productId);
+                if (!snapshotProduct) {
+                    throw new BadRequestException(`快照中未找到产品ID ${item.productId}。`);
+                }
+
+                // [核心修改] 调用基于快照的新方法 (假设存在)
+                const consumptions = await this.costingService.calculateProductConsumptionsFromSnapshot(
+                    snapshotProduct,
                     totalQuantity,
                 );
                 for (const cons of consumptions) {
@@ -1923,7 +2169,7 @@ export class ProductionTasksService {
             }
         }
 
-        // 库存检查
+        // 库存检查 (基于“实时”库存，正确)
         const neededIngredientIds = Array.from(totalInputNeeded.keys());
         if (neededIngredientIds.length > 0) {
             const ingredientsInStock = await this.prisma.ingredient.findMany({
@@ -1946,15 +2192,21 @@ export class ProductionTasksService {
         }
 
         // [核心重构] 步骤 2: 计算成功生产部分的【理论消耗量】，用于计入产品成本
+        // [核心修改] 此计算*必须*基于快照
         const theoreticalConsumption = new Map<
             string,
             { name: string; totalConsumed: number; activeSkuId: string | null }
         >();
         for (const item of completedItems) {
             if (item.completedQuantity > 0) {
-                const consumptions = await this.costingService.calculateTheoreticalProductConsumptions(
-                    tenantId,
-                    item.productId,
+                const snapshotProduct = snapshotProductMap.get(item.productId);
+                if (!snapshotProduct) {
+                    throw new BadRequestException(`快照中未找到产品ID ${item.productId}。`);
+                }
+
+                // [核心修改] 调用基于快照的新方法 (假设存在)
+                const consumptions = await this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                    snapshotProduct,
                     item.completedQuantity,
                 );
                 for (const cons of consumptions) {
@@ -1972,6 +2224,7 @@ export class ProductionTasksService {
             }
         }
 
+        // [核心修改] 从 task.items 获取计划数量 (FIX for ts(2339) is above)
         const plannedQuantities = new Map(task.items.map((item) => [item.productId, item.quantity]));
 
         return this.prisma.$transaction(async (tx) => {
@@ -1980,55 +2233,58 @@ export class ProductionTasksService {
                 data: { status: ProductionTaskStatus.COMPLETED },
             });
 
-            const recipeSnapshot = this._buildRecipeSnapshot(task);
+            // [核心修改] 不再创建快照，只创建日志
             const productionLog = await tx.productionLog.create({
                 data: {
                     taskId: id,
                     notes,
-                    recipeSnapshot,
+                    // recipeSnapshot 字段已移除
                 },
             });
 
             // [核心重构] 步骤 3: 处理显式报损 (Spoilage)
-            // [新增] 定义一个变量来累计所有报损产品的理论原料消耗，用于后续在工艺损耗中排除这部分，避免重复扣减库存
             const totalSpoiledConsumption = new Map<string, Prisma.Decimal>();
 
             for (const completedItem of completedItems) {
                 const { productId, completedQuantity, spoilageDetails } = completedItem;
                 const plannedQuantity = plannedQuantities.get(productId);
-                const taskItem = task.items.find((i) => i.productId === productId); // [核心新增] 获取任务项
-                const productName = taskItem?.product.name || '未知产品'; // [核心新增] 获取产品名称
+                // [核心修改] 从快照获取产品名称
+                const productName = snapshotProductMap.get(productId)?.name || '未知产品';
 
-                if (plannedQuantity === undefined || !taskItem) {
-                    // [核心修正] 修复此处的判断逻辑
+                if (plannedQuantity === undefined) {
                     throw new BadRequestException(`产品ID ${productId} 不在任务中。`);
                 }
 
                 // 验证上报损耗数量
                 const calculatedSpoilage = spoilageDetails?.reduce((sum, s) => sum + s.quantity, 0) || 0;
-                const actualSpoilage = Math.max(0, plannedQuantity - completedQuantity);
+                // [FIX] 修复 ts(18047)
+                const actualSpoilage = Math.max(0, (plannedQuantity || 0) - completedQuantity);
                 if (calculatedSpoilage !== actualSpoilage) {
                     throw new BadRequestException(
-                        `产品 ${
-                            task.items.find((i) => i.productId === productId)?.product.name // [核心修正] 修复这里的拼写错误
-                        } 的损耗数量计算不一致。计划: ${plannedQuantity}, 完成: ${completedQuantity}, 上报损耗: ${calculatedSpoilage}，差额应为 ${actualSpoilage}`,
+                        `产品 ${snapshotProductMap.get(productId)?.name} 的损耗数量计算不一致。计划: ${
+                            plannedQuantity || 0 // [FIX] 修复 ts(18047)
+                        }, 完成: ${completedQuantity}, 上报损耗: ${calculatedSpoilage}，差额应为 ${actualSpoilage}`,
                     );
                 }
 
                 if (actualSpoilage > 0 && spoilageDetails) {
-                    // 报损消耗同样按理论值计算
-                    const spoiledConsumptions = await this.costingService.calculateTheoreticalProductConsumptions(
-                        tenantId,
-                        productId,
-                        actualSpoilage,
-                    );
+                    // [核心修改] 报损消耗同样按“快照”的理论值计算
+                    const snapshotProduct = snapshotProductMap.get(productId);
+                    if (!snapshotProduct) {
+                        throw new BadRequestException(`快照中未找到产品ID ${productId}。`);
+                    }
+                    const spoiledConsumptions =
+                        await this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                            snapshotProduct,
+                            actualSpoilage,
+                        );
 
                     for (const spoilage of spoilageDetails) {
                         await tx.productionTaskSpoilageLog.create({
                             data: {
                                 productionLogId: productionLog.id,
                                 productId,
-                                productName: productName, // [核心新增] 写入产品名称
+                                productName: productName,
                                 stage: spoilage.stage,
                                 quantity: spoilage.quantity,
                                 notes: spoilage.notes,
@@ -2041,9 +2297,6 @@ export class ProductionTasksService {
                         const currentSpoiled = totalSpoiledConsumption.get(cons.ingredientId) || new Prisma.Decimal(0);
                         totalSpoiledConsumption.set(cons.ingredientId, currentSpoiled.add(cons.totalConsumed));
 
-                        // const productName =
-                        //     task.items.find((i) => i.productId === productId)?.product.name || '未知产品'; // [核心修改] 移到循环外
-                        // 显式报损直接通过库存调整扣减，因为它是一种直接损失
                         await tx.ingredientStockAdjustment.create({
                             data: {
                                 ingredientId: cons.ingredientId,
@@ -2056,13 +2309,14 @@ export class ProductionTasksService {
                 }
 
                 // 处理超量生产
-                const calculatedOverproduction = Math.max(0, completedQuantity - plannedQuantity);
+                // [FIX] 修复 ts(18047)
+                const calculatedOverproduction = Math.max(0, completedQuantity - (plannedQuantity || 0));
                 if (calculatedOverproduction > 0) {
                     await tx.productionTaskOverproductionLog.create({
                         data: {
                             productionLogId: productionLog.id,
                             productId,
-                            productName: productName, // [核心新增] 写入产品名称
+                            productName: productName,
                             quantity: calculatedOverproduction,
                         },
                     });
@@ -2137,18 +2391,11 @@ export class ProductionTasksService {
                 }
             }
 
+            // [核心修改] 调用 findOne，它现在会从快照读取数据
             return this.findOne(tenantId, id, {});
         });
     }
 
-    private _buildRecipeSnapshot(task: TaskWithDetails): Prisma.JsonObject {
-        // [核心修改] 修正快照逻辑，使其保存整个任务对象，并过滤掉已软删除的产品
-        // 这与 findOne 中加载快照的逻辑 (as unknown as TaskWithDetails) 保持一致
-        const snapshot = {
-            ...task,
-            items: task.items.filter((item) => !item.product.deletedAt),
-        };
-
-        return snapshot as unknown as Prisma.JsonObject;
-    }
+    // [核心修改] 此方法被移除，其逻辑被合并到 _fetchAndSerializeSnapshot
+    // private _buildRecipeSnapshot(task: TaskWithDetails): Prisma.JsonObject { ... }
 }

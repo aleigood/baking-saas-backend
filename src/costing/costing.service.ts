@@ -226,7 +226,7 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const flatIngredients = await this._getFlattenedIngredients(product);
+        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
 
@@ -422,7 +422,7 @@ export class CostingService {
         }
 
         // [核心修正] flatIngredients 和 pricePerGramMap 包含了*所有*基础原料 (包括馅料的)
-        const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
+        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
 
@@ -703,7 +703,7 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
+        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
 
@@ -733,7 +733,7 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
+        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
         const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
@@ -831,13 +831,50 @@ export class CostingService {
     }
 
     /**
+     * [核心新增] 辅助函数：从 FullProduct 对象中构建一个包含所有基础原料的 Map
+     */
+    private _buildIngredientMapFromProduct(product: FullProduct): Map<string, Ingredient> {
+        const map = new Map<string, Ingredient>();
+
+        const processComponent = (component: FullRecipeVersion['components'][0]) => {
+            for (const ing of component.ingredients) {
+                if (ing.ingredient) {
+                    map.set(ing.ingredient.id, ing.ingredient);
+                }
+                if (ing.linkedPreDough) {
+                    ing.linkedPreDough.versions.forEach((v) =>
+                        v.components.forEach((c) => processComponent(c as FullRecipeVersion['components'][0])),
+                    );
+                }
+            }
+        };
+
+        product.recipeVersion.components.forEach(processComponent);
+
+        for (const pIng of product.ingredients) {
+            if (pIng.ingredient) {
+                map.set(pIng.ingredient.id, pIng.ingredient);
+            }
+            if (pIng.linkedExtra) {
+                pIng.linkedExtra.versions.forEach((v) =>
+                    v.components.forEach((c) => processComponent(c as FullRecipeVersion['components'][0])),
+                );
+            }
+        }
+
+        return map;
+    }
+
+    /**
      * [核心函数] 计算生产一个产品所需的**所有基础原料的总投入量** (含损耗)。
-     * 用于生产任务备料、前置准备任务等需要知道“我需要领多少料”的场景。
-     * @param product 完整的产品对象
+     * [核心重构] 此函数现在是同步的，并且完全依赖传入的 product 对象。
+     * @param product 完整的产品对象 (来自快照或实时查询)
      * @returns Map<ingredientId, totalInputWeight>
      */
-    private async _getFlattenedIngredients(product: FullProduct): Promise<Map<string, Prisma.Decimal>> {
+    private _getFlattenedIngredients(product: FullProduct): Map<string, Prisma.Decimal> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>();
+        // [核心新增] 从 product 对象中构建原料 map
+        const ingredientMap = this._buildIngredientMapFromProduct(product);
 
         // [核心重构] 这是一个递归函数，用于计算一个组件（面团、面种、馅料等）需要的所有基础原料的投入量
         const processComponentRecursively = (
@@ -895,18 +932,12 @@ export class CostingService {
         }
 
         // [核心逻辑] 计算用于 MIX_IN 按比例计算的总面粉量
-        // 注意：这里的总面粉量是考虑了损耗之后的“投入量”，确保计算 MIX_IN 原料时也间接考虑了主面团的损耗
+        // [核心重构] 不再查询数据库，而是使用 ingredientMap
         let totalFlourInputWeight = new Prisma.Decimal(0);
-        const ingredientIds = Array.from(flattenedIngredients.keys());
-        if (ingredientIds.length > 0) {
-            const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
-            const ingredientMap = new Map(ingredients.map((i) => [i.id, i]));
-
-            for (const [id, weight] of flattenedIngredients.entries()) {
-                const ingredientInfo = ingredientMap.get(id);
-                if (ingredientInfo?.isFlour) {
-                    totalFlourInputWeight = totalFlourInputWeight.add(weight);
-                }
+        for (const [id, weight] of flattenedIngredients.entries()) {
+            const ingredientInfo = ingredientMap.get(id);
+            if (ingredientInfo?.isFlour) {
+                totalFlourInputWeight = totalFlourInputWeight.add(weight);
             }
         }
 
@@ -943,12 +974,14 @@ export class CostingService {
 
     /**
      * [新增函数] 计算生产一个产品所需的**所有基础原料的理论净重** (不含损耗)。
-     * 用于理论成本核算、任务完成后的库存核销等需要知道“我应该消耗多少料”的场景。
-     * @param product 完整的产品对象
+     * [核心重构] 此函数现在是同步的，并且完全依赖传入的 product 对象。
+     * @param product 完整的产品对象 (来自快照或实时查询)
      * @returns Map<ingredientId, theoreticalWeight>
      */
-    private async _getFlattenedIngredientsTheoretical(product: FullProduct): Promise<Map<string, Prisma.Decimal>> {
+    private _getFlattenedIngredientsTheoretical(product: FullProduct): Map<string, Prisma.Decimal> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>();
+        // [核心新增] 从 product 对象中构建原料 map
+        const ingredientMap = this._buildIngredientMapFromProduct(product);
 
         // [核心修正] 将递归逻辑提取到一个可复用的私有函数，并确保它能处理map的传递
         this._flattenComponentTheoretical(
@@ -957,17 +990,12 @@ export class CostingService {
             flattenedIngredients,
         );
 
+        // [核心重构] 不再查询数据库，而是使用 ingredientMap
         let totalFlourInputWeight = new Prisma.Decimal(0);
-        const ingredientIds = Array.from(flattenedIngredients.keys());
-        if (ingredientIds.length > 0) {
-            const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
-            const ingredientMap = new Map(ingredients.map((i) => [i.id, i]));
-
-            for (const [id, weight] of flattenedIngredients.entries()) {
-                const ingredientInfo = ingredientMap.get(id);
-                if (ingredientInfo?.isFlour) {
-                    totalFlourInputWeight = totalFlourInputWeight.add(weight);
-                }
+        for (const [id, weight] of flattenedIngredients.entries()) {
+            const ingredientInfo = ingredientMap.get(id);
+            if (ingredientInfo?.isFlour) {
+                totalFlourInputWeight = totalFlourInputWeight.add(weight);
             }
         }
 
@@ -1041,7 +1069,7 @@ export class CostingService {
 
     /**
      * 计算生产指定数量产品所需的**总投入原料**清单 (含损耗)。
-     * 用于【生产任务】和【备料清单】。
+     * 用于【生产任务】和【备料清单】。(实时查询)
      */
     async calculateProductConsumptions(
         tenantId: string,
@@ -1053,7 +1081,8 @@ export class CostingService {
             throw new NotFoundException('产品不存在');
         }
 
-        const flatIngredients = await this._getFlattenedIngredients(product);
+        // [核心修改] 调用重构后的同步函数
+        const flatIngredients = this._getFlattenedIngredients(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
 
@@ -1086,8 +1115,52 @@ export class CostingService {
     }
 
     /**
+     * [核心新增] 从“快照”计算生产指定数量产品所需的**总投入原料**清单 (含损耗)。
+     */
+    async calculateProductConsumptionsFromSnapshot(
+        snapshotProduct: any, // 接收来自快照的 product 对象
+        quantity: number,
+    ): Promise<ConsumptionDetail[]> {
+        const product = snapshotProduct as FullProduct; // 类型断言
+
+        // [核心修改] 调用重构后的同步函数
+        const flatIngredients = this._getFlattenedIngredients(product);
+        const ingredientIds = Array.from(flatIngredients.keys());
+        if (ingredientIds.length === 0) return [];
+
+        // [核心修改] 仍然需要查询“实时”的原料名称和SKU ID
+        const ingredients = await this.prisma.ingredient.findMany({
+            where: {
+                id: { in: ingredientIds },
+            },
+            select: {
+                id: true,
+                name: true,
+                activeSkuId: true,
+            },
+        });
+        const ingredientInfoMap = new Map(ingredients.map((i) => [i.id, { name: i.name, activeSkuId: i.activeSkuId }]));
+
+        const result: ConsumptionDetail[] = [];
+        for (const ingredientId of ingredientIds) {
+            const totalConsumed = (flatIngredients.get(ingredientId) || new Prisma.Decimal(0)).mul(quantity);
+            if (totalConsumed.gt(0)) {
+                const info = ingredientInfoMap.get(ingredientId);
+                result.push({
+                    ingredientId: ingredientId,
+                    ingredientName: info?.name || '未知原料',
+                    activeSkuId: info?.activeSkuId || null,
+                    totalConsumed: totalConsumed.toNumber(),
+                });
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * [新增函数] 计算生产指定数量产品的**理论原料消耗**清单 (不含损耗)。
-     * 用于【任务完成】时的库存核销。
+     * 用于【任务完成】时的库存核销。(实时查询)
      */
     async calculateTheoreticalProductConsumptions(
         tenantId: string,
@@ -1099,7 +1172,8 @@ export class CostingService {
             throw new NotFoundException('产品不存在');
         }
 
-        const flatIngredients = await this._getFlattenedIngredientsTheoretical(product);
+        // [核心修改] 调用重构后的同步函数
+        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
 
@@ -1123,6 +1197,50 @@ export class CostingService {
                     ingredientId: ingredient.id,
                     ingredientName: ingredient.name,
                     activeSkuId: ingredient.activeSkuId,
+                    totalConsumed: totalConsumed.toNumber(),
+                });
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * [核心新增] 从“快照”计算生产指定数量产品的**理论原料消耗**清单 (不含损耗)。
+     */
+    async calculateTheoreticalProductConsumptionsFromSnapshot(
+        snapshotProduct: any, // 接收来自快照的 product 对象
+        quantity: number,
+    ): Promise<ConsumptionDetail[]> {
+        const product = snapshotProduct as FullProduct; // 类型断言
+
+        // [核心修改] 调用重构后的同步函数
+        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
+        const ingredientIds = Array.from(flatIngredients.keys());
+        if (ingredientIds.length === 0) return [];
+
+        // [核心修改] 仍然需要查询“实时”的原料名称和SKU ID
+        const ingredients = await this.prisma.ingredient.findMany({
+            where: {
+                id: { in: ingredientIds },
+            },
+            select: {
+                id: true,
+                name: true,
+                activeSkuId: true,
+            },
+        });
+        const ingredientInfoMap = new Map(ingredients.map((i) => [i.id, { name: i.name, activeSkuId: i.activeSkuId }]));
+
+        const result: ConsumptionDetail[] = [];
+        for (const ingredientId of ingredientIds) {
+            const totalConsumed = (flatIngredients.get(ingredientId) || new Prisma.Decimal(0)).mul(quantity);
+            if (totalConsumed.gt(0)) {
+                const info = ingredientInfoMap.get(ingredientId);
+                result.push({
+                    ingredientId: ingredientId,
+                    ingredientName: info?.name || '未知原料',
+                    activeSkuId: info?.activeSkuId || null,
                     totalConsumed: totalConsumed.toNumber(),
                 });
             }

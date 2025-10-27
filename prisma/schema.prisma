@@ -265,7 +265,7 @@ model ProductIngredient {
 }
 
 // ================================================================= //
-//                  INGREDIENTS & STOCK           //
+//                  INGREDIENTS & STOCK                      //
 // ================================================================= //
 
 // 原料品类模型
@@ -339,25 +339,26 @@ model IngredientStockAdjustment {
 }
 
 // ================================================================= //
-//                  PRODUCTION & TASKS              //
+//                  PRODUCTION & TASKS                 //
 // ================================================================= //
 
 // 生产任务模型
 model ProductionTask {
-  id          String               @id @default(uuid())
-  tenantId    String
-  status      ProductionTaskStatus @default(PENDING)
-  startDate   DateTime
-  endDate     DateTime?
-  notes       String?
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  deletedAt   DateTime?
-  createdById String // [核心新增] 创建任务的用户ID
-  createdBy   User                 @relation(fields: [createdById], references: [id])
-  tenant      Tenant               @relation(fields: [tenantId], references: [id])
-  log         ProductionLog?
-  items       ProductionTaskItem[]
+  id             String               @id @default(uuid())
+  tenantId       String
+  status         ProductionTaskStatus @default(PENDING)
+  startDate      DateTime
+  endDate        DateTime?
+  notes          String?
+  recipeSnapshot Json? // [核心修改] 配方快照，在任务变为IN_PROGRESS时创建
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  deletedAt      DateTime?
+  createdById    String // [核心新增] 创建任务的用户ID
+  createdBy      User                 @relation(fields: [createdById], references: [id])
+  tenant         Tenant               @relation(fields: [tenantId], references: [id])
+  log            ProductionLog?
+  items          ProductionTaskItem[]
 
   @@index([tenantId])
   @@index([createdById]) // [核心新增] 为创建者ID添加索引
@@ -377,7 +378,7 @@ model ProductionTaskItem {
 }
 
 // ================================================================= //
-//                  PRODUCTION LOGS & CONSUMPTION                    //
+//             PRODUCTION LOGS & CONSUMPTION                //
 // ================================================================= //
 
 // 生产日志模型
@@ -386,7 +387,7 @@ model ProductionLog {
   taskId             String                            @unique
   completedAt        DateTime                          @default(now())
   notes              String?
-  recipeSnapshot     Json?
+  // [核心修改] recipeSnapshot 字段已移动到 ProductionTask
   task               ProductionTask                    @relation(fields: [taskId], references: [id])
   consumptionLogs    IngredientConsumptionLog[]
   spoilageLogs       ProductionTaskSpoilageLog[]
