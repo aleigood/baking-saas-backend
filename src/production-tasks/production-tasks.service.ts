@@ -124,12 +124,6 @@ const taskWithDetailsInclude = {
             },
         },
     },
-    log: {
-        select: {
-            // [核心修改] 不再从 log 中读取快照
-            // recipeSnapshot: true,
-        },
-    },
     createdBy: {
         select: {
             name: true,
