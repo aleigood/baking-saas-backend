@@ -501,7 +501,7 @@ export class ProductionTasksService {
                                 new Prisma.Decimal(0),
                             );
                             const weight = totalFlourWeight
-                                .mul(ing.flourRatio)
+                                .mul(new Prisma.Decimal(ing.flourRatio)) // [修复] 确保从快照加载时转换为Decimal
                                 .mul(preDoughTotalRatio)
                                 .mul(item.quantity);
 
@@ -526,7 +526,7 @@ export class ProductionTasksService {
                     if (pIng.weightInGrams) {
                         weight = new Prisma.Decimal(pIng.weightInGrams).mul(item.quantity);
                     } else if (pIng.ratio && pIng.type === 'MIX_IN') {
-                        weight = totalFlourWeight.mul(pIng.ratio).mul(item.quantity);
+                        weight = totalFlourWeight.mul(new Prisma.Decimal(pIng.ratio)).mul(item.quantity); // [修复] 确保从快照加载时转换为Decimal
                     }
                     const existing = requiredPrepItems.get(pIng.linkedExtra.id);
                     if (existing) {
@@ -1078,9 +1078,11 @@ export class ProductionTasksService {
                     (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
                     new Prisma.Decimal(0),
                 );
-                theoreticalWeight = theoreticalFlourWeightPerUnit.mul(ing.flourRatio).mul(preDoughTotalRatio);
+                theoreticalWeight = theoreticalFlourWeightPerUnit
+                    .mul(new Prisma.Decimal(ing.flourRatio)) // [修复] 确保从快照加载时转换为Decimal
+                    .mul(preDoughTotalRatio);
             } else if (ing.ingredient && ing.ratio) {
-                theoreticalWeight = theoreticalFlourWeightPerUnit.mul(ing.ratio);
+                theoreticalWeight = theoreticalFlourWeightPerUnit.mul(new Prisma.Decimal(ing.ratio)); // [修复] 确保从快照加载时转换为Decimal
             } else {
                 continue;
             }
@@ -1103,7 +1105,7 @@ export class ProductionTasksService {
             if (pIng.weightInGrams) {
                 theoreticalWeight = new Prisma.Decimal(pIng.weightInGrams);
             } else if (pIng.ratio && pIng.type === 'MIX_IN') {
-                theoreticalWeight = theoreticalFlourWeightPerUnit.mul(pIng.ratio);
+                theoreticalWeight = theoreticalFlourWeightPerUnit.mul(new Prisma.Decimal(pIng.ratio)); // [修复] 确保从快照加载时转换为Decimal
             } else {
                 continue;
             }
@@ -1402,9 +1404,11 @@ export class ProductionTasksService {
     private _parseProcedureForNotes(
         procedure: string[] | undefined | null,
         ingredientNotes: Map<string, string>,
-    ): string[] {
+        // ): string[] { // [核心修复] 修改返回类型声明
+    ): { cleanedProcedure: string[]; ingredientNotes: Map<string, string> } {
         if (!procedure) {
-            return [];
+            // return []; // [核心修复] 调整返回值以匹配新的类型
+            return { cleanedProcedure: [], ingredientNotes };
         }
         const noteRegex = /@(?:\[)?(.*?)(?:\])?[(（](.*?)[)）]/g;
 
@@ -1428,7 +1432,8 @@ export class ProductionTasksService {
             })
             .filter((step): step is string => step !== null);
 
-        return cleanedProcedure;
+        // return cleanedProcedure; // [核心修复] 调整返回值以匹配新的类型
+        return { cleanedProcedure, ingredientNotes };
     }
 
     /**
@@ -1527,13 +1532,13 @@ export class ProductionTasksService {
                             (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
                             new Prisma.Decimal(0),
                         );
-                        weight = totalFlour.mul(ing.flourRatio).mul(preDoughTotalRatio);
+                        weight = totalFlour.mul(new Prisma.Decimal(ing.flourRatio)).mul(preDoughTotalRatio); // [修复] 确保从快照加载时转换为Decimal
                         id = ing.linkedPreDough.id;
                         name = ing.linkedPreDough.name;
                         isRecipe = true;
                         brand = '自制面种';
                     } else if (ing.ingredient && ing.ratio) {
-                        weight = totalFlour.mul(ing.ratio);
+                        weight = totalFlour.mul(new Prisma.Decimal(ing.ratio)); // [修复] 确保从快照加载时转换为Decimal
                         id = ing.ingredient.id;
                         name = ing.ingredient.name;
                         brand = ing.ingredient.activeSku?.brand || null;
@@ -1566,7 +1571,7 @@ export class ProductionTasksService {
                 if (waterIngredient) {
                     const autoCalculatedParts: string[] = [];
                     const targetWaterTemp = this._calculateWaterTemp(
-                        baseComponentInfo.targetTemp.toNumber(),
+                        new Prisma.Decimal(baseComponentInfo.targetTemp).toNumber(), // [修复] 确保从快照加载时转换为Decimal
                         mixerType,
                         flourTemp,
                         envTemp,
@@ -1623,7 +1628,9 @@ export class ProductionTasksService {
                         name: ing.name,
                         brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
-                        weightInGrams: flourWeightPerUnitWithLoss.mul(ing.ratio ?? 0).toNumber(),
+                        weightInGrams: flourWeightPerUnitWithLoss
+                            .mul(new Prisma.Decimal(ing.ratio ?? 0)) // [修复] 确保从快照加载时转换为Decimal
+                            .toNumber(),
                     }));
 
                 const fillings: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
@@ -1633,7 +1640,7 @@ export class ProductionTasksService {
                         name: ing.name,
                         brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
-                        weightInGrams: ing.weightInGrams?.toNumber() ?? 0,
+                        weightInGrams: new Prisma.Decimal(ing.weightInGrams ?? 0).toNumber(), // [修复] 确保从快照加载时转换为Decimal
                     }));
 
                 const toppings: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
@@ -1643,14 +1650,14 @@ export class ProductionTasksService {
                         name: ing.name,
                         brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
-                        weightInGrams: ing.weightInGrams?.toNumber() ?? 0,
+                        weightInGrams: new Prisma.Decimal(ing.weightInGrams ?? 0).toNumber(), // [修复] 确保从快照加载时转换为Decimal
                     }));
 
                 const theoreticalFlourWeightPerUnit = this._calculateTheoreticalTotalFlourWeightForProduct(product);
                 const theoreticalMixInWeightPerUnit = Array.from(flattenedProductIngredients.values())
                     .filter((ing) => ing.type === 'MIX_IN')
                     .reduce(
-                        (sum, ing) => sum.add(theoreticalFlourWeightPerUnit.mul(ing.ratio ?? 0)),
+                        (sum, ing) => sum.add(theoreticalFlourWeightPerUnit.mul(new Prisma.Decimal(ing.ratio ?? 0))), // [修复] 确保从快照加载时转换为Decimal
                         new Prisma.Decimal(0),
                     );
 
@@ -1744,11 +1751,11 @@ export class ProductionTasksService {
                     if (ing.linkedPreDough && ing.flourRatio) {
                         const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.components[0];
                         if (preDoughRecipe) {
-                            const flourForPreDough = flourWeightRef.mul(new Prisma.Decimal(ing.flourRatio));
+                            const flourForPreDough = flourWeightRef.mul(new Prisma.Decimal(ing.flourRatio)); // [修复] 确保从快照加载时转换为Decimal
                             processDough(preDoughRecipe as ComponentWithRecursiveIngredients, flourForPreDough);
                         }
                     } else if (ing.ingredient && ing.ratio) {
-                        const weight = flourWeightRef.mul(new Prisma.Decimal(ing.ratio));
+                        const weight = flourWeightRef.mul(new Prisma.Decimal(ing.ratio)); // [修复] 确保从快照加载时转换为Decimal
 
                         const existing = flattened.get(ing.ingredient.id);
                         if (existing) {
@@ -1760,7 +1767,7 @@ export class ProductionTasksService {
                                 weight: weight,
                                 brand: ing.ingredient.activeSku?.brand || null,
                                 isRecipe: false,
-                                waterContent: ing.ingredient.waterContent,
+                                waterContent: new Prisma.Decimal(ing.ingredient.waterContent), // [修复] 确保从快照加载时转换为Decimal
                             });
                         }
                     }
@@ -1779,9 +1786,9 @@ export class ProductionTasksService {
                     brand: pIng.ingredient.activeSku?.brand || null,
                     isRecipe: false,
                     type: pIng.type,
-                    ratio: pIng.ratio ?? undefined,
-                    weightInGrams: pIng.weightInGrams ?? undefined,
-                    waterContent: pIng.ingredient.waterContent,
+                    ratio: pIng.ratio ? new Prisma.Decimal(pIng.ratio) : undefined, // [修复] 确保从快照加载时转换为Decimal
+                    weightInGrams: pIng.weightInGrams ? new Prisma.Decimal(pIng.weightInGrams) : undefined, // [修复] 确保从快照加载时转换为Decimal
+                    waterContent: new Prisma.Decimal(pIng.ingredient.waterContent), // [修复] 确保从快照加载时转换为Decimal
                 });
             } else if (pIng.linkedExtra) {
                 const uniqueKey = `${pIng.linkedExtra.id}-${pIng.type}`;
@@ -1794,8 +1801,8 @@ export class ProductionTasksService {
                     recipeType: pIng.linkedExtra.type,
                     recipeFamily: pIng.linkedExtra,
                     type: pIng.type,
-                    ratio: pIng.ratio ?? undefined,
-                    weightInGrams: pIng.weightInGrams ?? undefined,
+                    ratio: pIng.ratio ? new Prisma.Decimal(pIng.ratio) : undefined, // [修复] 确保从快照加载时转换为Decimal
+                    weightInGrams: pIng.weightInGrams ? new Prisma.Decimal(pIng.weightInGrams) : undefined, // [修复] 确保从快照加载时转换为Decimal
                 });
             }
         }
@@ -1825,10 +1832,10 @@ export class ProductionTasksService {
                             (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
                             new Prisma.Decimal(0),
                         );
-                        return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio));
+                        return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio)); // [修复] 确保从快照加载时转换为Decimal
                     }
                 }
-                return sum.add(new Prisma.Decimal(i.ratio ?? 0));
+                return sum.add(new Prisma.Decimal(i.ratio ?? 0)); // [修复] 确保从快照加载时转换为Decimal
             }, new Prisma.Decimal(0));
         };
 
@@ -1854,12 +1861,19 @@ export class ProductionTasksService {
                 if (ing.linkedPreDough && ing.flourRatio) {
                     const preDoughComponent = ing.linkedPreDough.versions?.find((v) => v.isActive)?.components[0];
                     if (preDoughComponent) {
-                        const flourForPreDough = flourRef.mul(ing.flourRatio);
+                        const flourForPreDough = flourRef.mul(new Prisma.Decimal(ing.flourRatio)); // [修复] 确保从快照加载时转换为Decimal
                         findWaterRecursively(preDoughComponent as ComponentWithRecursiveIngredients, flourForPreDough);
                     }
-                } else if (ing.ingredient?.waterContent?.gt(0) && ing.ratio) {
-                    const waterWeight = flourRef.mul(ing.ratio).mul(ing.ingredient.waterContent);
-                    totalWaterWeight = totalWaterWeight.add(waterWeight);
+                } else if (ing.ingredient?.waterContent && ing.ratio) {
+                    // [!! 核心修复 !!]
+                    // 1. 将 ing.ingredient.waterContent 和 ing.ratio (来自JSON) 转换为 Prisma.Decimal
+                    // 2. 检查转换后的 waterContentDecimal 是否 .gt(0)
+                    const waterContentDecimal = new Prisma.Decimal(ing.ingredient.waterContent);
+                    if (waterContentDecimal.gt(0)) {
+                        const ratioDecimal = new Prisma.Decimal(ing.ratio);
+                        const waterWeight = flourRef.mul(ratioDecimal).mul(waterContentDecimal);
+                        totalWaterWeight = totalWaterWeight.add(waterWeight);
+                    }
                 }
             }
         };
@@ -1900,10 +1914,10 @@ export class ProductionTasksService {
                             (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
                             new Prisma.Decimal(0),
                         );
-                        return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio));
+                        return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio)); // [修复] 确保从快照加载时转换为Decimal
                     }
                 }
-                return sum.add(new Prisma.Decimal(i.ratio ?? 0));
+                return sum.add(new Prisma.Decimal(i.ratio ?? 0)); // [修复] 确保从快照加载时转换为Decimal
             }, new Prisma.Decimal(0));
         };
 
@@ -1972,10 +1986,30 @@ export class ProductionTasksService {
             for (const component of item.product.recipeVersion?.components || []) {
                 for (const ing of component.ingredients) {
                     if (ing.ingredient?.id === ingredientId) return ing.ingredient;
+                    // [修复] 递归查找 preDough 内部
+                    if (ing.linkedPreDough) {
+                        for (const v of ing.linkedPreDough.versions) {
+                            for (const c of v.components) {
+                                for (const ci of c.ingredients) {
+                                    if (ci.ingredient?.id === ingredientId) return ci.ingredient;
+                                }
+                            }
+                        }
+                    }
                 }
             }
             for (const pIng of item.product.ingredients || []) {
                 if (pIng.ingredient?.id === ingredientId) return pIng.ingredient;
+                // [修复] 递归查找 linkedExtra 内部
+                if (pIng.linkedExtra) {
+                    for (const v of pIng.linkedExtra.versions) {
+                        for (const c of v.components) {
+                            for (const ci of c.ingredients) {
+                                if (ci.ingredient?.id === ingredientId) return ci.ingredient;
+                            }
+                        }
+                    }
+                }
             }
         }
         return null;
@@ -2411,7 +2445,4 @@ export class ProductionTasksService {
             return this.findOne(tenantId, id, {});
         });
     }
-
-    // [核心修改] 此方法被移除，其逻辑被合并到 _fetchAndSerializeSnapshot
-    // private _buildRecipeSnapshot(task: TaskWithDetails): Prisma.JsonObject { ... }
 }
