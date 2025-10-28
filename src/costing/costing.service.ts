@@ -931,41 +931,70 @@ export class CostingService {
             processComponentRecursively(mainComponent, requiredBaseDoughOutput);
         }
 
-        // [核心逻辑] 计算用于 MIX_IN 按比例计算的总面粉量
-        // [核心重构] 不再查询数据库，而是使用 ingredientMap
-        let totalFlourInputWeight = new Prisma.Decimal(0);
-        for (const [id, weight] of flattenedIngredients.entries()) {
-            const ingredientInfo = ingredientMap.get(id);
+        // [核心修正] 修复MIX_IN原料的损耗计算Bug
+        // 步骤 1: 计算理论面粉重量 (不含损耗), 作为MIX_IN比例的基准
+        const theoreticalIngredients = new Map<string, Prisma.Decimal>();
+        this._flattenComponentTheoretical(
+            mainComponent,
+            new Prisma.Decimal(product.baseDoughWeight), // 使用理论面团净重
+            theoreticalIngredients,
+        );
+
+        let theoreticalFlourWeight = new Prisma.Decimal(0);
+        for (const [id, weight] of theoreticalIngredients.entries()) {
+            const ingredientInfo = ingredientMap.get(id); // ingredientMap 来自 541行
             if (ingredientInfo?.isFlour) {
-                totalFlourInputWeight = totalFlourInputWeight.add(weight);
+                theoreticalFlourWeight = theoreticalFlourWeight.add(weight);
             }
         }
 
-        // 处理产品特有的附加原料（搅拌、馅料、装饰）
+        // 步骤 2: 获取主面团的损耗因子
+        const lossRatio = new Prisma.Decimal(mainComponent.lossRatio || 0);
+        const divisor = new Prisma.Decimal(1).sub(lossRatio);
+        if (divisor.isZero() || divisor.isNegative()) return flattenedIngredients; // 安全检查
+
+        const divisionLoss = new Prisma.Decimal(mainComponent.divisionLoss || 0);
+        const divisionLossFactor = new Prisma.Decimal(product.baseDoughWeight).isZero()
+            ? new Prisma.Decimal(1)
+            : new Prisma.Decimal(product.baseDoughWeight).add(divisionLoss).div(product.baseDoughWeight);
+
+        // 步骤 3: 遍历附加原料, 应用正确的损耗逻辑
+        // [原 607-628 行的循环被替换]
         for (const pIng of product.ingredients || []) {
-            let requiredOutputWeight = new Prisma.Decimal(0); // 同样，先确定附加原料的“目标产出净重”
+            let requiredInputWeight = new Prisma.Decimal(0); // 这是最终需要的 "投入量" (含损耗)
+
             if (pIng.weightInGrams) {
-                requiredOutputWeight = new Prisma.Decimal(pIng.weightInGrams); // 固定克重
+                // 类型为 FILLING 或 TOPPING, 使用固定克重
+                // 理论重量 = 投入重量 (因为主面团损耗不适用于它们)
+                requiredInputWeight = new Prisma.Decimal(pIng.weightInGrams);
             } else if (pIng.ratio && pIng.type === 'MIX_IN') {
-                requiredOutputWeight = totalFlourInputWeight.mul(new Prisma.Decimal(pIng.ratio)); // 按总面粉投入量比例计算
+                // 类型为 MIX_IN, 按比例计算
+                // 1. 计算理论重量 (基于理论面粉)
+                const theoreticalWeight = theoreticalFlourWeight.mul(new Prisma.Decimal(pIng.ratio));
+                // 2. 将主面团的损耗 (分割损耗 + 工艺损耗) 应用到理论重量上
+                requiredInputWeight = theoreticalWeight.mul(divisionLossFactor).div(divisor);
+            } else {
+                continue; // 没有重量或比例, 跳过
             }
 
-            if (requiredOutputWeight.isZero() || requiredOutputWeight.isNegative()) continue;
+            if (requiredInputWeight.isZero() || requiredInputWeight.isNegative()) continue;
 
-            // 如果附加原料本身也是一个配方（如卡仕达酱），则递归计算其原料用量
+            // 步骤 4: 递归处理或累加
             if (pIng.linkedExtra) {
+                // 如果附加原料是另一个配方 (如卡仕达酱)
                 const extraComponent = pIng.linkedExtra.versions?.[0]?.components?.[0];
                 if (extraComponent) {
+                    // 递归调用, `requiredInputWeight` 成为子配方的 "目标产出"
                     processComponentRecursively(
                         extraComponent as FullRecipeVersion['components'][0],
-                        requiredOutputWeight,
+                        requiredInputWeight,
                     );
                 }
             } else if (pIng.ingredientId) {
-                // 如果是基础原料，直接累加
-                // 注意：这里我们假设附加的基础原料（如杏仁片）自身损耗为0，所以投入=产出
+                // 如果是基础原料 (如香草籽, 杏仁片)
+                // 将计算出的 "投入量" 直接累加
                 const currentWeight = flattenedIngredients.get(pIng.ingredientId) || new Prisma.Decimal(0);
-                flattenedIngredients.set(pIng.ingredientId, currentWeight.add(requiredOutputWeight));
+                flattenedIngredients.set(pIng.ingredientId, currentWeight.add(requiredInputWeight));
             }
         }
 
