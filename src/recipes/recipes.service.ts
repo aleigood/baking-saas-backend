@@ -299,23 +299,22 @@ export class RecipesService {
             throw new NotFoundException('指定的配方版本不存在');
         }
 
-        // [核心修改] 检查是否正在 "进行中" 的任务
-        const productIds = versionToUpdate.products.map((p) => p.id);
-        if (productIds.length > 0) {
-            const inProgressUsageCount = await this.prisma.productionTaskItem.count({
-                where: {
-                    productId: { in: productIds },
-                    task: {
-                        status: 'IN_PROGRESS', // [核心修改] 只检查 "进行中"
-                    },
-                },
-            });
-            if (inProgressUsageCount > 0) {
-                // 如果正在生产中，则抛出错误
-                throw new BadRequestException('此配方版本正在生产中，无法修改。请等待任务完成后再试。');
-            }
-        }
-        // [核心修改] 原先检查 COMPLETED 任务的逻辑 (原 335-348 行) 已被删除
+        // [核心修改] 移除对 IN_PROGRESS 任务的检查
+        // const productIds = versionToUpdate.products.map((p) => p.id);
+        // if (productIds.length > 0) {
+        //     const inProgressUsageCount = await this.prisma.productionTaskItem.count({
+        //         where: {
+        //             productId: { in: productIds },
+        //             task: {
+        //                 status: 'IN_PROGRESS', // [核心修改] 只检查 "进行中"
+        //             },
+        //         },
+        //     });
+        //     if (inProgressUsageCount > 0) {
+        //         // 如果正在生产中，则抛出错误
+        //         throw new BadRequestException('此配方版本正在生产中，无法修改。请等待任务完成后再试。');
+        //     }
+        // }
 
         return this.prisma.$transaction(async (tx) => {
             const {
