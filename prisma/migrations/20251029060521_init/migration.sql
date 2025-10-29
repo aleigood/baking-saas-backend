@@ -219,6 +219,7 @@ CREATE TABLE "ProductionTask" (
     "startDate" TIMESTAMP(3) NOT NULL,
     "endDate" TIMESTAMP(3),
     "notes" TEXT,
+    "recipeSnapshot" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
@@ -243,7 +244,6 @@ CREATE TABLE "ProductionLog" (
     "taskId" TEXT NOT NULL,
     "completedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "notes" TEXT,
-    "recipeSnapshot" JSONB,
 
     CONSTRAINT "ProductionLog_pkey" PRIMARY KEY ("id")
 );
