@@ -578,23 +578,29 @@ export class ProductionTasksService {
             const procedure = mainComponent?.procedure;
 
             if (procedure && mainComponent && details.ingredients && details.ingredients.length > 0) {
-                let baseForPercentageCalc = new Prisma.Decimal(data.totalWeight.toNumber());
-                if (
-                    (recipeFamily.type === RecipeType.PRE_DOUGH || recipeFamily.category === RecipeCategory.BREAD) &&
-                    mainComponent.ingredients.length > 0
-                ) {
-                    const totalRatio = mainComponent.ingredients.reduce(
-                        (sum, ing) => sum.add(new Prisma.Decimal(ing.ratio ?? 0)),
-                        new Prisma.Decimal(0),
-                    );
-                    if (!totalRatio.isZero()) {
-                        baseForPercentageCalc = new Prisma.Decimal(data.totalWeight.toNumber()).div(totalRatio);
-                    }
+                // [核心修改] 统一计算逻辑
+                // 100%基准值应基于“所需投入总重” (details.totalWeight) 和“总配比”
+
+                // 1. 先获取总配比
+                const totalRatio = mainComponent.ingredients.reduce(
+                    (sum, ing) => sum.add(new Prisma.Decimal(ing.ratio ?? 0)),
+                    new Prisma.Decimal(0),
+                );
+
+                // 2. 初始化基准值为“所需投入总重” (从 costingService 返回的 details.totalWeight)
+                //    这作为总配比为0时的备用值
+                let baseForPercentageCalc = new Prisma.Decimal(details.totalWeight);
+
+                // 3. 如果总配比不为0，则计算理论的“100%基准值”
+                if (!totalRatio.isZero()) {
+                    // 100%基准值 = (所需投入总重 / 总配比)
+                    baseForPercentageCalc = new Prisma.Decimal(details.totalWeight).div(totalRatio);
                 }
+                // [核心修改结束]
 
                 const { processedProcedure, ingredientNotes } = this._parseAndCalculateProcedureNotes(
                     procedure,
-                    baseForPercentageCalc,
+                    baseForPercentageCalc, // 使用修正后的基准值
                 );
                 details.procedure = processedProcedure;
 
