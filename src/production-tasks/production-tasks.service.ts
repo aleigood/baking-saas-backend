@@ -577,6 +577,15 @@ export class ProductionTasksService {
             const mainComponent = recipeFamily?.versions[0]?.components[0];
             const procedure = mainComponent?.procedure;
 
+            // [核心修改] 获取版本号 (notes)
+            const activeVersion = recipeFamily?.versions[0];
+            const versionName = activeVersion?.notes; // 直接访问 .notes
+
+            // [核心修改] 组合名称和版本号
+            if (details.name && versionName) {
+                details.name = `${details.name} (${versionName})`;
+            }
+
             if (procedure && mainComponent && details.ingredients && details.ingredients.length > 0) {
                 // [核心修改] 统一计算逻辑
                 // 100%基准值应基于“所需投入总重” (details.totalWeight) 和“总配比”
