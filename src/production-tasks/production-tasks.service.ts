@@ -251,16 +251,47 @@ export class ProductionTasksService {
         };
     }
 
+    // [核心修正] 修正为行业标准公式 Tw = (Td * 3) - Tf - Ta - F
     private _calculateWaterTemp(targetTemp: number, mixerType: number, flourTemp: number, ambientTemp: number): number {
-        return (targetTemp - mixerType) * 3 - flourTemp - ambientTemp;
+        // Td = 目标温度 (targetTemp)
+        // F  = 摩擦系数 (mixerType)
+        // Tf = 面粉温度 (flourTemp)
+        // Ta = 环境温度 (ambientTemp)
+        return targetTemp * 3 - flourTemp - ambientTemp - mixerType;
     }
 
+    // [核心修正] 修正冰量计算公式的分母
     private _calculateIce(targetWaterTemp: number, totalWater: number, initialWaterTemp: number): number {
+        // [核心修正] 目标水温 >= 初始水温，不需要冰
         if (targetWaterTemp >= initialWaterTemp) {
             return 0;
         }
-        const ice = (totalWater * (initialWaterTemp - targetWaterTemp)) / (initialWaterTemp + 80);
-        return ice;
+
+        // [核心修正] 物理公式: 冰量 = 总水量 * (Ti - Tw) / (80 + Tw)
+        // Ti = 初始水温 (initialWaterTemp)
+        // Tw = 目标水温 (targetWaterTemp)
+        // W  = 总水量 (totalWater)
+
+        const Ti = new Prisma.Decimal(initialWaterTemp);
+        const Tw = new Prisma.Decimal(targetWaterTemp);
+        const W = new Prisma.Decimal(totalWater);
+
+        // [核心修正] 修正分母 (80 + Tw)
+        const denominator = new Prisma.Decimal(80).add(Tw);
+
+        // [核心修正] 如果 Tw <= -80°C, 分母为0或负，
+        // 意味着需要极端的冷却, 即使所有水都是冰也不够。
+        // 返回一个大于总水量的数，以触发调用方 (_calculateComponentGroups) 的“超量”逻辑。
+        if (denominator.isZero() || denominator.isNegative()) {
+            return totalWater + 1; // 返回一个比总水量大的值
+        }
+
+        // (Ti - Tw) 此时必然为正
+        const numerator = W.mul(Ti.sub(Tw));
+
+        const ice = numerator.div(denominator);
+
+        return ice.toNumber(); // 返回计算出的冰量，调用方会处理 > totalWater 的情况
     }
 
     private _calculateRequiredWetIngredientTemp(
@@ -1585,12 +1616,14 @@ export class ProductionTasksService {
                 const waterIngredient = baseComponentIngredientsMap.get(waterIngredientId);
                 if (waterIngredient) {
                     const autoCalculatedParts: string[] = [];
+                    // [核心修正] 调用修正后的 _calculateWaterTemp
                     const targetWaterTemp = this._calculateWaterTemp(
                         new Prisma.Decimal(baseComponentInfo.targetTemp).toNumber(), // [修复] 确保从快照加载时转换为Decimal
                         mixerType,
                         flourTemp,
                         envTemp,
                     );
+                    // [核心修正] 调用修正后的 _calculateIce
                     const iceWeight = this._calculateIce(targetWaterTemp, totalWaterForFamily.toNumber(), waterTemp);
 
                     if (iceWeight > totalWaterForFamily.toNumber()) {
