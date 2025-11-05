@@ -31,9 +31,12 @@ export interface CalculatedIngredientInfo {
     extraInfo?: string;
 }
 
+// [核心新增] 定义用于排序的类型
+type SortableCalculatedIngredient = CalculatedIngredientInfo & { isFlour?: boolean };
+
 export interface CalculatedComponentGroup {
     name: string;
-    ingredients: CalculatedIngredientInfo[];
+    ingredients: SortableCalculatedIngredient[]; // [核心修改] 允许 ingredients 包含 isFlour
     procedure?: string[];
     totalCost: number;
 }
@@ -57,6 +60,7 @@ export interface CalculatedProductCostDetails {
 }
 
 export interface CalculatedRecipeIngredient {
+    ingredientId: string; // [核心修改] 确保有 ingredientId
     name: string;
     weightInGrams: number;
     brand?: string | null;
@@ -189,6 +193,7 @@ export class CostingService {
 
                 if (ing.linkedPreDough) {
                     return {
+                        ingredientId: ing.linkedPreDough.id, // [核心修改]
                         name: ing.linkedPreDough.name,
                         weightInGrams: weight.toNumber(),
                         isRecipe: true,
@@ -196,6 +201,7 @@ export class CostingService {
                     };
                 } else if (ing.ingredient) {
                     return {
+                        ingredientId: ing.ingredient.id, // [核心修改]
                         name: ing.ingredient.name,
                         weightInGrams: weight.toNumber(),
                         isRecipe: false,
@@ -369,6 +375,34 @@ export class CostingService {
         return consumptionLogs.map((log) => ({ cost: log.quantityInGrams.toNumber() })).reverse();
     }
 
+    // [核心新增] 排序辅助函数
+    private _sortCalculatedIngredients(
+        ingredients: SortableCalculatedIngredient[],
+        category: RecipeCategory,
+        type: RecipeType,
+    ): SortableCalculatedIngredient[] {
+        const isFlourSort = type === 'PRE_DOUGH' || category === 'BREAD';
+
+        return ingredients.sort((a, b) => {
+            // 在 cost service 中, 预制面团(isRecipe)不在 ingredients 数组中，
+            // 它们是独立的 componentGroups, 所以不需要 isRecipe 排序
+
+            // 1. 如果是面包或面种类，应用面粉优先规则
+            if (isFlourSort) {
+                const aIsFlour = a.isFlour ?? false;
+                const bIsFlour = b.isFlour ?? false;
+
+                if (aIsFlour && !bIsFlour) return -1;
+                if (!aIsFlour && bIsFlour) return 1;
+            }
+
+            // 2. 按用量（克重）倒序
+            const aWeight = a.weightInGrams ?? 0;
+            const bWeight = b.weightInGrams ?? 0;
+            return bWeight - aWeight;
+        });
+    }
+
     private _parseProcedureForNotes(
         procedure: string[] | undefined | null,
         baseWeightForPercentage: Prisma.Decimal,
@@ -425,6 +459,10 @@ export class CostingService {
         const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
+
+        // [核心新增] 获取品类和类型用于排序
+        const recipeCategory = product.recipeVersion.family.category;
+        const recipeType = product.recipeVersion.family.type;
 
         const getPricePerKg = (id: string) => {
             const pricePerGram = pricePerGramMap.get(id);
@@ -484,6 +522,9 @@ export class CostingService {
             parentConversionFactor: Prisma.Decimal,
             isBaseComponent: boolean,
             flourWeightReference: Prisma.Decimal,
+            // [核心新增] 传入分类用于排序
+            category: RecipeCategory,
+            type: RecipeType,
         ): CalculatedComponentGroup => {
             const group: CalculatedComponentGroup = {
                 name: isBaseComponent ? '基础组件' : component.name,
@@ -546,6 +587,9 @@ export class CostingService {
                         newConversionFactor,
                         false,
                         flourWeightReference,
+                        // [核心新增] 传递预制面团的分类和类型
+                        ingredient.linkedPreDough!.category,
+                        ingredient.linkedPreDough!.type,
                     );
                     preDoughGroup.name = `${ingredient.linkedPreDough?.name}`;
                     componentGroups.push(preDoughGroup);
@@ -568,10 +612,15 @@ export class CostingService {
                         pricePerKg: pricePerKg,
                         cost: cost.toNumber(), // [核心修复] 移除 .toDP()
                         extraInfo: extraInfoParts.length > 0 ? extraInfoParts.join('\n') : undefined,
+                        isFlour: ingredient.ingredient.isFlour, // [核心新增]
                     });
                     group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
                 }
             }
+
+            // [核心新增] 在返回组之前对其原料进行排序
+            group.ingredients = this._sortCalculatedIngredients(group.ingredients, category, type);
+
             // [核心修正] 将这个组件的总成本累加到产品总成本
             totalCost = totalCost.add(group.totalCost);
             return group;
@@ -607,6 +656,8 @@ export class CostingService {
             new Prisma.Decimal(1),
             true,
             flourWeightReference,
+            recipeCategory, // [核心新增] 传入主配方的分类
+            recipeType, // [核心新增] 传入主配方的类型
         );
 
         if (baseComponentGroup.ingredients.length > 0) {
@@ -623,45 +674,51 @@ export class CostingService {
         };
 
         // [核心修正] 此循环现在同时负责计算附加原料的成本，并累加到 totalCost
-        const extraIngredients = (product.ingredients || []).map((ing) => {
-            const name = ing.ingredient?.name || ing.linkedExtra?.name || '未知';
-            let finalWeightInGrams = new Prisma.Decimal(0);
-            let cost = new Prisma.Decimal(0);
-            let pricePerKg = 0; // 仅当是基础原料时有效
+        const extraIngredients = (product.ingredients || [])
+            .map((ing) => {
+                const name = ing.ingredient?.name || ing.linkedExtra?.name || '未知';
+                let finalWeightInGrams = new Prisma.Decimal(0);
+                let cost = new Prisma.Decimal(0);
+                let pricePerKg = 0; // 仅当是基础原料时有效
 
-            if (ing.type === 'MIX_IN' && ing.ratio) {
-                finalWeightInGrams = flourWeightReference.mul(new Prisma.Decimal(ing.ratio));
-            } else if (ing.weightInGrams) {
-                finalWeightInGrams = new Prisma.Decimal(ing.weightInGrams);
-            }
-
-            if (ing.ingredientId) {
-                // 是基础原料
-                pricePerKg = getPricePerKg(ing.ingredientId);
-                cost = new Prisma.Decimal(pricePerKg).div(1000).mul(finalWeightInGrams);
-            } else if (ing.linkedExtraId) {
-                // 是配方 (linkedExtra)
-                const extraComponent = ing.linkedExtra?.versions?.[0]?.components?.[0];
-                if (extraComponent) {
-                    // 调用我们新增的辅助函数来计算这个配方的成本
-                    cost = getExtraRecipeCost(extraComponent as FullRecipeVersion['components'][0], finalWeightInGrams);
+                if (ing.type === 'MIX_IN' && ing.ratio) {
+                    finalWeightInGrams = flourWeightReference.mul(new Prisma.Decimal(ing.ratio));
+                } else if (ing.weightInGrams) {
+                    finalWeightInGrams = new Prisma.Decimal(ing.weightInGrams);
                 }
-            }
 
-            // [核心修正] 将这个附加原料的成本累加到产品总成本
-            totalCost = totalCost.add(cost);
+                if (ing.ingredientId) {
+                    // 是基础原料
+                    pricePerKg = getPricePerKg(ing.ingredientId);
+                    cost = new Prisma.Decimal(pricePerKg).div(1000).mul(finalWeightInGrams);
+                } else if (ing.linkedExtraId) {
+                    // 是配方 (linkedExtra)
+                    const extraComponent = ing.linkedExtra?.versions?.[0]?.components?.[0];
+                    if (extraComponent) {
+                        // 调用我们新增的辅助函数来计算这个配方的成本
+                        cost = getExtraRecipeCost(
+                            extraComponent as FullRecipeVersion['components'][0],
+                            finalWeightInGrams,
+                        );
+                    }
+                }
 
-            return {
-                id: ing.id,
-                name: name,
-                type: getProductIngredientTypeName(ing.type),
-                cost: cost.toNumber(), // [核心修复] 移除 .toDP()
-                weightInGrams: finalWeightInGrams.toNumber(),
-                ratio: ing.ratio ? ing.ratio.toNumber() : undefined,
-                extraInfo: undefined,
-                // pricePerKg: pricePerKg, // 这一行可以去掉，因为对于配方它是无效的
-            };
-        });
+                // [核心修正] 将这个附加原料的成本累加到产品总成本
+                totalCost = totalCost.add(cost);
+
+                return {
+                    id: ing.id,
+                    name: name,
+                    type: getProductIngredientTypeName(ing.type),
+                    cost: cost.toNumber(), // [核心修复] 移除 .toDP()
+                    weightInGrams: finalWeightInGrams.toNumber(),
+                    ratio: ing.ratio ? ing.ratio.toNumber() : undefined,
+                    extraInfo: undefined,
+                    // pricePerKg: pricePerKg, // 这一行可以去掉，因为对于配方它是无效的
+                };
+            })
+            // [核心新增] 按用量（克重）倒序排序附加原料
+            .sort((a, b) => b.weightInGrams - a.weightInGrams);
 
         const summaryRowName = product.recipeVersion.family.category === RecipeCategory.BREAD ? '基础面团' : '基础原料';
         const allExtraIngredients: CalculatedExtraIngredientInfo[] = [

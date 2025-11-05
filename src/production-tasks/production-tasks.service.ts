@@ -689,31 +689,54 @@ export class ProductionTasksService {
                             i.ingredient ? [i.ingredient.id, { isFlour: i.ingredient.isFlour }] : [null, null],
                         ),
                     );
-                    // 2. 补充 isFlour 和 id 属性
-                    // [核心修改] 修复 TS 错误 (TS 2322, TS 2339)
-                    const ingredientsWithFlour: SortableTaskIngredient[] = (
+
+                    // 2. [FIX] 转换 costingService 的 list (CalculatedRecipeIngredient[])
+                    //    为 DTO 的 list (SortableTaskIngredient[])
+                    const ingredientsForSortingAndNotes: SortableTaskIngredient[] = (
                         details.ingredients as CalculatedRecipeIngredient[]
                     ).map((ing) => ({
-                        ...ing,
-                        id: ing.ingredientId, // [核心修复] 假设 costing service 返回 ingredientId
-                        isFlour: ingredientInfoMap.get(ing.ingredientId)?.isFlour ?? false, // [核心修复]
+                        // 显式映射 TaskIngredientDetail 所需的属性
+                        id: ing.ingredientId, // <-- 修复 Error 2 (提供 id)
+                        name: ing.name,
+                        weightInGrams: ing.weightInGrams,
+                        brand: ing.brand ?? null,
+                        isRecipe: ing.isRecipe,
+                        extraInfo: null, // <-- 补全 TaskIngredientDetail
+
+                        // 添加排序所需的属性
+                        isFlour: ingredientInfoMap.get(ing.ingredientId)?.isFlour ?? false,
                     }));
-                    // 3. 排序
-                    details.ingredients = this._sortTaskIngredients(
-                        ingredientsWithFlour,
+
+                    // 3. [FIX] 对新列表排序，并赋值给新变量
+                    const sortedIngredients = this._sortTaskIngredients(
+                        ingredientsForSortingAndNotes, // <-- 使用我们刚创建的新列表
                         recipeFamily.category,
                         recipeFamily.type,
                     );
-                }
 
-                if (ingredientNotes.size > 0) {
-                    details.ingredients.forEach((ingredient: TaskIngredientDetail) => {
-                        const note = ingredientNotes.get(ingredient.name);
-                        if (note) {
-                            const existingInfo = ingredient.extraInfo ? `${ingredient.extraInfo}\n` : '';
-                            ingredient.extraInfo = `${existingInfo}${note}`;
-                        }
-                    });
+                    // 4. [FIX] 遍历新排好序的列表
+                    if (ingredientNotes.size > 0) {
+                        sortedIngredients.forEach((ingredient: TaskIngredientDetail) => {
+                            // <-- 使用新列表
+                            const note = ingredientNotes.get(ingredient.name);
+                            if (note) {
+                                const existingInfo = ingredient.extraInfo ? `${ingredient.extraInfo}\n` : '';
+                                ingredient.extraInfo = `${existingInfo}${note}`;
+                            }
+                        });
+                    }
+
+                    // 5. [FIX] 在 push 之前，将已排序和注释的列表(SortableTaskIngredient[])
+                    // 强制赋值回 details.ingredients (它期望 CalculatedRecipeIngredient[])
+                    details.ingredients = sortedIngredients.map((ing) => ({
+                        ingredientId: ing.id, // 映射 id 回 ingredientId
+                        name: ing.name,
+                        weightInGrams: ing.weightInGrams,
+                        brand: ing.brand,
+                        isRecipe: ing.isRecipe,
+                        extraInfo: ing.extraInfo,
+                        // 'id' 和 'isFlour' 属性被正确省略
+                    }));
                 }
             }
             prepTaskItems.push(details);
@@ -1758,15 +1781,10 @@ export class ProductionTasksService {
                         name: ing.name,
                         brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
-                        weightInGGrams: new Prisma.Decimal(ing.weightInGrams ?? 0).toNumber(), // [修复] 确保从快照加载时转换为Decimal
-                        extraInfo: null, // [核心修复] 满足 TaskIngredientDetail 类型
-                        weightInGrams: 0, // [核心修复] 修正上一行
+                        weightInGrams: new Prisma.Decimal(ing.weightInGrams ?? 0).toNumber(), // [修正]
+                        extraInfo: null,
                     }))
-                    .map((ing) => ({
-                        ...ing,
-                        weightInGrams: new Prisma.Decimal(ing.weightInGrams ?? 0).toNumber(),
-                    }))
-                    .sort((a, b) => b.weightInGrams - a.weightInGrams); // [核心新增] 按用量排序
+                    .sort((a, b) => b.weightInGrams - a.weightInGrams);
 
                 const toppings: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
                     .filter((ing) => ing.type === 'TOPPING')
