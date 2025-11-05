@@ -164,6 +164,25 @@ type ComponentWithRecursiveIngredients = ProductWithDetails['recipeVersion']['co
 type PrepItemFamily = RecipeFamily;
 type RequiredPrepItem = { family: PrepItemFamily; totalWeight: Prisma.Decimal };
 
+// [核心修正] 为 _getPrepItemsForTask 中的快照配方对象定义最小类型存根
+type SnapshotRecipeFamilyStub = {
+    id: string;
+    name: string;
+    type: RecipeType;
+    category: RecipeCategory;
+    versions: {
+        notes: string | null;
+        components: {
+            procedure: string[];
+            lossRatio: number | string | null;
+            ingredients: {
+                ratio: number | string | null;
+                ingredient: { id: string; isFlour: boolean } | null;
+            }[];
+        }[];
+    }[];
+};
+
 type FlattenedIngredient = {
     id: string;
     name: string;
@@ -615,38 +634,22 @@ export class ProductionTasksService {
         }
 
         const prepTaskItems: CalculatedRecipeDetails[] = [];
-        for (const [id, data] of requiredPrepItems.entries()) {
-            // [核心修改] 此处 costingService 仍然查询实时配方。
-            // 这是一个权衡：我们假设预制件的“配方”是实时的，但“需求量”是基于快照计算的。
-            // 理想情况下，costingService 也应能接收快照数据。
-            const [details, recipeFamily] = await Promise.all([
-                this.costingService.getCalculatedRecipeDetails(tenantId, id, data.totalWeight.toNumber()),
-                this.prisma.recipeFamily.findUnique({
-                    where: { id },
-                    include: {
-                        versions: {
-                            where: { isActive: true },
-                            include: {
-                                components: {
-                                    include: {
-                                        ingredients: {
-                                            include: {
-                                                ingredient: true,
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                }),
-            ]);
+        // [核心修正] 移除 L618 报错的 'id' 变量
+        for (const [, data] of requiredPrepItems.entries()) {
+            // [核心修改] 不再执行 Promise.all，不再查询数据库
+            // [核心修改] 调用 costingService 的新 "FromSnapshot" 同步方法
+            // [核心修改] data.family 就是快照中 linkedPreDough/linkedExtra 存储的完整配方对象
+            const details = this.costingService.getCalculatedRecipeDetailsFromSnapshot(
+                data.family,
+                data.totalWeight.toNumber(),
+            );
 
-            const mainComponent = recipeFamily?.versions[0]?.components[0];
+            // [核心修改] 直接从 data.family (快照) 中获取所需信息，不再查询数据库
+            // [核心修正] 使用 'unknown' 作为桥梁进行强制类型转换，修复 L649 (TS 2352) 错误
+            const recipeFamily = data.family as unknown as SnapshotRecipeFamilyStub;
+            const mainComponent = recipeFamily.versions[0]?.components[0];
             const procedure = mainComponent?.procedure;
-
-            // [核心修改] 获取版本号 (notes)
-            const activeVersion = recipeFamily?.versions[0];
+            const activeVersion = recipeFamily.versions[0];
             const versionName = activeVersion?.notes; // 直接访问 .notes
 
             // [核心修改] 组合名称和版本号
@@ -704,6 +707,7 @@ export class ProductionTasksService {
                         extraInfo: null, // <-- 补全 TaskIngredientDetail
 
                         // 添加排序所需的属性
+                        // [核心修正] 修复 L699 (isFlour) 错误
                         isFlour: ingredientInfoMap.get(ing.ingredientId)?.isFlour ?? false,
                     }));
 
@@ -2117,7 +2121,8 @@ export class ProductionTasksService {
             for (const [ingredientId, data] of totalIngredientsMap.entries()) {
                 const ingredient = ingredientStockMap.get(ingredientId);
                 if (ingredient && new Prisma.Decimal(ingredient.currentStockInGrams).lt(data.totalWeight)) {
-                    insufficientIngredients.push(ingredient.name);
+                    // [核心修改] 使用快照中的原料名称 (data.name)，而不是实时查询的名称 (ingredient.name)
+                    insufficientIngredients.push(data.name);
                 }
             }
 
@@ -2348,8 +2353,8 @@ export class ProductionTasksService {
                     throw new BadRequestException(`快照中未找到产品ID ${item.productId}。`);
                 }
 
-                // [核心修改] 调用基于快照的新方法 (假设存在)
-                const consumptions = await this.costingService.calculateProductConsumptionsFromSnapshot(
+                // [核心修改] 调用 costingService 的同步方法，移除 await
+                const consumptions = this.costingService.calculateProductConsumptionsFromSnapshot(
                     snapshotProduct,
                     totalQuantity,
                 );
@@ -2402,8 +2407,8 @@ export class ProductionTasksService {
                     throw new BadRequestException(`快照中未找到产品ID ${item.productId}。`);
                 }
 
-                // [核心修改] 调用基于快照的新方法 (假设存在)
-                const consumptions = await this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                // [核心修改] 调用 costingService 的同步方法，移除 await
+                const consumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
                     snapshotProduct,
                     item.completedQuantity,
                 );
@@ -2471,11 +2476,11 @@ export class ProductionTasksService {
                     if (!snapshotProduct) {
                         throw new BadRequestException(`快照中未找到产品ID ${productId}。`);
                     }
-                    const spoiledConsumptions =
-                        await this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
-                            snapshotProduct,
-                            actualSpoilage,
-                        );
+                    // [核心修改] 调用 costingService 的同步方法，移除 await
+                    const spoiledConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                        snapshotProduct,
+                        actualSpoilage,
+                    );
 
                     for (const spoilage of spoilageDetails) {
                         await tx.productionTaskSpoilageLog.create({

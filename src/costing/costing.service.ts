@@ -118,6 +118,34 @@ type FullProduct = Product & {
     ingredients: FullProductIngredient[];
 };
 
+// [核心新增] 为快照中的 RecipeFamily 定义一个最小类型 (基于 Prisma 生成的类型)
+// 这有助于 getCalculatedRecipeDetailsFromSnapshot 的类型安全
+type SnapshotRecipeFamily = {
+    id: string;
+    name: string;
+    type: RecipeType;
+    versions: {
+        components: {
+            lossRatio: number | string | null;
+            procedure: string[];
+            ingredients: {
+                ratio: number | string | null;
+                linkedPreDough: {
+                    id: string;
+                    name: string;
+                } | null;
+                ingredient: {
+                    id: string;
+                    name: string;
+                    activeSku: {
+                        brand: string | null;
+                    } | null;
+                } | null;
+            }[];
+        }[];
+    }[];
+};
+
 @Injectable()
 export class CostingService {
     constructor(private readonly prisma: PrismaService) {}
@@ -217,6 +245,99 @@ export class CostingService {
             name: recipeFamily.name,
             type: recipeFamily.type,
             // [核心修复] 移除 .toDP()，返回完整精度的 number
+            totalWeight: requiredInputWeight.toNumber(),
+            targetWeight: outputWeightTarget.toNumber(),
+            procedure: mainComponent.procedure,
+            ingredients: calculatedIngredients,
+        };
+
+        return response;
+    }
+
+    /**
+     * [核心新增] getCalculatedRecipeDetails 的快照版本
+     * 此方法是同步的，因为它只处理已传入的快照对象，不执行任何 I/O
+     */
+    getCalculatedRecipeDetailsFromSnapshot(
+        snapshotRecipeFamily: any, // 接收来自快照的 RecipeFamily 对象
+        totalWeight: number, // 目标产出重量 (Output)
+    ): CalculatedRecipeDetails {
+        // [核心修正] 立即转换类型，以便后续安全访问
+        const recipeFamily = snapshotRecipeFamily as SnapshotRecipeFamily;
+        const outputWeightTarget = new Prisma.Decimal(totalWeight);
+
+        // [核心修改] 不再查询数据库，而是直接访问对象
+        if (!recipeFamily || !recipeFamily.versions[0]?.components[0]) {
+            // [核心修正] 使用类型安全且经过可选链检查的 'recipeFamily' 变量
+            return {
+                id: recipeFamily?.id || 'unknown',
+                name: recipeFamily?.name || '快照数据不完整',
+                type: recipeFamily?.type || 'OTHER',
+                totalWeight: totalWeight,
+                targetWeight: totalWeight,
+                procedure: [],
+                ingredients: [],
+            };
+        }
+
+        const activeVersion = recipeFamily.versions[0];
+        const mainComponent = activeVersion.components[0];
+
+        // [核心逻辑] 根据损耗率，从“目标产出重量”反推计算“所需投入原料总重”
+        const lossRatio = new Prisma.Decimal(mainComponent.lossRatio || 0);
+        const divisor = new Prisma.Decimal(1).sub(lossRatio);
+
+        const requiredInputWeight = divisor.isZero() ? outputWeightTarget : outputWeightTarget.div(divisor);
+
+        const totalRatio = mainComponent.ingredients.reduce(
+            (sum, ing) => sum.add(new Prisma.Decimal(ing.ratio ?? 0)),
+            new Prisma.Decimal(0),
+        );
+
+        if (totalRatio.isZero()) {
+            return {
+                id: recipeFamily.id,
+                name: recipeFamily.name,
+                type: recipeFamily.type,
+                totalWeight: outputWeightTarget.toNumber(),
+                targetWeight: outputWeightTarget.toNumber(),
+                procedure: mainComponent.procedure,
+                ingredients: [],
+            };
+        }
+
+        const weightPerRatioPoint = requiredInputWeight.div(totalRatio);
+
+        const calculatedIngredients = mainComponent.ingredients
+            .map((ing) => {
+                // [核心修改] 确保从快照中读取时转换为 Decimal
+                const weight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
+
+                if (ing.linkedPreDough) {
+                    return {
+                        ingredientId: ing.linkedPreDough.id,
+                        name: ing.linkedPreDough.name,
+                        weightInGrams: weight.toNumber(),
+                        isRecipe: true,
+                        brand: null,
+                    };
+                } else if (ing.ingredient) {
+                    return {
+                        ingredientId: ing.ingredient.id,
+                        name: ing.ingredient.name,
+                        weightInGrams: weight.toNumber(),
+                        isRecipe: false,
+                        brand: ing.ingredient.activeSku?.brand,
+                    };
+                }
+                return null;
+            })
+            .filter(Boolean) as CalculatedRecipeIngredient[];
+
+        const response: CalculatedRecipeDetails = {
+            id: recipeFamily.id,
+            name: recipeFamily.name,
+            type: recipeFamily.type,
             totalWeight: requiredInputWeight.toNumber(),
             targetWeight: outputWeightTarget.toNumber(),
             procedure: mainComponent.procedure,
@@ -889,11 +1010,14 @@ export class CostingService {
 
     /**
      * [核心新增] 辅助函数：从 FullProduct 对象中构建一个包含所有基础原料的 Map
+     * [核心修改] 修改参数为 any，以便接收快照对象
      */
-    private _buildIngredientMapFromProduct(product: FullProduct): Map<string, Ingredient> {
+    private _buildIngredientMapFromProduct(product: any): Map<string, Ingredient> {
+        const fullProduct = product as FullProduct; // 类型断言
         const map = new Map<string, Ingredient>();
 
         const processComponent = (component: FullRecipeVersion['components'][0]) => {
+            if (!component) return; // [核心修复] 增加安全检查
             for (const ing of component.ingredients) {
                 if (ing.ingredient) {
                     map.set(ing.ingredient.id, ing.ingredient);
@@ -906,9 +1030,9 @@ export class CostingService {
             }
         };
 
-        product.recipeVersion.components.forEach(processComponent);
+        fullProduct.recipeVersion.components.forEach(processComponent);
 
-        for (const pIng of product.ingredients) {
+        for (const pIng of fullProduct.ingredients) {
             if (pIng.ingredient) {
                 map.set(pIng.ingredient.id, pIng.ingredient);
             }
@@ -1125,6 +1249,8 @@ export class CostingService {
         // [核心区别] 理论计算，不考虑损耗率，直接使用 requiredOutputWeight 作为 totalInputWeight
         const totalInputWeight = requiredOutputWeight;
 
+        // [核心修复] 增加安全检查
+        if (!component) return;
         const totalRatio = component.ingredients.reduce(
             (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
             new Prisma.Decimal(0),
@@ -1202,11 +1328,13 @@ export class CostingService {
 
     /**
      * [核心新增] 从“快照”计算生产指定数量产品所需的**总投入原料**清单 (含损耗)。
+     * [核心修正] 移除 'async' 关键字，使其变为同步方法
      */
-    async calculateProductConsumptionsFromSnapshot(
+    calculateProductConsumptionsFromSnapshot(
         snapshotProduct: any, // 接收来自快照的 product 对象
         quantity: number,
-    ): Promise<ConsumptionDetail[]> {
+    ): ConsumptionDetail[] {
+        // [核心修正] 移除 Promise<>
         const product = snapshotProduct as FullProduct; // 类型断言
 
         // [核心修改] 调用重构后的同步函数
@@ -1214,28 +1342,19 @@ export class CostingService {
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
 
-        // [核心修改] 仍然需要查询“实时”的原料名称和SKU ID
-        const ingredients = await this.prisma.ingredient.findMany({
-            where: {
-                id: { in: ingredientIds },
-            },
-            select: {
-                id: true,
-                name: true,
-                activeSkuId: true,
-            },
-        });
-        const ingredientInfoMap = new Map(ingredients.map((i) => [i.id, { name: i.name, activeSkuId: i.activeSkuId }]));
+        // [核心修改] 不再查询数据库，改为从快照中构建原料信息
+        const ingredientInfoMap = this._buildIngredientMapFromProduct(product);
 
         const result: ConsumptionDetail[] = [];
         for (const ingredientId of ingredientIds) {
             const totalConsumed = (flatIngredients.get(ingredientId) || new Prisma.Decimal(0)).mul(quantity);
             if (totalConsumed.gt(0)) {
+                // [核心修改] 从快照构建的 map 中获取信息
                 const info = ingredientInfoMap.get(ingredientId);
                 result.push({
                     ingredientId: ingredientId,
-                    ingredientName: info?.name || '未知原料',
-                    activeSkuId: info?.activeSkuId || null,
+                    ingredientName: info?.name || '未知原料', // [核心修改]
+                    activeSkuId: info?.activeSkuId || null, // [核心修改]
                     totalConsumed: totalConsumed.toNumber(),
                 });
             }
@@ -1293,11 +1412,13 @@ export class CostingService {
 
     /**
      * [核心新增] 从“快照”计算生产指定数量产品的**理论原料消耗**清单 (不含损耗)。
+     * [核心修正] 移除 'async' 关键字，使其变为同步方法
      */
-    async calculateTheoreticalProductConsumptionsFromSnapshot(
+    calculateTheoreticalProductConsumptionsFromSnapshot(
         snapshotProduct: any, // 接收来自快照的 product 对象
         quantity: number,
-    ): Promise<ConsumptionDetail[]> {
+    ): ConsumptionDetail[] {
+        // [核心修正] 移除 Promise<>
         const product = snapshotProduct as FullProduct; // 类型断言
 
         // [核心修改] 调用重构后的同步函数
@@ -1305,28 +1426,19 @@ export class CostingService {
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
 
-        // [核心修改] 仍然需要查询“实时”的原料名称和SKU ID
-        const ingredients = await this.prisma.ingredient.findMany({
-            where: {
-                id: { in: ingredientIds },
-            },
-            select: {
-                id: true,
-                name: true,
-                activeSkuId: true,
-            },
-        });
-        const ingredientInfoMap = new Map(ingredients.map((i) => [i.id, { name: i.name, activeSkuId: i.activeSkuId }]));
+        // [核心修改] 不再查询数据库，改为从快照中构建原料信息
+        const ingredientInfoMap = this._buildIngredientMapFromProduct(product);
 
         const result: ConsumptionDetail[] = [];
         for (const ingredientId of ingredientIds) {
             const totalConsumed = (flatIngredients.get(ingredientId) || new Prisma.Decimal(0)).mul(quantity);
             if (totalConsumed.gt(0)) {
+                // [核心修改] 从快照构建的 map 中获取信息
                 const info = ingredientInfoMap.get(ingredientId);
                 result.push({
                     ingredientId: ingredientId,
-                    ingredientName: info?.name || '未知原料',
-                    activeSkuId: info?.activeSkuId || null,
+                    ingredientName: info?.name || '未知原料', // [核心修改]
+                    activeSkuId: info?.activeSkuId || null, // [核心修改]
                     totalConsumed: totalConsumed.toNumber(),
                 });
             }
