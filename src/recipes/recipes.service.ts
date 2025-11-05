@@ -66,6 +66,44 @@ type RecipeFamilyWithDetails = Prisma.RecipeFamilyGetPayload<{
 export class RecipesService {
     constructor(private prisma: PrismaService) {}
 
+    // [核心新增] 排序辅助函数
+    // [核心修改]
+    // 1. 修复 Prettier 括号错误 (移除 ingredients: (...)[] )
+    // 2. 改为泛型以保留传入的深层类型，修复 typescript-eslint/no-unsafe-* 错误
+    private _sortIngredients<
+        T extends Prisma.ComponentIngredientGetPayload<{
+            include: {
+                ingredient: true;
+                linkedPreDough: true; // 最小类型约束
+            };
+        }>,
+    >(ingredients: T[], category: RecipeCategory, type: RecipeType): T[] {
+        // 规则1：面包类 和 面种类 应用面粉优先排序
+        const isFlourSort = type === 'PRE_DOUGH' || category === 'BREAD';
+
+        return ingredients.sort((a, b) => {
+            // 1. 优先排序面种 (linkedPreDough)
+            const aIsPreDough = !!a.linkedPreDoughId;
+            const bIsPreDough = !!b.linkedPreDoughId;
+            if (aIsPreDough && !bIsPreDough) return -1;
+            if (!aIsPreDough && bIsPreDough) return 1;
+
+            // 2. 如果是面包或面种类，应用面粉优先规则
+            if (isFlourSort) {
+                const aIsFlour = a.ingredient?.isFlour ?? false;
+                const bIsFlour = b.ingredient?.isFlour ?? false;
+
+                if (aIsFlour && !bIsFlour) return -1;
+                if (!aIsFlour && bIsFlour) return 1;
+            }
+
+            // 3. 按用量倒序 (flourRatio 优先于 ratio)
+            const aRatio = a.flourRatio ?? a.ratio ?? new Prisma.Decimal(0);
+            const bRatio = b.flourRatio ?? b.ratio ?? new Prisma.Decimal(0);
+            return new Prisma.Decimal(bRatio).cmp(new Prisma.Decimal(aRatio));
+        });
+    }
+
     // [核心重命名] 修改 _sanitizeFamily 方法内部变量名
     private _sanitizeFamily(family: RecipeFamilyWithDetails | null) {
         if (!family) {
@@ -75,26 +113,38 @@ export class RecipesService {
             ...family,
             versions: family.versions.map((version) => ({
                 ...version,
-                components: version.components.map((component) => ({
-                    ...component,
-                    targetTemp: component.targetTemp?.toNumber(),
-                    lossRatio: component.lossRatio?.toNumber(),
-                    divisionLoss: component.divisionLoss?.toNumber(),
-                    // [核心重命名] ing -> componentIngredient
-                    ingredients: component.ingredients.map((componentIngredient) => ({
-                        ...componentIngredient,
-                        ratio: componentIngredient.ratio?.toNumber(),
-                        flourRatio: componentIngredient.flourRatio?.toNumber(),
-                        ingredient: componentIngredient.ingredient
-                            ? {
-                                  ...componentIngredient.ingredient,
-                                  waterContent: componentIngredient.ingredient.waterContent.toNumber(),
-                                  currentStockInGrams: componentIngredient.ingredient.currentStockInGrams.toNumber(),
-                                  currentStockValue: componentIngredient.ingredient.currentStockValue.toNumber(),
-                              }
-                            : null,
-                    })),
-                })),
+                components: version.components.map((component) => {
+                    // [核心修改] 调用排序辅助函数
+                    // [核心修改] 修复 Prettier 换行
+                    const sortedIngredients = this._sortIngredients(
+                        component.ingredients,
+                        family.category,
+                        family.type,
+                    );
+
+                    return {
+                        ...component,
+                        targetTemp: component.targetTemp?.toNumber(),
+                        lossRatio: component.lossRatio?.toNumber(),
+                        divisionLoss: component.divisionLoss?.toNumber(),
+                        // [核心重命名] ing -> componentIngredient
+                        // [核心修改] 使用 sortedIngredients
+                        ingredients: sortedIngredients.map((componentIngredient) => ({
+                            ...componentIngredient,
+                            ratio: componentIngredient.ratio?.toNumber(),
+                            flourRatio: componentIngredient.flourRatio?.toNumber(),
+                            ingredient: componentIngredient.ingredient
+                                ? {
+                                      ...componentIngredient.ingredient,
+                                      waterContent: componentIngredient.ingredient.waterContent.toNumber(),
+                                      currentStockInGrams:
+                                          componentIngredient.ingredient.currentStockInGrams.toNumber(),
+                                      currentStockValue: componentIngredient.ingredient.currentStockValue.toNumber(),
+                                  }
+                                : null,
+                        })),
+                    };
+                }),
                 products: version.products.map((product) => ({
                     ...product,
                     baseDoughWeight: product.baseDoughWeight.toNumber(),
@@ -1163,13 +1213,21 @@ export class RecipesService {
                 throw new NotFoundException('源配方数据不完整: 缺少组件');
             }
 
+            // [核心修改] 调用排序
+            const sortedIngredients = this._sortIngredients(
+                componentSource.ingredients,
+                version.family.category,
+                version.family.type,
+            );
+
             const baseComponent: ComponentTemplate = {
                 id: componentSource.id,
                 name: componentSource.name,
                 type: 'BASE_COMPONENT',
                 lossRatio: toCleanPercent(componentSource.lossRatio) ?? undefined,
                 divisionLoss: componentSource.divisionLoss?.toNumber(),
-                ingredients: componentSource.ingredients.map((ing) => ({
+                // [核心修改] 使用 sortedIngredients
+                ingredients: sortedIngredients.map((ing) => ({
                     id: ing.ingredient!.id,
                     name: ing.ingredient!.name,
                     ratio: toCleanPercent(ing.ratio),
@@ -1200,7 +1258,15 @@ export class RecipesService {
             const mainComponentIngredientsForForm: ComponentTemplate['ingredients'] = [];
             const preDoughComponentsForForm: ComponentTemplate[] = [];
 
-            for (const ing of mainComponentSource.ingredients) {
+            // [核心修改] 调用排序
+            const sortedIngredients = this._sortIngredients(
+                mainComponentSource.ingredients,
+                version.family.category,
+                version.family.type,
+            );
+
+            // [核心修改] 使用 sortedIngredients
+            for (const ing of sortedIngredients) {
                 if (ing.linkedPreDough) {
                     const preDoughFamily = ing.linkedPreDough;
                     const preDoughActiveVersion = preDoughFamily.versions.find((v) => v.isActive);
@@ -1257,13 +1323,22 @@ export class RecipesService {
             if (!componentSource) {
                 throw new NotFoundException('源配方数据不完整: 缺少组件');
             }
+
+            // [核心修改] 调用排序
+            const sortedIngredients = this._sortIngredients(
+                componentSource.ingredients,
+                version.family.category,
+                version.family.type,
+            );
+
             const baseComponent: ComponentTemplate = {
                 id: componentSource.id,
                 name: componentSource.name,
                 type: 'BASE_COMPONENT',
                 lossRatio: toCleanPercent(componentSource.lossRatio) ?? undefined,
                 divisionLoss: componentSource.divisionLoss?.toNumber(),
-                ingredients: componentSource.ingredients.map((ing) => ({
+                // [核心修改] 使用 sortedIngredients
+                ingredients: sortedIngredients.map((ing) => ({
                     id: ing.ingredient!.id,
                     name: ing.ingredient!.name,
                     ratio: toCleanPercent(ing.ratio),
@@ -1284,21 +1359,36 @@ export class RecipesService {
             targetTemp: version.components[0]?.targetTemp?.toNumber() ?? undefined,
             components: componentsForForm,
             products: version.products.map((p) => {
+                // [核心修改] 修复 Prettier 格式
                 const processIngredients = (type: ProductIngredientType) => {
-                    return p.ingredients
-                        .filter((ing) => ing.type === type && (ing.ingredient || ing.linkedExtra))
-                        .map((ing) => {
-                            const name = ing.ingredient?.name || ing.linkedExtra?.name || '';
-                            return {
-                                id: ing.ingredient?.id || ing.linkedExtra?.id || null,
-                                name,
-                                ratio: toCleanPercent(ing.ratio),
-                                weightInGrams: ing.weightInGrams?.toNumber(),
-                                isRecipe: !!ing.linkedExtra,
-                                isFlour: ing.ingredient?.isFlour ?? false,
-                                waterContent: ing.ingredient?.waterContent.toNumber() ?? 0,
-                            };
-                        });
+                    return (
+                        p.ingredients
+                            .filter((ing) => ing.type === type && (ing.ingredient || ing.linkedExtra))
+                            // [核心修改] 按用量排序 (Rule 2)
+                            .sort((a, b) => {
+                                const aWeight = a.weightInGrams ? new Prisma.Decimal(a.weightInGrams).toNumber() : 0;
+                                const bWeight = b.weightInGrams ? new Prisma.Decimal(b.weightInGrams).toNumber() : 0;
+                                if (aWeight !== 0 || bWeight !== 0) {
+                                    return bWeight - aWeight; // 优先按克重
+                                }
+                                const aRatio = a.ratio ? new Prisma.Decimal(a.ratio).toNumber() : 0;
+                                const bRatio = b.ratio ? new Prisma.Decimal(b.ratio).toNumber() : 0;
+                                return bRatio - aRatio; // 其次按比例
+                            })
+                            .map((ing) => {
+                                const name = ing.ingredient?.name || ing.linkedExtra?.name || '';
+                                // [核心修改] 修复 Prettier 格式
+                                return {
+                                    id: ing.ingredient?.id || ing.linkedExtra?.id || null,
+                                    name,
+                                    ratio: toCleanPercent(ing.ratio),
+                                    weightInGrams: ing.weightInGrams?.toNumber(),
+                                    isRecipe: !!ing.linkedExtra,
+                                    isFlour: ing.ingredient?.isFlour ?? false,
+                                    waterContent: ing.ingredient?.waterContent.toNumber() ?? 0,
+                                };
+                            })
+                    );
                 };
                 return {
                     id: p.id, // [核心修改] 传递产品ID到前端

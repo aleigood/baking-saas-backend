@@ -178,12 +178,49 @@ type FlattenedIngredient = {
     waterContent?: Prisma.Decimal;
 };
 
+// [核心新增] 定义用于排序的原料类型
+// [核心修改] 假设 TaskIngredientDetail 是基类型，它需要 id
+// CalculatedRecipeIngredient (来自 costingService) 可能没有 id 但有 ingredientId
+type SortableTaskIngredient = TaskIngredientDetail & { isFlour?: boolean };
+type CalculatedRecipeIngredient = Omit<TaskIngredientDetail, 'id'> & { ingredientId: string };
+
 @Injectable()
 export class ProductionTasksService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly costingService: CostingService,
     ) {}
+
+    // [核心新增] 排序辅助函数
+    private _sortTaskIngredients(
+        ingredients: SortableTaskIngredient[],
+        category: RecipeCategory,
+        type: RecipeType,
+    ): SortableTaskIngredient[] {
+        const isFlourSort = type === 'PRE_DOUGH' || category === 'BREAD';
+
+        return ingredients.sort((a, b) => {
+            // 1. 优先排序面种 (isRecipe)
+            const aIsRecipe = a.isRecipe ?? false;
+            const bIsRecipe = b.isRecipe ?? false;
+            if (aIsRecipe && !bIsRecipe) return -1;
+            if (!aIsRecipe && bIsRecipe) return 1;
+
+            // 2. 如果是面包或面种类，应用面粉优先规则
+            if (isFlourSort) {
+                const aIsFlour = a.isFlour ?? false;
+                const bIsFlour = b.isFlour ?? false;
+
+                if (aIsFlour && !bIsFlour) return -1;
+                if (!aIsFlour && bIsFlour) return 1;
+            }
+
+            // 3. 按克重倒序
+            const aWeight = a.weightInGrams ?? 0;
+            const bWeight = b.weightInGrams ?? 0;
+            return bWeight - aWeight;
+        });
+    }
 
     // [核心新增] 新增一个私有方法，用于获取并序列化任务的实时配方数据作为快照
     private async _fetchAndSerializeSnapshot(
@@ -643,6 +680,31 @@ export class ProductionTasksService {
                     baseForPercentageCalc, // 使用修正后的基准值
                 );
                 details.procedure = processedProcedure;
+
+                // [核心修改] 在应用笔记前进行排序
+                if (recipeFamily && details.ingredients && details.ingredients.length > 0) {
+                    // 1. 创建原料信息 Map
+                    const ingredientInfoMap = new Map(
+                        mainComponent.ingredients.map((i) =>
+                            i.ingredient ? [i.ingredient.id, { isFlour: i.ingredient.isFlour }] : [null, null],
+                        ),
+                    );
+                    // 2. 补充 isFlour 和 id 属性
+                    // [核心修改] 修复 TS 错误 (TS 2322, TS 2339)
+                    const ingredientsWithFlour: SortableTaskIngredient[] = (
+                        details.ingredients as CalculatedRecipeIngredient[]
+                    ).map((ing) => ({
+                        ...ing,
+                        id: ing.ingredientId, // [核心修复] 假设 costing service 返回 ingredientId
+                        isFlour: ingredientInfoMap.get(ing.ingredientId)?.isFlour ?? false, // [核心修复]
+                    }));
+                    // 3. 排序
+                    details.ingredients = this._sortTaskIngredients(
+                        ingredientsWithFlour,
+                        recipeFamily.category,
+                        recipeFamily.type,
+                    );
+                }
 
                 if (ingredientNotes.size > 0) {
                     details.ingredients.forEach((ingredient: TaskIngredientDetail) => {
@@ -1500,7 +1562,7 @@ export class ProductionTasksService {
 
         const componentsMap = new Map<
             string,
-            { familyName: string; category: RecipeCategory; items: TaskItemWithDetails[] }
+            { familyName: string; category: RecipeCategory; type: RecipeType; items: TaskItemWithDetails[] }
         >();
         // [核心修改] 遍历来自“快照”的 items
         task.items.forEach((item) => {
@@ -1510,6 +1572,7 @@ export class ProductionTasksService {
                 componentsMap.set(family.id, {
                     familyName: family.name,
                     category: family.category,
+                    type: family.type, // [核心新增] 存储配方类型
                     items: [],
                 });
             }
@@ -1539,7 +1602,8 @@ export class ProductionTasksService {
                 totalFlourForFamily,
             );
 
-            const baseComponentIngredientsMap = new Map<string, TaskIngredientDetail>();
+            // [核心修改] 明确 Map 的类型
+            const baseComponentIngredientsMap = new Map<string, SortableTaskIngredient>();
             let totalComponentWeight = new Prisma.Decimal(0);
 
             let totalWaterForFamily = new Prisma.Decimal(0);
@@ -1569,6 +1633,7 @@ export class ProductionTasksService {
                     let name: string;
                     let brand: string | null = null;
                     let isRecipe = false;
+                    let isFlour = false; // [核心新增]
 
                     if (ing.linkedPreDough && ing.flourRatio) {
                         const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.components[0];
@@ -1588,6 +1653,7 @@ export class ProductionTasksService {
                         id = ing.ingredient.id;
                         name = ing.ingredient.name;
                         brand = ing.ingredient.activeSku?.brand || null;
+                        isFlour = ing.ingredient.isFlour; // [核心新增]
                     } else {
                         continue;
                     }
@@ -1599,12 +1665,14 @@ export class ProductionTasksService {
                     if (existing) {
                         existing.weightInGrams += currentTotalWeight.toNumber();
                     } else {
-                        const newIngredient: TaskIngredientDetail = {
+                        // [核心修改] 明确类型为 SortableTaskIngredient
+                        const newIngredient: SortableTaskIngredient = {
                             id,
                             name,
                             brand,
                             weightInGrams: currentTotalWeight.toNumber(),
                             isRecipe,
+                            isFlour, // [核心新增]
                             extraInfo: ingredientNotes.get(name) || null,
                         };
                         baseComponentIngredientsMap.set(id, newIngredient);
@@ -1679,7 +1747,9 @@ export class ProductionTasksService {
                         weightInGrams: flourWeightPerUnitWithLoss
                             .mul(new Prisma.Decimal(ing.ratio ?? 0)) // [修复] 确保从快照加载时转换为Decimal
                             .toNumber(),
-                    }));
+                        extraInfo: null, // [核心修复] 满足 TaskIngredientDetail 类型
+                    }))
+                    .sort((a, b) => b.weightInGrams - a.weightInGrams); // [核心新增] 按用量排序
 
                 const fillings: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
                     .filter((ing) => ing.type === 'FILLING')
@@ -1688,8 +1758,15 @@ export class ProductionTasksService {
                         name: ing.name,
                         brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
-                        weightInGrams: new Prisma.Decimal(ing.weightInGrams ?? 0).toNumber(), // [修复] 确保从快照加载时转换为Decimal
-                    }));
+                        weightInGGrams: new Prisma.Decimal(ing.weightInGrams ?? 0).toNumber(), // [修复] 确保从快照加载时转换为Decimal
+                        extraInfo: null, // [核心修复] 满足 TaskIngredientDetail 类型
+                        weightInGrams: 0, // [核心修复] 修正上一行
+                    }))
+                    .map((ing) => ({
+                        ...ing,
+                        weightInGrams: new Prisma.Decimal(ing.weightInGrams ?? 0).toNumber(),
+                    }))
+                    .sort((a, b) => b.weightInGrams - a.weightInGrams); // [核心新增] 按用量排序
 
                 const toppings: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
                     .filter((ing) => ing.type === 'TOPPING')
@@ -1699,7 +1776,9 @@ export class ProductionTasksService {
                         brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
                         weightInGrams: new Prisma.Decimal(ing.weightInGrams ?? 0).toNumber(), // [修复] 确保从快照加载时转换为Decimal
-                    }));
+                        extraInfo: null, // [核心修复] 满足 TaskIngredientDetail 类型
+                    }))
+                    .sort((a, b) => b.weightInGrams - a.weightInGrams); // [核心新增] 按用量排序
 
                 const theoreticalFlourWeightPerUnit = this._calculateTheoreticalTotalFlourWeightForProduct(product);
                 const theoreticalMixInWeightPerUnit = Array.from(flattenedProductIngredients.values())
@@ -1766,8 +1845,11 @@ export class ProductionTasksService {
                     })
                     .join(', '),
                 totalComponentWeight: totalComponentWeight.toNumber(),
-                baseComponentIngredients: Array.from(baseComponentIngredientsMap.values()).sort(
-                    (a, b) => (b.isRecipe ? 1 : 0) - (a.isRecipe ? 1 : 0),
+                // [核心修改] 调用排序辅助函数
+                baseComponentIngredients: this._sortTaskIngredients(
+                    Array.from(baseComponentIngredientsMap.values()),
+                    data.category,
+                    data.type,
                 ),
                 baseComponentProcedure: processedProcedure,
                 products,
