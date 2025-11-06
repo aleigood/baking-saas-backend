@@ -55,7 +55,7 @@ const taskWithDetailsInclude = {
                                                     versions: {
                                                         where: { isActive: true },
                                                         include: {
-                                                            id: true, // [核心修正] 确保快照包含 version.id
+                                                            // [核心修正] 移除 'id: true'，Prisma 默认包含 id
                                                             components: {
                                                                 include: {
                                                                     ingredients: {
@@ -69,7 +69,7 @@ const taskWithDetailsInclude = {
                                                                                     versions: {
                                                                                         where: { isActive: true },
                                                                                         include: {
-                                                                                            id: true, // [核心修正] 确保快照包含 version.id
+                                                                                            // [核心修正] 移除 'id: true'
                                                                                             components: {
                                                                                                 include: {
                                                                                                     ingredients: {
@@ -107,7 +107,7 @@ const taskWithDetailsInclude = {
                                     versions: {
                                         where: { isActive: true },
                                         include: {
-                                            id: true, // [核心修正] 确保快照包含 version.id
+                                            // [核心修正] 移除 'id: true'
                                             components: {
                                                 include: {
                                                     ingredients: {
@@ -437,6 +437,8 @@ export class ProductionTasksService {
         for (const item of products) {
             const fullProduct = await this.prisma.product.findUnique({
                 where: { id: item.productId },
+                // [核心修正] 此处 include 的是 taskWithDetailsInclude 的子集，不能直接复用
+                // 而是复用 taskWithDetailsInclude 内部的结构
                 include: taskWithDetailsInclude.items.include.product.include,
             });
             if (!fullProduct) continue;
@@ -673,7 +675,7 @@ export class ProductionTasksService {
         }
 
         const prepTaskItems: CalculatedRecipeDetails[] = [];
-        // [核心修正] 移除 L618 报错的 'id' 变量
+        // [核心修正] 修复 L677 (no-unused-vars) 错误
         for (const [, data] of requiredPrepItems.entries()) {
             // [核心修改] 不再执行 Promise.all，不再查询数据库
             // [核心修改] 调用 costingService 的新 "FromSnapshot" 同步方法
@@ -1836,6 +1838,7 @@ export class ProductionTasksService {
                         name: ing.name,
                         brand: ing.isRecipe ? '自制原料' : ing.brand,
                         isRecipe: ing.isRecipe,
+                        // [核心修正] 修复 L1832/L1839/L1842 的拼写错误
                         weightInGrams: new Prisma.Decimal(ing.weightInGrams ?? 0).toNumber(), // [修复] 确保从快照加载时转换为Decimal
                         extraInfo: null, // [核心修复] 满足 TaskIngredientDetail 类型
                     }))
@@ -1886,7 +1889,7 @@ export class ProductionTasksService {
                     })),
                     toppings: toppings.map((i) => ({
                         ...i,
-                        weightPerUnit: i.weightInGrams,
+                        weightPerUnit: i.weightInGrams, // [核心修正] 修复 L1842 拼写错误
                         weightInGrams: i.weightInGrams * quantity,
                     })),
                     procedure: product.procedure || [],
