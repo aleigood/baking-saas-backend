@@ -55,6 +55,7 @@ const taskWithDetailsInclude = {
                                                     versions: {
                                                         where: { isActive: true },
                                                         include: {
+                                                            id: true, // [核心修正] 确保快照包含 version.id
                                                             components: {
                                                                 include: {
                                                                     ingredients: {
@@ -68,6 +69,7 @@ const taskWithDetailsInclude = {
                                                                                     versions: {
                                                                                         where: { isActive: true },
                                                                                         include: {
+                                                                                            id: true, // [核心修正] 确保快照包含 version.id
                                                                                             components: {
                                                                                                 include: {
                                                                                                     ingredients: {
@@ -105,6 +107,7 @@ const taskWithDetailsInclude = {
                                     versions: {
                                         where: { isActive: true },
                                         include: {
+                                            id: true, // [核心修正] 确保快照包含 version.id
                                             components: {
                                                 include: {
                                                     ingredients: {
@@ -162,6 +165,7 @@ type ComponentWithIngredients = ProductWithDetails['recipeVersion']['components'
 type ComponentWithRecursiveIngredients = ProductWithDetails['recipeVersion']['components'][0];
 
 type PrepItemFamily = RecipeFamily;
+// [核心修改] requiredPrepItems 的 Value 现在只存储 family 对象和 totalWeight
 type RequiredPrepItem = { family: PrepItemFamily; totalWeight: Prisma.Decimal };
 
 // [核心修正] 为 _getPrepItemsForTask 中的快照配方对象定义最小类型存根
@@ -171,6 +175,7 @@ type SnapshotRecipeFamilyStub = {
     type: RecipeType;
     category: RecipeCategory;
     versions: {
+        id: string; // [核心修正] 增加 version.id
         notes: string | null;
         components: {
             procedure: string[];
@@ -178,6 +183,18 @@ type SnapshotRecipeFamilyStub = {
             ingredients: {
                 ratio: number | string | null;
                 ingredient: { id: string; isFlour: boolean } | null;
+                // [核心修正] 增加递归依赖的类型
+                linkedPreDough: {
+                    id: string; // family.id
+                    versions: {
+                        id: string; // version.id
+                        components: {
+                            ingredients: {
+                                ratio: number | string | null;
+                            }[];
+                        }[];
+                    }[];
+                } | null;
             }[];
         }[];
     }[];
@@ -513,30 +530,21 @@ export class ProductionTasksService {
             return [];
         }
 
+        // [核心修改] Map 的 Key 从 family.id 更改为 version.id
         const requiredPrepItems = new Map<string, RequiredPrepItem>();
-        const visitedRecipes = new Set<string>();
+        const visitedRecipes = new Set<string>(); // visitedRecipes 仍然使用 version.id
 
-        // [核心修改] 此函数现在依赖传入的 task (快照) 对象，而不是实时查询数据库
-        const resolveDependencies = async (familyId: string, requiredWeight: Prisma.Decimal) => {
-            if (visitedRecipes.has(familyId)) return;
-            visitedRecipes.add(familyId);
+        // [核心修改] 函数签名改变，以接受 versionId 和 family 对象
+        const resolveDependencies = async (
+            versionId: string,
+            family: SnapshotRecipeFamilyStub,
+            requiredWeight: Prisma.Decimal,
+        ) => {
+            if (visitedRecipes.has(versionId)) return;
+            visitedRecipes.add(versionId);
 
-            // [核心修改] 依赖 costingService 来获取快照中配方的信息
-            // 注意：这暗含一个要求，即 costingService 必须能处理从快照中提取的配方数据
-            // 为了简化，我们暂时假定快照中的 pre-dough 结构是完整的，可以用于遍历
-            // 一个更健壮的实现可能需要 costingService 也能接收序列化的配方数据
-
-            // 查找快照中所有产品，看谁依赖了这个 familyId
-            // 这部分逻辑变得复杂，因为我们不能只依赖数据库
-            // 我们将依赖快照中已拉取的 `linkedPreDough.versions` 数据
-            const allPreDoughIngredients = task.items
-                .flatMap((item) => item.product.recipeVersion?.components || [])
-                .flatMap((comp) => comp.ingredients)
-                .filter((ing) => ing.linkedPreDough?.id === familyId);
-
-            const firstMatch = allPreDoughIngredients.length > 0 ? allPreDoughIngredients[0] : null;
-            const preDoughFamily = firstMatch?.linkedPreDough;
-
+            // [核心修改] 不再从 task.items 中查找，而是直接使用传入的 family 对象
+            const preDoughFamily = family;
             if (!preDoughFamily || !preDoughFamily.versions[0]?.components[0]) return;
 
             const activeVersion = preDoughFamily.versions[0];
@@ -554,17 +562,27 @@ export class ProductionTasksService {
                 const weight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
 
                 if (ing.linkedPreDough) {
-                    const existing = requiredPrepItems.get(ing.linkedPreDough.id);
+                    // [核心修改] 找到子依赖的版本 ID
+                    const subVersion = ing.linkedPreDough.versions[0];
+                    if (!subVersion) continue;
+                    const subVersionId = subVersion.id;
+
+                    const existing = requiredPrepItems.get(subVersionId);
                     if (existing) {
                         existing.totalWeight = existing.totalWeight.add(weight);
                     } else {
-                        requiredPrepItems.set(ing.linkedPreDough.id, {
-                            family: ing.linkedPreDough as PrepItemFamily, // [修复] 类型断言
+                        requiredPrepItems.set(subVersionId, {
+                            // [核心修正] 类型断言
+                            family: ing.linkedPreDough as unknown as PrepItemFamily,
                             totalWeight: weight,
                         });
                     }
-                    // [核心修改] 递归调用，但依赖于快照数据
-                    await resolveDependencies(ing.linkedPreDough.id, weight);
+                    // [核心修改] 递归调用，传入 versionId 和 family 对象
+                    await resolveDependencies(
+                        subVersionId,
+                        ing.linkedPreDough as unknown as SnapshotRecipeFamilyStub,
+                        weight,
+                    );
                 }
             }
         };
@@ -572,36 +590,44 @@ export class ProductionTasksService {
         for (const item of task.items) {
             const product = item.product;
             if (!product) continue;
-            // [核心修改] 跳过已软删除的产品（快照中可能也包含此信息）
             if (product.deletedAt) continue;
 
             const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
-            if (!product.recipeVersion) continue; // 安全检查
+            if (!product.recipeVersion) continue;
 
             for (const component of product.recipeVersion.components) {
                 for (const ing of component.ingredients) {
                     if (ing.linkedPreDough && ing.flourRatio) {
-                        const preDoughRecipe = ing.linkedPreDough.versions.find((v) => v.isActive)?.components[0];
-                        if (preDoughRecipe) {
+                        // [核心修改] 获取配方族和版本信息
+                        const preDoughFamily = ing.linkedPreDough;
+                        const preDoughVersion = preDoughFamily.versions.find((v) => v.isActive); // 在快照中 [0] 总是 active
+                        const preDoughRecipe = preDoughVersion?.components[0];
+
+                        if (preDoughRecipe && preDoughVersion) {
+                            const preDoughVersionId = preDoughVersion.id; // <-- [核心修改] 这是新的 Map Key
                             const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
                                 (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
                                 new Prisma.Decimal(0),
                             );
                             const weight = totalFlourWeight
-                                .mul(new Prisma.Decimal(ing.flourRatio)) // [修复] 确保从快照加载时转换为Decimal
+                                .mul(new Prisma.Decimal(ing.flourRatio))
                                 .mul(preDoughTotalRatio)
                                 .mul(item.quantity);
 
-                            const existing = requiredPrepItems.get(ing.linkedPreDough.id);
+                            const existing = requiredPrepItems.get(preDoughVersionId);
                             if (existing) {
                                 existing.totalWeight = existing.totalWeight.add(weight);
                             } else {
-                                requiredPrepItems.set(ing.linkedPreDough.id, {
-                                    family: ing.linkedPreDough,
+                                requiredPrepItems.set(preDoughVersionId, {
+                                    family: preDoughFamily,
                                     totalWeight: weight,
                                 });
                             }
-                            await resolveDependencies(ing.linkedPreDough.id, weight);
+                            await resolveDependencies(
+                                preDoughVersionId,
+                                preDoughFamily as unknown as SnapshotRecipeFamilyStub,
+                                weight,
+                            );
                         }
                     }
                 }
@@ -609,22 +635,35 @@ export class ProductionTasksService {
 
             for (const pIng of product.ingredients) {
                 if (pIng.linkedExtra) {
-                    let weight = new Prisma.Decimal(0);
-                    if (pIng.weightInGrams) {
-                        weight = new Prisma.Decimal(pIng.weightInGrams).mul(item.quantity);
-                    } else if (pIng.ratio && pIng.type === 'MIX_IN') {
-                        weight = totalFlourWeight.mul(new Prisma.Decimal(pIng.ratio)).mul(item.quantity); // [修复] 确保从快照加载时转换为Decimal
+                    // [核心修改] 获取配方族和版本信息
+                    const extraFamily = pIng.linkedExtra;
+                    const extraVersion = extraFamily.versions.find((v) => v.isActive);
+                    const extraRecipe = extraVersion?.components[0];
+
+                    if (extraRecipe && extraVersion) {
+                        const extraVersionId = extraVersion.id; // <-- [核心修改] 这是新的 Map Key
+                        let weight = new Prisma.Decimal(0);
+                        if (pIng.weightInGrams) {
+                            weight = new Prisma.Decimal(pIng.weightInGrams).mul(item.quantity);
+                        } else if (pIng.ratio && pIng.type === 'MIX_IN') {
+                            weight = totalFlourWeight.mul(new Prisma.Decimal(pIng.ratio)).mul(item.quantity);
+                        }
+
+                        const existing = requiredPrepItems.get(extraVersionId);
+                        if (existing) {
+                            existing.totalWeight = existing.totalWeight.add(weight);
+                        } else {
+                            requiredPrepItems.set(extraVersionId, {
+                                family: extraFamily,
+                                totalWeight: weight,
+                            });
+                        }
+                        await resolveDependencies(
+                            extraVersionId,
+                            extraFamily as unknown as SnapshotRecipeFamilyStub,
+                            weight,
+                        );
                     }
-                    const existing = requiredPrepItems.get(pIng.linkedExtra.id);
-                    if (existing) {
-                        existing.totalWeight = existing.totalWeight.add(weight);
-                    } else {
-                        requiredPrepItems.set(pIng.linkedExtra.id, {
-                            family: pIng.linkedExtra,
-                            totalWeight: weight,
-                        });
-                    }
-                    await resolveDependencies(pIng.linkedExtra.id, weight);
                 }
             }
         }
