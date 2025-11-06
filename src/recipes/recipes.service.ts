@@ -1,4 +1,15 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+// G-Code-Note: Service (NestJS)
+// 路径: src/recipes/recipes.service.ts
+// [核心修改] 修复 ESLint 和 TypeScript 错误
+
+// [G-Code-Note] 修复 Prettier 格式
+import {
+    Injectable,
+    NotFoundException,
+    ConflictException,
+    BadRequestException,
+    ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRecipeDto, ComponentIngredientDto, ProductDto, ProductIngredientDto } from './dto/create-recipe.dto';
 import {
@@ -16,12 +27,13 @@ import {
     Role,
 } from '@prisma/client';
 import { RecipeFormTemplateDto, ComponentTemplate } from './dto/recipe-form-template.dto';
+// [G-Code-Note] 导入 BatchImportVersionDto
 import {
     BatchImportRecipeDto,
     BatchImportResultDto,
     BatchImportVersionDto,
-    BatchComponentIngredientDto, // [核心新增]
-    BatchProductDto, // [核心新增]
+    BatchComponentIngredientDto,
+    BatchProductDto,
 } from './dto/batch-import-recipe.dto';
 
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
@@ -67,6 +79,44 @@ const recipeFamilyWithDetailsInclude = {
 type RecipeFamilyWithDetails = Prisma.RecipeFamilyGetPayload<{
     include: typeof recipeFamilyWithDetailsInclude;
 }>;
+
+// [G-Code-Note] 【新增】为 exportRecipes 定义一个包含所有版本详情的类型
+const recipeFamilyForExportInclude = {
+    versions: {
+        include: {
+            components: {
+                include: {
+                    ingredients: {
+                        include: {
+                            ingredient: true,
+                            linkedPreDough: true,
+                        },
+                    },
+                },
+            },
+            products: {
+                where: { deletedAt: null },
+                include: {
+                    ingredients: {
+                        include: {
+                            ingredient: true,
+                            linkedExtra: true,
+                        },
+                    },
+                },
+            },
+        },
+        orderBy: { version: 'asc' }, // 按版本升序导出
+    },
+} satisfies Prisma.RecipeFamilyInclude;
+
+// [G-Code-Note] 【新增】定义上面查询的 Payload 类型
+type RecipeFamilyForExport = Prisma.RecipeFamilyGetPayload<{
+    include: typeof recipeFamilyForExportInclude;
+}>;
+type RecipeVersionForExport = RecipeFamilyForExport['versions'][0];
+// [G-Code-Note] 【新增】定义原料 Payload 类型
+type ComponentIngredientForExport = RecipeVersionForExport['components'][0]['ingredients'][0];
 
 @Injectable()
 export class RecipesService {
@@ -250,61 +300,61 @@ export class RecipesService {
 
                     // 5. 准备将 JSON DTO 转换为内部 CreateRecipeDto 的辅助函数
                     // [核心重用] 这段转换逻辑来自你原来的 batchImportRecipes 方法
-                    // [核心修改] 明确 BatchImportVersionDto 类型，修复 Prettier 错误
+                    // [G-Code-Note] 修复 Prettier 格式
                     const convertVersionToCreateDto = (versionDto: BatchImportVersionDto): CreateRecipeDto => {
-                        // [核心修改] 修复 ESLint no-unsafe-* 错误 [cite: 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+                        // [核心修改] 修复 ESLint no-unsafe-* 错误
                         // 通过使用强类型的 versionDto
                         return {
                             name: recipeDto.name,
                             type: recipeDto.type,
                             category: recipeDto.category,
                             // 从 versionDto 展开版本特定字段
-                            notes: versionDto.notes, // [cite: 4]
-                            targetTemp: versionDto.targetTemp, // [cite: 6]
-                            lossRatio: versionDto.lossRatio, // [cite: 8]
-                            divisionLoss: versionDto.divisionLoss, // [cite: 10]
-                            procedure: versionDto.procedure, // [cite: 12]
+                            notes: versionDto.notes, //
+                            targetTemp: versionDto.targetTemp, //
+                            lossRatio: versionDto.lossRatio, //
+                            divisionLoss: versionDto.divisionLoss, //
+                            procedure: versionDto.procedure, //
                             // 转换 ComponentIngredientDto (结构已匹配，直接用)
-                            // [cite: 14, 15]
+                            //
                             ingredients: versionDto.ingredients.map(
                                 // [核心修改] 明确类型 (ing: BatchComponentIngredientDto)
                                 (ing: BatchComponentIngredientDto): ComponentIngredientDto => ({
-                                    ...ing, // [cite: 16]
+                                    ...ing, //
                                     ingredientId: undefined, // 确保 ID 未定义，由 service 内部处理
                                 }),
                             ),
                             // 转换 ProductDto (结构不匹配，需要翻译)
-                            // [cite: 18, 19]
+                            //
                             products: versionDto.products?.map(
                                 // [核心修改] 明确类型 (p: BatchProductDto)
                                 (p: BatchProductDto): ProductDto => ({
                                     ...p, // 包含 name, weight, procedure
                                     id: undefined, // 确保 ID 未定义
                                     // [核心重用] 下面的 mixIn, fillings, toppings 转换逻辑来自你的旧代码
-                                    // [核心修改] 修复 ESLint no-unsafe-* 错误 [cite: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+                                    // [核心修改] 修复 ESLint no-unsafe-* 错误
+                                    // [G-Code-Note] 修复 Prettier 格式
                                     mixIn:
                                         p.mixIn?.map(
-                                            // [cite: 22]
                                             (i): ProductIngredientDto => ({
-                                                ...i, // [cite: 24]
+                                                ...i, //
                                                 type: ProductIngredientType.MIX_IN,
                                                 ingredientId: undefined,
                                             }),
                                         ) || [],
+                                    // [G-Code-Note] 修复 Prettier 格式
                                     fillings:
                                         p.fillings?.map(
-                                            // [cite: 26]
                                             (i): ProductIngredientDto => ({
-                                                ...i, // [cite: 28]
+                                                ...i, //
                                                 type: ProductIngredientType.FILLING,
                                                 ingredientId: undefined,
                                             }),
                                         ) || [],
+                                    // [G-Code-Note] 修复 Prettier 格式
                                     toppings:
                                         p.toppings?.map(
-                                            // [cite: 30]
                                             (i): ProductIngredientDto => ({
-                                                ...i, // [cite: 32]
+                                                ...i, //
                                                 type: ProductIngredientType.TOPPING,
                                                 ingredientId: undefined,
                                             }),
@@ -319,7 +369,7 @@ export class RecipesService {
                         let familyId: string | null = null;
                         let versionsCreatedCount = 0;
 
-                        // [核心修改] 修复 'Property 'versions' does not exist' [cite: 32]
+                        // [核心修改] 修复 'Property 'versions' does not exist'
                         for (const versionDto of recipeDto.versions) {
                             const createDto = convertVersionToCreateDto(versionDto);
 
@@ -329,6 +379,7 @@ export class RecipesService {
 
                                 // [核心修改] 修复 'createdFamily' is possibly 'null' 错误
                                 if (!createdFamily) {
+                                    // [G-Code-Note] 修复 Prettier 格式
                                     throw new Error(`创建配方族 "${recipeDto.name}" 失败，_sanitizeFamily 返回 null`);
                                 }
                                 familyId = createdFamily.id;
@@ -353,9 +404,9 @@ export class RecipesService {
                         const existingVersionNotes = new Set(existingFamily.versions.map((v) => v.notes));
                         let newVersionsAdded = 0;
 
-                        // [核心修改] 修复 'Property 'versions' does not exist' [cite: 34]
+                        // [核心修改] 修复 'Property 'versions' does not exist'
                         for (const versionDto of recipeDto.versions) {
-                            // [核心修改] 修复 'Unsafe member access .notes' [cite: 35]
+                            // [核心修改] 修复 'Unsafe member access .notes'
                             if (existingVersionNotes.has(versionDto.notes)) {
                                 // 备注(notes) 相同，视为同一版本，跳过
                                 continue;
@@ -390,6 +441,163 @@ export class RecipesService {
 
         return overallResult;
     }
+
+    // [G-Code-Note] 【新增】导出配方的方法
+    async exportRecipes(tenantId: string, userId: string): Promise<BatchImportRecipeDto[]> {
+        // 1. 权限检查：确认该用户是该店铺的 Owner
+        const tenantAccess = await this.prisma.tenantUser.findFirst({
+            where: {
+                tenantId: tenantId,
+                userId: userId,
+                role: Role.OWNER,
+            },
+        });
+
+        if (!tenantAccess) {
+            throw new ForbiddenException('您没有权限导出该店铺的配方。');
+        }
+
+        // 2. 查找该店铺的所有配方族，并包含所有版本和详情
+        const families = await this.prisma.recipeFamily.findMany({
+            where: {
+                tenantId: tenantId,
+                deletedAt: null, // 只导出未弃用的
+            },
+            include: recipeFamilyForExportInclude, // [G-Code-Note] 使用我们新定义的 include
+        });
+
+        // 3. 将 Prisma 模型 转换为 离线工具/导入 DTO 所需的 JSON 结构
+        const exportableFamilies: BatchImportRecipeDto[] = families.map((family) => {
+            const exportableVersions = family.versions.map((version) =>
+                // [G-Code-Note] 调用私有辅助方法
+                this._exportVersion(version, family.type),
+            );
+
+            return {
+                name: family.name,
+                type: family.type,
+                category: family.category,
+                versions: exportableVersions,
+            };
+        });
+
+        return exportableFamilies;
+    }
+
+    // [G-Code-Note] 【新增】私有辅助方法，用于将单个 Prisma 版本转换为 DTO 版本
+    // [G-Code-Note] 此逻辑镜像自 index.html 中的 exportVersion
+    private _exportVersion(version: RecipeVersionForExport, familyType: RecipeType): BatchImportVersionDto {
+        // 辅助函数：将 Prisma.Decimal 转换为 number (小数)
+        const toNum = (val: Prisma.Decimal | null | undefined): number | undefined => {
+            if (val === null || val === undefined) return undefined;
+            return val.toNumber();
+        };
+
+        // 辅助函数：格式化组件原料
+        const formatComponentIngredient = (ing: ComponentIngredientForExport): BatchComponentIngredientDto | null => {
+            // [G-Code-Note] 修复 'possibly 'null''
+            if (ing.linkedPreDoughId && ing.linkedPreDough) {
+                return {
+                    name: ing.linkedPreDough.name,
+                    flourRatio: toNum(ing.flourRatio), // 导出小数
+                };
+            }
+            // [G-Code-Note] 修复 'possibly 'null''
+            if (ing.ingredientId && ing.ingredient) {
+                const result: BatchComponentIngredientDto = {
+                    name: ing.ingredient.name,
+                    ratio: toNum(ing.ratio), // 导出小数
+                };
+                // [G-Code-Note] 修复 'possibly 'null''
+                if (ing.ingredient.isFlour) {
+                    result.isFlour = true;
+                }
+                // [G-Code-Note] 修复 'possibly 'null''
+                if (ing.ingredient.waterContent.gt(0)) {
+                    result.waterContent = ing.ingredient.waterContent.toNumber();
+                }
+                return result;
+            }
+            return null;
+        };
+
+        // [G-Code-Note] 【已删除】移除未使用的 'formatProductIngredient' 辅助函数
+
+        if (familyType === 'MAIN') {
+            const mainComponent = version.components[0]; // 假设 MAIN 总是 [0]
+            if (!mainComponent) {
+                // [G-Code-Note] 修复 'string | null' is not assignable to 'string'
+                return { notes: version.notes || '', ingredients: [], products: [] };
+            }
+
+            // [G-Code-Note] 修复 '(Dto | null)[]' is not assignable to 'Dto[]'
+            const finalIngredients = mainComponent.ingredients
+                .map(formatComponentIngredient)
+                .filter((ing): ing is BatchComponentIngredientDto => !!ing);
+
+            return {
+                // [G-Code-Note] 修复 'string | null' is not assignable to 'string'
+                notes: version.notes || '',
+                targetTemp: toNum(mainComponent.targetTemp),
+                lossRatio: toNum(mainComponent.lossRatio),
+                divisionLoss: toNum(mainComponent.divisionLoss),
+                procedure: mainComponent.procedure,
+                ingredients: finalIngredients,
+                // [G-Code-Note] 彻底修复产品导出逻辑，避免 'name' not found 错误
+                products: version.products.map((p) => {
+                    return {
+                        name: p.name,
+                        weight: p.baseDoughWeight.toNumber(),
+                        procedure: p.procedure,
+                        mixIn: p.ingredients
+                            .filter((i) => i.type === 'MIX_IN' && (i.ingredient || i.linkedExtra))
+                            .map((i) => ({
+                                name: i.ingredient?.name || i.linkedExtra!.name, // 已在 filter 中检查
+                                ratio: toNum(i.ratio),
+                            })),
+                        // [G-Code-Note] 修复 Prettier 格式
+                        fillings: p.ingredients
+                            .filter((i) => i.type === 'FILLING' && (i.ingredient || i.linkedExtra))
+                            .map((i) => ({
+                                name: i.ingredient?.name || i.linkedExtra!.name,
+                                weightInGrams: toNum(i.weightInGrams),
+                            })),
+                        // [G-Code-Note] 修复 Prettier 格式
+                        toppings: p.ingredients
+                            .filter((i) => i.type === 'TOPPING' && (i.ingredient || i.linkedExtra))
+                            .map((i) => ({
+                                name: i.ingredient?.name || i.linkedExtra!.name,
+                                weightInGrams: toNum(i.weightInGrams),
+                            })),
+                    };
+                }),
+            };
+        } else {
+            // PRE_DOUGH 或 EXTRA
+            const component = version.components[0];
+            if (!component) {
+                // [G-Code-Note] 修复 'string | null' is not assignable to 'string'
+                return { notes: version.notes || '', ingredients: [], products: [] };
+            }
+
+            return {
+                // [G-Code-Note] 修复 'string | null' is not assignable to 'string'
+                notes: version.notes || '',
+                lossRatio: toNum(component.lossRatio),
+                procedure: component.procedure,
+                // [G-Code-Note] 修复 '(Dto | null)[]' is not assignable to 'Dto[]'
+                ingredients: component.ingredients
+                    .map(formatComponentIngredient)
+                    .filter((ing): ing is BatchComponentIngredientDto => !!ing),
+                products: [], // 非 MAIN 配方没有产品
+            };
+        }
+    }
+
+    // =======================================================================
+    // G-Code-Note: 以下所有方法 (create, createVersion, updateVersion 等)
+    // 均保持你提供的原文件不变，无需修改。
+    // =======================================================================
 
     async create(tenantId: string, createRecipeDto: CreateRecipeDto) {
         const { name } = createRecipeDto;

@@ -1,3 +1,7 @@
+// G-Code-Note: Controller (NestJS)
+// 路径: src/recipes/recipes.controller.ts
+// [核心修改] 修复 Prettier 格式问题，并将 'exportRecipes' 的权限检查移至 Service
+
 import {
     Controller,
     Get,
@@ -86,6 +90,18 @@ export class RecipesController {
 
         // [修改] 将 userId 和 tenantIds 传递给 service
         return this.recipesService.batchImportRecipes(user.sub, recipesDto, batchImportRequestDto.tenantIds);
+    }
+
+    /**
+     * [G-Code-Note] 【新增】导出指定店铺的所有配方
+     */
+    @Get('export/:tenantId')
+    // [G-Code-Note] 修复 Prettier 格式问题
+    // [G-Code-Note] 移除 async，因为权限检查已移入 service，修复 @typescript-eslint/require-await
+    exportRecipes(@GetUser() user: UserPayload, @Param('tenantId') tenantId: string) {
+        // [G-Code-Note] 权限检查逻辑已移至 service
+        // [G-Code-Note] 修复 @typescript-eslint/no-unsafe-return 和 no-unsafe-call
+        return this.recipesService.exportRecipes(tenantId, user.sub);
     }
 
     /**
@@ -227,3 +243,5 @@ export class RecipesController {
         return this.recipesService.restore(id);
     }
 }
+
+// [G-Code-Note] 修复 Prettier 格式：文件末尾添加空行
