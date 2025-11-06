@@ -16,7 +16,13 @@ import {
     Role,
 } from '@prisma/client';
 import { RecipeFormTemplateDto, ComponentTemplate } from './dto/recipe-form-template.dto';
-import { BatchImportRecipeDto, BatchImportResultDto } from './dto/batch-import-recipe.dto';
+import {
+    BatchImportRecipeDto,
+    BatchImportResultDto,
+    BatchImportVersionDto,
+    BatchComponentIngredientDto, // [核心新增]
+    BatchProductDto, // [核心新增]
+} from './dto/batch-import-recipe.dto';
 
 type RecipeFamilyWithVersions = RecipeFamily & { versions: RecipeVersion[] };
 
@@ -167,13 +173,15 @@ export class RecipesService {
         };
     }
 
+    // [核心修改] 重写 batchImportRecipes 方法以支持多版本导入
     async batchImportRecipes(
         userId: string,
-        recipesDto: BatchImportRecipeDto[],
+        recipesDto: BatchImportRecipeDto[], // [核心修改] 使用新的 Family DTO
         tenantIds?: string[],
     ): Promise<BatchImportResultDto> {
         let targetTenants: { id: string; name: string }[];
 
+        // 1. 获取目标店铺 (与旧逻辑相同)
         if (tenantIds && tenantIds.length > 0) {
             const ownedTenants = await this.prisma.tenant.findMany({
                 where: {
@@ -212,88 +220,170 @@ export class RecipesService {
         }
 
         const overallResult: BatchImportResultDto = {
-            totalCount: recipesDto.length * targetTenants.length,
+            totalCount: recipesDto.length * targetTenants.length, // [核心修改] totalCount 语义变为 "总配方族数"
             importedCount: 0,
             skippedCount: 0,
             skippedRecipes: [],
         };
 
+        // 2. 遍历所有目标店铺
         for (const tenant of targetTenants) {
             const tenantId = tenant.id;
             const tenantName = tenant.name;
 
-            const existingFamilies = await this.prisma.recipeFamily.findMany({
-                where: {
-                    tenantId,
-                    name: { in: recipesDto.map((r) => r.name) },
-                    deletedAt: null,
-                },
-                select: { name: true },
-            });
-            const existingFamilyNames = new Set(existingFamilies.map((f) => f.name));
+            // [核心修改] 移除旧的 Set<existingFamilyNames> 逻辑
 
+            // 3. 遍历所有配方族 DTO
             for (const recipeDto of recipesDto) {
-                if (existingFamilyNames.has(recipeDto.name)) {
-                    overallResult.skippedCount++;
-                    overallResult.skippedRecipes.push(`${recipeDto.name} (在店铺 "${tenantName}" 已存在)`);
-                    continue;
-                }
-
                 try {
-                    const createDto: CreateRecipeDto = {
-                        name: recipeDto.name,
-                        type: recipeDto.type,
-                        category: recipeDto.category,
-                        notes: recipeDto.notes,
-                        targetTemp: recipeDto.targetTemp,
-                        lossRatio: recipeDto.lossRatio,
-                        divisionLoss: recipeDto.divisionLoss,
-                        procedure: recipeDto.procedure,
-                        ingredients: recipeDto.ingredients.map(
-                            (ing): ComponentIngredientDto => ({
-                                ...ing,
-                                ingredientId: undefined,
-                            }),
-                        ),
-                        products: recipeDto.products?.map(
-                            (p): ProductDto => ({
-                                ...p,
-                                id: undefined, // [核心修改] 确保导入时ID是undefined (假设ProductDto有id)
-                                mixIn:
-                                    p.mixIn?.map(
-                                        (i): ProductIngredientDto => ({
-                                            ...i,
-                                            type: ProductIngredientType.MIX_IN,
-                                            ingredientId: undefined,
-                                        }),
-                                    ) || [],
-                                fillings:
-                                    p.fillings?.map(
-                                        (i): ProductIngredientDto => ({
-                                            ...i,
-                                            type: ProductIngredientType.FILLING,
-                                            ingredientId: undefined,
-                                        }),
-                                    ) || [],
-                                toppings:
-                                    p.toppings?.map(
-                                        (i): ProductIngredientDto => ({
-                                            ...i,
-                                            type: ProductIngredientType.TOPPING,
-                                            ingredientId: undefined,
-                                        }),
-                                    ) || [],
-                            }),
-                        ),
+                    // 4. 检查配方族 (RecipeFamily) 是否已存在
+                    const existingFamily = await this.prisma.recipeFamily.findFirst({
+                        where: {
+                            tenantId,
+                            name: recipeDto.name,
+                            deletedAt: null,
+                        },
+                        include: {
+                            versions: { select: { notes: true } }, // 仅查询 notes 用于去重
+                        },
+                    });
+
+                    // 5. 准备将 JSON DTO 转换为内部 CreateRecipeDto 的辅助函数
+                    // [核心重用] 这段转换逻辑来自你原来的 batchImportRecipes 方法
+                    // [核心修改] 明确 BatchImportVersionDto 类型，修复 Prettier 错误
+                    const convertVersionToCreateDto = (versionDto: BatchImportVersionDto): CreateRecipeDto => {
+                        // [核心修改] 修复 ESLint no-unsafe-* 错误 [cite: 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+                        // 通过使用强类型的 versionDto
+                        return {
+                            name: recipeDto.name,
+                            type: recipeDto.type,
+                            category: recipeDto.category,
+                            // 从 versionDto 展开版本特定字段
+                            notes: versionDto.notes, // [cite: 4]
+                            targetTemp: versionDto.targetTemp, // [cite: 6]
+                            lossRatio: versionDto.lossRatio, // [cite: 8]
+                            divisionLoss: versionDto.divisionLoss, // [cite: 10]
+                            procedure: versionDto.procedure, // [cite: 12]
+                            // 转换 ComponentIngredientDto (结构已匹配，直接用)
+                            // [cite: 14, 15]
+                            ingredients: versionDto.ingredients.map(
+                                // [核心修改] 明确类型 (ing: BatchComponentIngredientDto)
+                                (ing: BatchComponentIngredientDto): ComponentIngredientDto => ({
+                                    ...ing, // [cite: 16]
+                                    ingredientId: undefined, // 确保 ID 未定义，由 service 内部处理
+                                }),
+                            ),
+                            // 转换 ProductDto (结构不匹配，需要翻译)
+                            // [cite: 18, 19]
+                            products: versionDto.products?.map(
+                                // [核心修改] 明确类型 (p: BatchProductDto)
+                                (p: BatchProductDto): ProductDto => ({
+                                    ...p, // 包含 name, weight, procedure
+                                    id: undefined, // 确保 ID 未定义
+                                    // [核心重用] 下面的 mixIn, fillings, toppings 转换逻辑来自你的旧代码
+                                    // [核心修改] 修复 ESLint no-unsafe-* 错误 [cite: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+                                    mixIn:
+                                        p.mixIn?.map(
+                                            // [cite: 22]
+                                            (i): ProductIngredientDto => ({
+                                                ...i, // [cite: 24]
+                                                type: ProductIngredientType.MIX_IN,
+                                                ingredientId: undefined,
+                                            }),
+                                        ) || [],
+                                    fillings:
+                                        p.fillings?.map(
+                                            // [cite: 26]
+                                            (i): ProductIngredientDto => ({
+                                                ...i, // [cite: 28]
+                                                type: ProductIngredientType.FILLING,
+                                                ingredientId: undefined,
+                                            }),
+                                        ) || [],
+                                    toppings:
+                                        p.toppings?.map(
+                                            // [cite: 30]
+                                            (i): ProductIngredientDto => ({
+                                                ...i, // [cite: 32]
+                                                type: ProductIngredientType.TOPPING,
+                                                ingredientId: undefined,
+                                            }),
+                                        ) || [],
+                                }),
+                            ),
+                        };
                     };
 
-                    await this.create(tenantId, createDto);
-                    overallResult.importedCount++;
+                    if (!existingFamily) {
+                        // 6. [情况 A] 配方族不存在：创建配方族和所有版本
+                        let familyId: string | null = null;
+                        let versionsCreatedCount = 0;
+
+                        // [核心修改] 修复 'Property 'versions' does not exist' [cite: 32]
+                        for (const versionDto of recipeDto.versions) {
+                            const createDto = convertVersionToCreateDto(versionDto);
+
+                            if (familyId === null) {
+                                // 第一个版本：调用 this.create() 创建 Family 和 V1
+                                const createdFamily = await this.create(tenantId, createDto);
+
+                                // [核心修改] 修复 'createdFamily' is possibly 'null' 错误
+                                if (!createdFamily) {
+                                    throw new Error(`创建配方族 "${recipeDto.name}" 失败，_sanitizeFamily 返回 null`);
+                                }
+                                familyId = createdFamily.id;
+                                versionsCreatedCount++;
+                            } else {
+                                // 后续版本：调用 this.createVersion() 添加 V2, V3...
+                                await this.createVersion(tenantId, familyId, createDto);
+                                versionsCreatedCount++;
+                            }
+                        }
+                        if (versionsCreatedCount > 0) {
+                            overallResult.importedCount++;
+                        } else {
+                            // 理论上不应该发生，除非 versions 数组为空
+                            overallResult.skippedCount++;
+                            overallResult.skippedRecipes.push(
+                                `${recipeDto.name} (在店铺 "${tenantName}" 导入失败, DTO 中没有版本信息)`,
+                            );
+                        }
+                    } else {
+                        // 7. [情况 B] 配方族已存在：只添加新版本 (通过 notes 字段判断)
+                        const existingVersionNotes = new Set(existingFamily.versions.map((v) => v.notes));
+                        let newVersionsAdded = 0;
+
+                        // [核心修改] 修复 'Property 'versions' does not exist' [cite: 34]
+                        for (const versionDto of recipeDto.versions) {
+                            // [核心修改] 修复 'Unsafe member access .notes' [cite: 35]
+                            if (existingVersionNotes.has(versionDto.notes)) {
+                                // 备注(notes) 相同，视为同一版本，跳过
+                                continue;
+                            }
+
+                            // 发现新版本，调用 createVersion() 添加
+                            const createDto = convertVersionToCreateDto(versionDto);
+                            await this.createVersion(tenantId, existingFamily.id, createDto);
+                            newVersionsAdded++;
+                        }
+
+                        if (newVersionsAdded > 0) {
+                            overallResult.importedCount++; // 成功为现有配方族添加了新版本
+                        } else {
+                            overallResult.skippedCount++;
+                            overallResult.skippedRecipes.push(
+                                `${recipeDto.name} (在店铺 "${tenantName}" 已存在且无新版本)`,
+                            );
+                        }
+                    }
                 } catch (error) {
+                    // 8. 错误处理 (与旧逻辑相同)
                     const typedError = error as Error;
                     console.error(`向店铺 ${tenantName} 导入配方 "${recipeDto.name}" 失败:`, typedError);
                     overallResult.skippedCount++;
-                    overallResult.skippedRecipes.push(`${recipeDto.name} (在店铺 "${tenantName}" 导入失败)`);
+                    overallResult.skippedRecipes.push(
+                        `${recipeDto.name} (在店铺 "${tenantName}" 导入失败: ${typedError.message})`,
+                    );
                 }
             }
         }

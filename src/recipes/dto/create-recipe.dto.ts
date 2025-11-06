@@ -37,6 +37,16 @@ export class ProductIngredientDto {
     @IsUUID()
     @IsOptional()
     ingredientId?: string; // [核心修改] 客户端可传入已存在原料的ID
+
+    // [核心新增] 补充 isFlour 字段，以匹配 _ensureIngredientsExist 逻辑
+    @IsBoolean()
+    @IsOptional()
+    isFlour?: boolean;
+
+    // [核心新增] 补充 waterContent 字段，以匹配 _ensureIngredientsExist 逻辑
+    @IsNumber()
+    @IsOptional()
+    waterContent?: number;
 }
 
 // [核心修正] 导出 ProductDto 以在其他文件中使用

@@ -3,8 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>配方编辑器</title>
-        <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+        <title>配方编辑器</title> <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
         <style>
             :root {
                 --primary-color: #8c5a3b;
@@ -275,6 +274,12 @@
             .form-item {
                 margin-bottom: 20px;
             }
+            /* [G-Code-Note] 栅格布局 (新增) */
+            .form-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+            }
             .form-item-label {
                 display: block;
                 margin-bottom: 8px;
@@ -439,13 +444,14 @@
                 margin-bottom: 15px;
             }
 
-            .product-tabs-wrapper {
+            /* [G-Code-Note] 复用 .product-tabs-wrapper 样式用于版本管理 */
+            .tabs-wrapper {
                 position: relative;
                 display: flex;
                 align-items: center;
                 margin-bottom: 20px;
             }
-            .product-tabs {
+            .tabs {
                 display: flex;
                 gap: 10px;
                 border-bottom: 1px solid var(--border-color);
@@ -453,7 +459,7 @@
                 overflow-x: auto;
                 scrollbar-width: none;
             }
-            .product-tabs::-webkit-scrollbar {
+            .tabs::-webkit-scrollbar {
                 display: none;
             }
             .tab-item {
@@ -679,28 +685,30 @@
 
                 <div class="recipe-list-container">
                     <div
-                        v-for="recipe in filteredRecipes"
-                        :key="recipe.id"
+                        v-for="family in filteredFamilies"
+                        :key="family.id"
                         class="recipe-list-item"
-                        :class="{ active: currentRecipe && currentRecipe.id === recipe.id }"
-                        @click="selectRecipe(recipe.id)"
+                        :class="{ active: currentFamily && currentFamily.id === family.id }"
+                        @click="selectFamily(family.id)"
                     >
                         <div class="recipe-info">
                             <strong>
-                                {{ recipe.name || `未命名配方` }}
-                                <span v-if="isRecipeDirty(recipe)" style="color: var(--danger-color); margin-left: 4px"
+                                {{ family.name || `未命名配方` }}
+                                <span
+                                    v-if="isFamilyDirty(family)"
+                                    style="color: var(--danger-color); margin-left: 4px"
                                     >*</span
                                 >
                             </strong>
                         </div>
-                        <button class="btn-delete-recipe" @click.stop="deleteRecipe(recipe.id)">
+                        <button class="btn-delete-recipe" @click.stop="deleteFamily(family.id)">
                             <svg><use href="#icon-trash"></use></svg>
                         </button>
                     </div>
                 </div>
 
                 <footer class="sidebar-footer">
-                    <button class="btn btn-dashed btn-full-width" @click="addRecipe()">+ 新增配方</button>
+                    <button class="btn btn-dashed btn-full-width" @click="addFamily()">+ 新增配方</button>
                     <button class="btn btn-secondary btn-full-width" @click="openFile" v-if="isFSApiSupported">
                         打开文件
                     </button>
@@ -736,37 +744,80 @@
             </aside>
 
             <main class="main-content" ref="mainContentRef">
-                <div v-if="currentRecipe" class="editor-content">
+                <div v-if="currentFamily && currentVersion" class="editor-content">
                     <div class="card">
-                        <div class="form-item">
-                            <label class="form-item-label">配方类型</label>
-                            <input
-                                class="input-field"
-                                :value="recipeTypeDisplay(currentRecipe.type)"
-                                readonly
-                                disabled
-                            />
+                        <div class="form-grid">
+                            <div class="form-item" style="margin-bottom: 0">
+                                <label class="form-item-label">配方名称 (配方族)</label>
+                                <input
+                                    class="input-field"
+                                    v-model="currentFamily.name"
+                                    :placeholder="recipeNamePlaceholder"
+                                />
+                            </div>
+                            <div class="form-item" style="margin-bottom: 0">
+                                <label class="form-item-label">配方类型</label>
+                                <input
+                                    class="input-field"
+                                    :value="recipeTypeDisplay(currentFamily.type)"
+                                    readonly
+                                    disabled
+                                />
+                            </div>
                         </div>
-                        <div v-if="currentRecipe.type === 'MAIN'" class="form-item">
+                        <div v-if="currentFamily.type === 'MAIN'" class="form-item" style="margin-top: 20px">
                             <label class="form-item-label">配方品类</label>
-                            <select class="picker" v-model="currentRecipe.category">
+                            <select class="picker" v-model="currentFamily.category">
                                 <option v-for="cat in mainRecipeCategories" :key="cat.value" :value="cat.value">
                                     {{ cat.text }}
                                 </option>
                             </select>
                         </div>
-                        <div class="form-item">
-                            <label class="form-item-label">配方名称</label>
-                            <input
-                                class="input-field"
-                                v-model="currentRecipe.name"
-                                :placeholder="recipeNamePlaceholder"
-                            />
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title-wrapper" style="margin-bottom: 10px">
+                            <span class="card-title">版本管理</span>
+                        </div>
+                        <div class="tabs-wrapper">
+                            <button
+                                v-if="tabScrollState.version.showLeft"
+                                class="tab-scroll-btn left"
+                                @click="scrollVersionTabs(-150)"
+                            >
+                                &lt;
+                            </button>
+                            <div class="tabs" ref="versionTabsRef" @scroll="updateVersionTabScrollButtons">
+                                <div
+                                    v-for="(version, index) in currentFamily.versions"
+                                    :key="version.id"
+                                    class="tab-item"
+                                    :class="{ active: currentVersionIndex === index }"
+                                    @click="currentVersionIndex = index"
+                                >
+                                    <span>{{ version.notes || `版本 ${index + 1}` }}</span>
+                                    <button class="tab-delete-btn" @click.stop="deleteVersion(index)">
+                                        <svg><use href="#icon-close"></use></svg>
+                                    </button>
+                                </div>
+                                <div class="tab-item add-tab" @click="addVersion">+</div>
+                            </div>
+                            <button
+                                v-if="tabScrollState.version.showRight"
+                                class="tab-scroll-btn right"
+                                @click="scrollVersionTabs(150)"
+                            >
+                                &gt;
+                            </button>
+                        </div>
+                        <div class="form-item" style="margin-top: 20px; margin-bottom: 0">
+                            <label class="form-item-label">版本备注 (例如: V1 - 冬季配方)</label>
+                            <input class="input-field" v-model="currentVersion.notes" placeholder="输入备注" />
                         </div>
                     </div>
 
-                    <div v-if="currentRecipe.type === 'MAIN'">
-                        <template v-if="currentRecipe.category === 'BREAD'">
+                    <div v-if="currentFamily.type === 'MAIN'">
+                        <template v-if="currentFamily.category === 'BREAD'">
                             <div v-for="(dough, doughIndex) in processedPreDoughs" :key="dough.id" class="card">
                                 <button class="btn-delete-dough" @click="removePreDough(doughIndex)">
                                     <svg><use href="#icon-close"></use></svg>
@@ -817,12 +868,12 @@
                             <div class="card-title-wrapper">
                                 <span class="card-title">{{ recipeContentTitle }}</span>
                             </div>
-                            <div v-if="currentRecipe.category === 'BREAD'" class="form-item">
+                            <div v-if="currentFamily.category === 'BREAD'" class="form-item">
                                 <label class="form-item-label">面团出缸温度 (°C)</label>
                                 <input
                                     class="input-field"
                                     type="number"
-                                    v-model.number="currentRecipe.targetTemp"
+                                    v-model.number="currentVersion.targetTemp"
                                     placeholder="例如: 26"
                                 />
                             </div>
@@ -890,17 +941,17 @@
                         </div>
                         <div class="card">
                             <div class="card-title-wrapper"><span class="card-title">产品列表</span></div>
-                            <div class="product-tabs-wrapper">
+                            <div class="tabs-wrapper">
                                 <button
-                                    v-if="tabScrollState.showLeft"
+                                    v-if="tabScrollState.product.showLeft"
                                     class="tab-scroll-btn left"
-                                    @click="scrollTabs(-150)"
+                                    @click="scrollProductTabs(-150)"
                                 >
                                     &lt;
                                 </button>
-                                <div class="product-tabs" ref="productTabsRef" @scroll="updateTabScrollButtons">
+                                <div class="tabs" ref="productTabsRef" @scroll="updateProductTabScrollButtons">
                                     <div
-                                        v-for="(product, index) in currentRecipe.products"
+                                        v-for="(product, index) in currentVersion.products"
                                         :key="product.id"
                                         class="tab-item"
                                         :class="{ active: activeProductTab === index }"
@@ -914,17 +965,17 @@
                                     <div class="tab-item add-tab" @click="addProduct">+</div>
                                 </div>
                                 <button
-                                    v-if="tabScrollState.showRight"
+                                    v-if="tabScrollState.product.showRight"
                                     class="tab-scroll-btn right"
-                                    @click="scrollTabs(150)"
+                                    @click="scrollProductTabs(150)"
                                 >
                                     &gt;
                                 </button>
                             </div>
 
-                            <div v-if="currentRecipe.products.length > 0">
+                            <div v-if="currentVersion.products.length > 0">
                                 <div
-                                    v-for="(product, prodIndex) in currentRecipe.products"
+                                    v-for="(product, prodIndex) in currentVersion.products"
                                     v-show="activeProductTab === prodIndex"
                                     :key="product.id"
                                 >
@@ -1101,7 +1152,7 @@
                                 <input
                                     class="input-field"
                                     type="number"
-                                    v-model.number="currentRecipe.lossRatio"
+                                    v-model.number="currentVersion.lossRatio"
                                     placeholder="例如: 1"
                                 />
                             </div>
@@ -1110,7 +1161,11 @@
                                 <span class="col-ratio">比例 %</span>
                                 <span class="col-action"></span>
                             </div>
-                            <div v-for="(ing, index) in currentRecipe.ingredients" :key="ing.id" class="ingredient-row">
+                            <div
+                                v-for="(ing, index) in currentVersion.ingredients"
+                                :key="ing.id"
+                                class="ingredient-row"
+                            >
                                 <input
                                     class="input-field"
                                     v-model="ing.name"
@@ -1135,13 +1190,13 @@
                             <div class="procedure-notes sub-group">
                                 <span class="notes-title">制作要点:</span>
                                 <div
-                                    v-for="(step, index) in currentRecipe.procedure"
+                                    v-for="(step, index) in currentVersion.procedure"
                                     :key="index"
                                     class="procedure-item"
                                 >
                                     <input
                                         class="input-field"
-                                        v-model="currentRecipe.procedure[index]"
+                                        v-model="currentVersion.procedure[index]"
                                         placeholder="输入制作步骤"
                                     />
                                     <button class="btn btn-remove" @click="removeOtherProcedureStep(index)">
@@ -1205,33 +1260,44 @@
                 setup() {
                     let nextRecipeId = 1;
                     let nextIngredientId = 1000;
+                    let nextVersionId = 10000; // [G-Code-Note] 新增
 
-                    const recipes = ref([]);
-                    const currentRecipeId = ref(null);
+                    const recipes = ref([]); // [G-Code-Note] 现在是 '配方族' (Families) 数组
+                    const currentFamilyId = ref(null); // [G-Code-Note] 替换 currentRecipeId
+                    const currentVersionIndex = ref(0); // [G-Code-Note] 新增，跟踪当前激活的版本
                     const activeProductTab = ref(0);
                     const fileInput = ref(null);
                     const isAddPreDoughModalVisible = ref(false);
                     const activeCategory = ref('MAIN');
                     const mainContentRef = ref(null);
                     const productTabsRef = ref(null);
+                    const versionTabsRef = ref(null); // [G-Code-Note] 新增
                     const fileHandle = ref(null);
 
-                    // [修改] 使用 Map 来存储每个配方的快照
                     const savedRecipeSnapshots = ref(new Map());
                     const isFSApiSupported = computed(() => 'showOpenFilePicker' in window);
 
-                    // [修改] isDirty 变为一个计算属性，更精确地反映全局状态
+                    // [G-Code-Note] 检查 Family 是否被修改
+                    const isFamilyDirty = (family) => {
+                        if (!family) return false;
+                        const savedSnapshot = savedRecipeSnapshots.value.get(family.id);
+                        if (!savedSnapshot) {
+                            return true; // 新增的
+                        }
+                        return JSON.stringify(family) !== savedSnapshot;
+                    };
+
                     const isDirty = computed(() => {
                         if (recipes.value.length !== savedRecipeSnapshots.value.size) {
-                            return true; // 如果配方数量不一致，则肯定有变动
+                            return true;
                         }
-                        // 检查是否有任何一个配方被修改过
-                        return recipes.value.some((recipe) => isRecipeDirty(recipe));
+                        return recipes.value.some((family) => isFamilyDirty(family));
                     });
 
+                    // [G-Code-Note] 拆分 tabs 滚动状态
                     const tabScrollState = ref({
-                        showLeft: false,
-                        showRight: false,
+                        version: { showLeft: false, showRight: false },
+                        product: { showLeft: false, showRight: false },
                     });
 
                     const categoryDisplayMap = {
@@ -1326,23 +1392,35 @@
                         },
                     );
 
-                    const currentRecipeIndex = computed(() =>
-                        recipes.value.findIndex((r) => r.id === currentRecipeId.value),
+                    // --- [G-Code-Note] 核心状态重构 ---
+                    const currentFamilyIndex = computed(() =>
+                        recipes.value.findIndex((r) => r.id === currentFamilyId.value),
                     );
-                    const currentRecipe = computed(() =>
-                        currentRecipeIndex.value > -1 ? recipes.value[currentRecipeIndex.value] : null,
+                    const currentFamily = computed(() =>
+                        currentFamilyIndex.value > -1 ? recipes.value[currentFamilyIndex.value] : null,
                     );
+                    const currentVersion = computed(() =>
+                        currentFamily.value
+                            ? currentFamily.value.versions[currentVersionIndex.value]
+                            : null,
+                    );
+                    // ------------------------------------
+
                     const mainDough = computed(() =>
-                        currentRecipe.value?.type === 'MAIN'
-                            ? currentRecipe.value.doughs.find((d) => d.type === 'MAIN_DOUGH')
+                        currentFamily.value?.type === 'MAIN' && currentVersion.value
+                            ? currentVersion.value.doughs.find((d) => d.type === 'MAIN_DOUGH')
                             : null,
                     );
 
                     const processedPreDoughs = computed(() => {
-                        if (!currentRecipe.value || currentRecipe.value.type !== 'MAIN') {
+                        if (
+                            !currentFamily.value ||
+                            currentFamily.value.type !== 'MAIN' ||
+                            !currentVersion.value
+                        ) {
                             return [];
                         }
-                        const preDoughs = currentRecipe.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
+                        const preDoughs = currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
 
                         return preDoughs.map((dough) => {
                             const totalFlourRatioInPreDough = dough.ingredients
@@ -1379,8 +1457,8 @@
                     });
 
                     const recipeContentTitle = computed(() => {
-                        if (!currentRecipe.value) return '';
-                        if (currentRecipe.value.category === 'BREAD') return '主面团';
+                        if (!currentFamily.value) return '';
+                        if (currentFamily.value.category === 'BREAD') return '主面团';
                         return '配方内容';
                     });
 
@@ -1390,15 +1468,16 @@
                         extra: recipes.value.filter((r) => r.type === 'EXTRA'),
                     }));
 
-                    const filteredRecipes = computed(() => {
+                    // [G-Code-Note] 重命名为 filteredFamilies
+                    const filteredFamilies = computed(() => {
                         return recipes.value.filter((r) => r.type === activeCategory.value);
                     });
 
                     const recipeNamePlaceholder = computed(() =>
-                        !currentRecipe.value
+                        !currentFamily.value
                             ? ''
                             : { MAIN: '例如：法式长棍', PRE_DOUGH: '例如：波兰种', EXTRA: '例如：奶酥馅' }[
-                                  currentRecipe.value.type
+                                  currentFamily.value.type
                               ] || '配方名称',
                     );
                     const recipeTypeDisplay = (type) =>
@@ -1412,52 +1491,78 @@
                     const availablePreDoughs = computed(() => recipes.value.filter((r) => r.type === 'PRE_DOUGH'));
 
                     const availablePreDoughsForReferencing = computed(() => {
-                        if (!currentRecipe.value || currentRecipe.value.type !== 'MAIN') return [];
+                        if (
+                            !currentFamily.value ||
+                            currentFamily.value.type !== 'MAIN' ||
+                            !currentVersion.value
+                        )
+                            return [];
                         const existingDoughNames = new Set(
-                            currentRecipe.value.doughs.filter((d) => d.type === 'PRE_DOUGH').map((d) => d.name),
+                            currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH').map((d) => d.name),
                         );
                         return availablePreDoughs.value.filter((d) => !existingDoughNames.has(d.name));
                     });
 
+                    // [G-Code-Note] 监听 'currentVersion.products'
                     watch(
-                        () => currentRecipe.value?.products,
+                        () => currentVersion.value?.products,
                         () => {
                             nextTick(() => {
-                                updateTabScrollButtons();
+                                updateProductTabScrollButtons();
                             });
                         },
                         { deep: true },
                     );
 
-                    watch(currentRecipeId, (newId) => {
-                        if (!newId) return;
-                        const recipe = recipes.value.find((r) => r.id === newId);
-                        if (recipe && recipe.type === 'MAIN') {
-                            activeProductTab.value = 0;
+                    // [G-Code-Note] 监听 'currentFamily' (用于版本) 和 'currentVersionIndex'
+                    watch([currentFamily, currentVersionIndex], () => {
+                        if (currentFamily.value) {
                             nextTick(() => {
-                                updateTabScrollButtons();
+                                updateVersionTabScrollButtons();
+                                if (currentFamily.value.type === 'MAIN') {
+                                    activeProductTab.value = 0;
+                                    updateProductTabScrollButtons();
+                                }
                             });
                         }
                     });
 
-                    const updateTabScrollButtons = () => {
-                        const el = productTabsRef.value;
+                    // [G-Code-Note] 更新版本 Tab 滚动按钮
+                    const updateVersionTabScrollButtons = () => {
+                        const el = versionTabsRef.value;
                         if (!el) {
-                            tabScrollState.value = { showLeft: false, showRight: false };
+                            tabScrollState.value.version = { showLeft: false, showRight: false };
                             return;
                         }
                         const hasOverflow = el.scrollWidth > el.clientWidth;
-                        tabScrollState.value.showLeft = hasOverflow && el.scrollLeft > 0;
-                        tabScrollState.value.showRight =
+                        tabScrollState.value.version.showLeft = hasOverflow && el.scrollLeft > 0;
+                        tabScrollState.value.version.showRight =
                             hasOverflow && el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
                     };
+                    // [G-Code-Note] 滚动版本 Tab
+                    const scrollVersionTabs = (amount) => {
+                        versionTabsRef.value?.scrollBy({ left: amount, behavior: 'smooth' });
+                    };
 
-                    const scrollTabs = (amount) => {
+                    // [G-Code-Note] 更新产品 Tab 滚动按钮
+                    const updateProductTabScrollButtons = () => {
+                        const el = productTabsRef.value;
+                        if (!el) {
+                            tabScrollState.value.product = { showLeft: false, showRight: false };
+                            return;
+                        }
+                        const hasOverflow = el.scrollWidth > el.clientWidth;
+                        tabScrollState.value.product.showLeft = hasOverflow && el.scrollLeft > 0;
+                        tabScrollState.value.product.showRight =
+                            hasOverflow && el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
+                    };
+                    // [G-Code-Note] 滚动产品 Tab
+                    const scrollProductTabs = (amount) => {
                         productTabsRef.value?.scrollBy({ left: amount, behavior: 'smooth' });
                     };
 
-                    function getNewForm(type) {
-                        const id = nextRecipeId++;
+                    // [G-Code-Note] 重构：getNewVersion (创建新版本的模板)
+                    function getNewVersion(type, category = 'BREAD') {
                         const commonIngredient = {
                             id: nextIngredientId++,
                             name: '',
@@ -1465,15 +1570,11 @@
                             isFlour: false,
                             waterContent: 0,
                         };
-                        const category = type === 'MAIN' ? 'BREAD' : 'OTHER';
 
                         if (type === 'MAIN') {
                             return {
-                                id,
-                                name: '',
-                                type: 'MAIN',
-                                category,
-                                notes: '',
+                                id: nextVersionId++,
+                                notes: `V${nextVersionId}`, // 初始备注
                                 targetTemp: null,
                                 doughs: [
                                     {
@@ -1500,57 +1601,110 @@
                             };
                         }
                         return {
-                            id,
-                            name: '',
-                            type: type,
-                            category,
-                            notes: '',
+                            id: nextVersionId++,
+                            notes: `V${nextVersionId}`, // 初始备注
                             lossRatio: null,
                             ingredients: [JSON.parse(JSON.stringify(commonIngredient))],
                             procedure: [''],
                         };
                     }
 
-                    const addRecipe = () => {
-                        const newRecipe = getNewForm(activeCategory.value);
-                        recipes.value.push(newRecipe);
-                        currentRecipeId.value = newRecipe.id;
+                    // [G-Code-Note] 重构：getNewFamily (创建新配方族的模板)
+                    function getNewFamily(type) {
+                        const id = nextRecipeId++;
+                        const category = type === 'MAIN' ? 'BREAD' : 'OTHER';
+                        const firstVersion = getNewVersion(type, category);
+                        firstVersion.notes = 'V1 - 初始版本'; // 第一个版本备注
+
+                        return {
+                            id,
+                            name: '',
+                            type: type,
+                            category,
+                            versions: [firstVersion],
+                        };
+                    }
+
+                    // [G-Code-Note] 重构：addFamily (替换 addRecipe)
+                    const addFamily = () => {
+                        const newFamily = getNewFamily(activeCategory.value);
+                        recipes.value.push(newFamily);
+                        selectFamily(newFamily.id); // [G-Code-Note] 调用 selectFamily
                     };
 
-                    const selectRecipe = (id) => {
+                    // [G-Code-Note] 重构：selectFamily (替换 selectRecipe)
+                    const selectFamily = (id) => {
                         suggestionState.value.visible = false;
-                        currentRecipeId.value = id;
+                        currentFamilyId.value = id;
+                        currentVersionIndex.value = 0; // 默认选中第一个版本
                     };
 
-                    const deleteRecipe = (id) => {
+                    // [G-Code-Note] 重构：deleteFamily (替换 deleteRecipe)
+                    const deleteFamily = (id) => {
                         const index = recipes.value.findIndex((r) => r.id === id);
                         if (index === -1) return;
                         if (!confirm(`确定要删除 "${recipes.value[index].name || '未命名配方'}" 吗？`)) return;
-                        if (currentRecipeId.value === id) currentRecipeId.value = null;
+                        if (currentFamilyId.value === id) {
+                            currentFamilyId.value = null;
+                            currentVersionIndex.value = 0;
+                        }
 
-                        // [修改] 从快照中也删除
-                        savedRecipeSnapshots.value.delete(id);
+                        savedRecipeSnapshots.value.delete(id); // 从快照中也删除
                         recipes.value.splice(index, 1);
+                    };
+
+                    // [G-Code-Note] 新增：addVersion
+                    const addVersion = () => {
+                        if (!currentFamily.value) return;
+                        // 复制当前版本作为模板
+                        const newVersion = JSON.parse(JSON.stringify(currentVersion.value));
+                        // 分配新 ID
+                        newVersion.id = nextVersionId++;
+                        newVersion.notes = `${currentVersion.value.notes} (副本)`;
+                        // TODO: 深度复制时需要为所有子项分配新 ID
+                        // (为了简化，这个工具目前依赖浅层复制ID，但对于纯JSON是安全的)
+                        currentFamily.value.versions.push(newVersion);
+                        nextTick(() => {
+                            currentVersionIndex.value = currentFamily.value.versions.length - 1;
+                        });
+                    };
+
+                    // [G-Code-Note] 新增：deleteVersion
+                    const deleteVersion = (index) => {
+                        if (!currentFamily.value || currentFamily.value.versions.length <= 1) {
+                            alert('必须至少保留一个版本。');
+                            return;
+                        }
+                        const versionNotes = currentFamily.value.versions[index].notes || `版本 ${index + 1}`;
+                        if (!confirm(`确定要删除版本 "${versionNotes}" 吗？`)) return;
+
+                        currentFamily.value.versions.splice(index, 1);
+                        if (currentVersionIndex.value >= currentFamily.value.versions.length) {
+                            currentVersionIndex.value = currentFamily.value.versions.length - 1;
+                        }
                     };
 
                     const openAddPreDoughModal = () => {
                         isAddPreDoughModalVisible.value = true;
                     };
                     const addPreDoughReference = (dough) => {
-                        currentRecipe.value.doughs.push({
-                            ...JSON.parse(JSON.stringify(dough)),
+                        // [G-Code-Note] 绑定到 currentVersion
+                        currentVersion.value.doughs.push({
+                            ...JSON.parse(JSON.stringify(dough.versions[0])), // 假设引用面种的V1
                             id: nextRecipeId++,
+                            name: dough.name, // Family name
                             type: 'PRE_DOUGH',
                             flourRatioInMainDough: 20,
                         });
                         isAddPreDoughModalVisible.value = false;
                     };
                     const removePreDough = (index) => {
-                        const preDoughs = currentRecipe.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
+                        // [G-Code-Note] 绑定到 currentVersion
+                        const preDoughs = currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
                         const doughToRemove = preDoughs[index];
-                        const originalIndex = currentRecipe.value.doughs.findIndex((d) => d === doughToRemove);
+                        const originalIndex = currentVersion.value.doughs.findIndex((d) => d === doughToRemove);
                         if (originalIndex > -1) {
-                            currentRecipe.value.doughs.splice(originalIndex, 1);
+                            currentVersion.value.doughs.splice(originalIndex, 1);
                         }
                     };
 
@@ -1613,21 +1767,21 @@
                     const removeMainDoughProcedureStep = (index) => mainDough.value.procedure.splice(index, 1);
 
                     const addOtherIngredient = () =>
-                        currentRecipe.value.ingredients.push({
+                        currentVersion.value.ingredients.push({
                             id: nextIngredientId++,
                             name: '',
                             ratio: null,
                             isFlour: false,
                             waterContent: 0,
                         });
-                    const removeOtherIngredient = (index) => currentRecipe.value.ingredients.splice(index, 1);
-                    const addOtherProcedureStep = () => currentRecipe.value.procedure.push('');
-                    const removeOtherProcedureStep = (index) => currentRecipe.value.procedure.splice(index, 1);
+                    const removeOtherIngredient = (index) => currentVersion.value.ingredients.splice(index, 1);
+                    const addOtherProcedureStep = () => currentVersion.value.procedure.push('');
+                    const removeOtherProcedureStep = (index) => currentVersion.value.procedure.splice(index, 1);
 
                     const addProduct = () => {
-                        currentRecipe.value.products.push({
+                        currentVersion.value.products.push({
                             id: nextRecipeId++,
-                            name: `产品${currentRecipe.value.products.length + 1}`,
+                            name: `产品${currentVersion.value.products.length + 1}`,
                             baseDoughWeight: 100,
                             mixIns: [],
                             fillings: [],
@@ -1635,23 +1789,23 @@
                             procedure: [''],
                         });
                         nextTick(() => {
-                            activeProductTab.value = currentRecipe.value.products.length - 1;
+                            activeProductTab.value = currentVersion.value.products.length - 1;
                         });
                     };
 
                     const deleteProduct = (index) => {
-                        const productName = currentRecipe.value.products[index].name || `产品${index + 1}`;
+                        const productName = currentVersion.value.products[index].name || `产品${index + 1}`;
                         if (!confirm(`确定要删除产品 "${productName}" 吗？`)) return;
 
-                        currentRecipe.value.products.splice(index, 1);
+                        currentVersion.value.products.splice(index, 1);
 
-                        if (activeProductTab.value >= currentRecipe.value.products.length) {
-                            activeProductTab.value = Math.max(0, currentRecipe.value.products.length - 1);
+                        if (activeProductTab.value >= currentVersion.value.products.length) {
+                            activeProductTab.value = Math.max(0, currentVersion.value.products.length - 1);
                         }
                     };
 
                     const addSubIngredient = (prodIndex, type) =>
-                        currentRecipe.value.products[prodIndex][type].push({
+                        currentVersion.value.products[prodIndex][type].push({
                             id: nextIngredientId++,
                             name: '',
                             ratio: null,
@@ -1660,11 +1814,11 @@
                             waterContent: 0,
                         });
                     const removeSubIngredient = (prodIndex, type, ingIndex) =>
-                        currentRecipe.value.products[prodIndex][type].splice(ingIndex, 1);
+                        currentVersion.value.products[prodIndex][type].splice(ingIndex, 1);
                     const addProductProcedureStep = (prodIndex) =>
-                        currentRecipe.value.products[prodIndex].procedure.push('');
+                        currentVersion.value.products[prodIndex].procedure.push('');
                     const removeProductProcedureStep = (prodIndex, stepIndex) =>
-                        currentRecipe.value.products[prodIndex].procedure.splice(stepIndex, 1);
+                        currentVersion.value.products[prodIndex].procedure.splice(stepIndex, 1);
 
                     const toDecimal = (percentage) =>
                         percentage === null || percentage === undefined
@@ -1673,37 +1827,77 @@
                     const toPercentage = (decimal) =>
                         decimal === null || decimal === undefined ? null : parseFloat((decimal * 100).toPrecision(12));
 
-                    // [修改] 更新数据快照，并重置'dirty'状态
                     const updateSnapshot = () => {
                         savedRecipeSnapshots.value.clear();
-                        for (const recipe of recipes.value) {
-                            savedRecipeSnapshots.value.set(recipe.id, JSON.stringify(recipe));
+                        for (const family of recipes.value) {
+                            savedRecipeSnapshots.value.set(family.id, JSON.stringify(family));
                         }
                     };
 
+                    // [G-Code-Note] 重构：loadRecipesFromJson (支持 Family 结构)
                     const loadRecipesFromJson = (jsonString) => {
                         try {
                             const importedData = JSON.parse(jsonString);
                             if (!Array.isArray(importedData)) throw new Error('JSON文件格式不正确，根节点应为数组。');
 
                             const preDoughMap = new Map();
-                            importedData.filter((r) => r.type !== 'MAIN').forEach((r) => preDoughMap.set(r.name, r));
+                            importedData
+                                .filter((r) => r.type !== 'MAIN')
+                                .forEach((family) => {
+                                    // 假设面种/馅料使用第一个版本的数据
+                                    if (family.versions && family.versions.length > 0) {
+                                        preDoughMap.set(family.name, family.versions[0]);
+                                    }
+                                });
 
-                            const normalizedRecipes = importedData.map((recipe) =>
-                                normalizeRecipe(recipe, preDoughMap),
-                            );
+                            const normalizedFamilies = importedData.map((family) => {
+                                const newFamily = {
+                                    id: nextRecipeId++,
+                                    name: family.name,
+                                    type: family.type,
+                                    category: family.category || (family.type === 'MAIN' ? 'BREAD' : 'OTHER'),
+                                    versions: [],
+                                };
 
-                            recipes.value = normalizedRecipes;
+                                if (!family.versions || family.versions.length === 0) {
+                                    // 如果导入的文件是旧格式（没有 versions 数组）
+                                    // 则将其作为 V1 版本处理
+                                    console.warn(
+                                        `配方 "${family.name}" 是旧格式，将自动转换为 V1 版本。`,
+                                    );
+                                    const v1 = normalizeVersion(
+                                        family, // 旧格式 recipe
+                                        family.type,
+                                        family.category,
+                                        preDoughMap,
+                                    );
+                                    v1.notes = 'V1 - (从旧格式导入)';
+                                    newFamily.versions = [v1];
+                                } else {
+                                    // 新格式，遍历版本
+                                    newFamily.versions = family.versions.map((version) => {
+                                        return normalizeVersion(
+                                            version,
+                                            family.type,
+                                            family.category,
+                                            preDoughMap,
+                                        );
+                                    });
+                                }
+                                return newFamily;
+                            });
+
+                            recipes.value = normalizedFamilies;
 
                             if (recipes.value.length > 0) {
                                 nextTick(() => {
-                                    currentRecipeId.value = recipes.value[0].id;
+                                    selectFamily(recipes.value[0].id);
                                     activeCategory.value = recipes.value[0].type;
                                 });
                             } else {
-                                currentRecipeId.value = null;
+                                currentFamilyId.value = null;
                             }
-                            alert(`成功加载 ${normalizedRecipes.length} 个配方！`);
+                            alert(`成功加载 ${normalizedFamilies.length} 个配方族！`);
                             nextTick(updateSnapshot);
                         } catch (err) {
                             console.error('Load Error:', err);
@@ -1725,13 +1919,12 @@
                         reader.readAsText(file);
                     };
 
-                    const normalizeRecipe = (recipe, preDoughMap) => {
-                        const baseRecipe = {
-                            id: nextRecipeId++,
-                            name: recipe.name,
-                            type: recipe.type,
-                            category: recipe.category || (recipe.type === 'MAIN' ? 'BREAD' : 'OTHER'),
-                            notes: recipe.notes || '',
+                    // [G-Code-Note] 重构：normalizeVersion (替换 normalizeRecipe)
+                    // (versionData 是来自 JSON 的 *单个* 版本)
+                    function normalizeVersion(versionData, familyType, familyCategory, preDoughMap) {
+                        const baseVersion = {
+                            id: nextVersionId++,
+                            notes: versionData.notes || 'V?',
                             targetTemp: null,
                             lossRatio: null,
                             doughs: [],
@@ -1751,11 +1944,11 @@
                             };
                         };
 
-                        if (recipe.type === 'MAIN') {
+                        if (familyType === 'MAIN') {
                             const preDoughs = [];
                             const mainDoughIngredients = [];
 
-                            (recipe.ingredients || []).forEach((ing) => {
+                            (versionData.ingredients || []).forEach((ing) => {
                                 if (preDoughMap.has(ing.name)) {
                                     const preDoughDef = preDoughMap.get(ing.name);
                                     if (preDoughDef) {
@@ -1780,9 +1973,12 @@
                                 id: nextIngredientId++,
                                 name: '主面团',
                                 type: 'MAIN_DOUGH',
-                                lossRatio: toPercentage(recipe.lossRatio),
-                                divisionLoss: recipe.divisionLoss === undefined ? 2 : recipe.divisionLoss,
-                                procedure: recipe.procedure && recipe.procedure.length > 0 ? recipe.procedure : [''],
+                                lossRatio: toPercentage(versionData.lossRatio),
+                                divisionLoss: versionData.divisionLoss === undefined ? 2 : versionData.divisionLoss,
+                                procedure:
+                                    versionData.procedure && versionData.procedure.length > 0
+                                        ? versionData.procedure
+                                        : [''],
                                 ingredients:
                                     mainDoughIngredients.length > 0
                                         ? mainDoughIngredients
@@ -1797,11 +1993,11 @@
                                           ],
                             };
 
-                            baseRecipe.targetTemp = recipe.targetTemp || null;
-                            baseRecipe.doughs = [mainDoughData, ...preDoughs];
-                            baseRecipe.products =
-                                recipe.products && recipe.products.length > 0
-                                    ? recipe.products.map((p) => ({
+                            baseVersion.targetTemp = versionData.targetTemp || null;
+                            baseVersion.doughs = [mainDoughData, ...preDoughs];
+                            baseVersion.products =
+                                versionData.products && versionData.products.length > 0
+                                    ? versionData.products.map((p) => ({
                                           id: nextRecipeId++,
                                           name: p.name,
                                           baseDoughWeight: p.weight,
@@ -1843,10 +2039,10 @@
                                           },
                                       ];
                         } else {
-                            baseRecipe.lossRatio = toPercentage(recipe.lossRatio) || null;
-                            baseRecipe.ingredients =
-                                recipe.ingredients && recipe.ingredients.length > 0
-                                    ? recipe.ingredients.map(processImportedIngredient)
+                            baseVersion.lossRatio = toPercentage(versionData.lossRatio) || null;
+                            baseVersion.ingredients =
+                                versionData.ingredients && versionData.ingredients.length > 0
+                                    ? versionData.ingredients.map(processImportedIngredient)
                                     : [
                                           {
                                               id: nextIngredientId++,
@@ -1856,89 +2052,98 @@
                                               waterContent: 0,
                                           },
                                       ];
-                            baseRecipe.procedure =
-                                recipe.procedure && recipe.procedure.length > 0 ? recipe.procedure : [''];
+                            baseVersion.procedure =
+                                versionData.procedure && versionData.procedure.length > 0
+                                    ? versionData.procedure
+                                    : [''];
                         }
+                        return baseVersion;
+                    }
 
-                        return baseRecipe;
-                    };
+                    // [G-Code-Note] 新增：exportVersion (将内部版本转换为 JSON 版本)
+                    function exportVersion(version, familyType) {
+                        const formatIngredient = (ing) => {
+                            const result = {
+                                name: ing.name,
+                                ratio: toDecimal(ing.ratio),
+                            };
+                            if (ing.isFlour) {
+                                result.isFlour = true;
+                            }
+                            if (ing.waterContent && ing.waterContent > 0) {
+                                result.waterContent = ing.waterContent;
+                            }
+                            return result;
+                        };
 
+                        if (familyType === 'MAIN') {
+                            const md = version.doughs.find((d) => d.type === 'MAIN_DOUGH');
+                            const finalIngredients = [
+                                ...version.doughs
+                                    .filter((d) => d.type === 'PRE_DOUGH')
+                                    .map((pd) => ({
+                                        name: pd.name,
+                                        flourRatio: toDecimal(pd.flourRatioInMainDough),
+                                    })),
+                                ...md.ingredients
+                                    .filter((ing) => ing.name.trim() && ing.ratio !== null)
+                                    .map(formatIngredient),
+                            ];
+                            return {
+                                notes: version.notes,
+                                targetTemp: version.targetTemp,
+                                lossRatio: toDecimal(md.lossRatio),
+                                divisionLoss: md.divisionLoss,
+                                procedure: md.procedure.filter((p) => p.trim()),
+                                ingredients: finalIngredients,
+                                products: version.products.map((p) => ({
+                                    name: p.name,
+                                    weight: p.baseDoughWeight,
+                                    procedure: p.procedure.filter((step) => step.trim()),
+                                    mixIn: p.mixIns
+                                        .filter((i) => i.name.trim() && i.ratio !== null)
+                                        .map((i) => ({ name: i.name, ratio: toDecimal(i.ratio) })),
+                                    fillings: p.fillings
+                                        .filter((i) => i.name.trim() && i.weightInGrams !== null)
+                                        .map((i) => ({ name: i.name, weightInGrams: i.weightInGrams })),
+                                    toppings: p.toppings
+                                        .filter((i) => i.name.trim() && i.weightInGrams !== null)
+                                        .map((i) => ({ name: i.name, weightInGrams: i.weightInGrams })),
+                                })),
+                            };
+                        } else {
+                            // PRE_DOUGH 或 EXTRA
+                            return {
+                                notes: version.notes,
+                                lossRatio: toDecimal(version.lossRatio),
+                                ingredients: version.ingredients
+                                    .filter((ing) => ing.name.trim() && ing.ratio !== null)
+                                    .map(formatIngredient),
+                                procedure: version.procedure.filter((p) => p.trim()),
+                                products: [],
+                            };
+                        }
+                    }
+
+                    // [G-Code-Note] 重构：getRecipesAsJsonString (支持 Family 结构)
                     const getRecipesAsJsonString = () => {
                         if (recipes.value.length === 0) {
                             alert('请先添加至少一个配方');
                             return null;
                         }
                         try {
-                            const processedRecipes = recipes.value.map((recipe) => {
-                                if (!recipe.name || !recipe.name.trim())
-                                    throw new Error(`列表中有未命名的配方，请检查后再导出。`);
+                            const processedFamilies = recipes.value.map((family) => {
+                                if (!family.name || !family.name.trim())
+                                    throw new Error(`列表中有未命名的配方族，请检查后再导出。`);
 
-                                const formatIngredient = (ing) => {
-                                    const result = {
-                                        name: ing.name,
-                                        ratio: toDecimal(ing.ratio),
-                                    };
-                                    if (ing.isFlour) {
-                                        result.isFlour = true;
-                                    }
-                                    if (ing.waterContent && ing.waterContent > 0) {
-                                        result.waterContent = ing.waterContent;
-                                    }
-                                    return result;
+                                return {
+                                    name: family.name,
+                                    type: family.type,
+                                    category: family.category,
+                                    versions: family.versions.map((v) => exportVersion(v, family.type)),
                                 };
-
-                                if (recipe.type === 'MAIN') {
-                                    const md = recipe.doughs.find((d) => d.type === 'MAIN_DOUGH');
-                                    const finalIngredients = [
-                                        ...recipe.doughs
-                                            .filter((d) => d.type === 'PRE_DOUGH')
-                                            .map((pd) => ({
-                                                name: pd.name,
-                                                flourRatio: toDecimal(pd.flourRatioInMainDough),
-                                            })),
-                                        ...md.ingredients
-                                            .filter((ing) => ing.name.trim() && ing.ratio !== null)
-                                            .map(formatIngredient),
-                                    ];
-                                    return {
-                                        name: recipe.name,
-                                        type: recipe.type,
-                                        category: recipe.category,
-                                        targetTemp: recipe.targetTemp,
-                                        lossRatio: toDecimal(md.lossRatio),
-                                        divisionLoss: md.divisionLoss,
-                                        procedure: md.procedure.filter((p) => p.trim()),
-                                        ingredients: finalIngredients,
-                                        products: recipe.products.map((p) => ({
-                                            name: p.name,
-                                            weight: p.baseDoughWeight,
-                                            procedure: p.procedure.filter((step) => step.trim()),
-                                            mixIn: p.mixIns
-                                                .filter((i) => i.name.trim() && i.ratio !== null)
-                                                .map((i) => ({ name: i.name, ratio: toDecimal(i.ratio) })),
-                                            fillings: p.fillings
-                                                .filter((i) => i.name.trim() && i.weightInGrams !== null)
-                                                .map((i) => ({ name: i.name, weightInGrams: i.weightInGrams })),
-                                            toppings: p.toppings
-                                                .filter((i) => i.name.trim() && i.weightInGrams !== null)
-                                                .map((i) => ({ name: i.name, weightInGrams: i.weightInGrams })),
-                                        })),
-                                    };
-                                } else {
-                                    return {
-                                        name: recipe.name,
-                                        type: recipe.type,
-                                        category: recipe.category,
-                                        lossRatio: toDecimal(recipe.lossRatio),
-                                        ingredients: recipe.ingredients
-                                            .filter((ing) => ing.name.trim() && ing.ratio !== null)
-                                            .map(formatIngredient),
-                                        procedure: recipe.procedure.filter((p) => p.trim()),
-                                        products: [],
-                                    };
-                                }
                             });
-                            return JSON.stringify(processedRecipes, null, 4);
+                            return JSON.stringify(processedFamilies, null, 4);
                         } catch (err) {
                             alert(`处理数据失败: ${err.message}`);
                             return null;
@@ -1997,15 +2202,6 @@
                         }
                     };
 
-                    // [新增] 检查单个配方是否被修改过
-                    const isRecipeDirty = (recipe) => {
-                        const savedSnapshot = savedRecipeSnapshots.value.get(recipe.id);
-                        if (!savedSnapshot) {
-                            return true; // 如果没有快照（比如是新增的），则为 dirty
-                        }
-                        return JSON.stringify(recipe) !== savedSnapshot;
-                    };
-
                     const handleBeforeUnload = (event) => {
                         if (isDirty.value) {
                             event.preventDefault();
@@ -2022,16 +2218,18 @@
 
                     return {
                         recipes,
-                        currentRecipeId,
+                        currentFamilyId,
+                        currentVersionIndex,
                         activeProductTab,
-                        currentRecipe,
+                        currentFamily,
+                        currentVersion,
                         mainDough,
                         fileInput,
                         recipeNamePlaceholder,
                         recipeTypeDisplay,
                         isSelfMade,
                         recipeCategories,
-                        filteredRecipes,
+                        filteredFamilies,
                         isAddPreDoughModalVisible,
                         categoryDisplay,
                         recipeContentTitle,
@@ -2041,16 +2239,19 @@
                         activeCategory,
                         mainContentRef,
                         productTabsRef,
+                        versionTabsRef,
                         tabScrollState,
                         suggestionState,
                         suggestionBoxStyle,
                         processedPreDoughs,
                         isFSApiSupported,
                         fileHandle,
-                        isRecipeDirty, // [新增] 导出函数给模板使用
-                        addRecipe,
-                        selectRecipe,
-                        deleteRecipe,
+                        isFamilyDirty,
+                        addFamily,
+                        selectFamily,
+                        deleteFamily,
+                        addVersion,
+                        deleteVersion,
                         triggerImport,
                         handleFileImport,
                         openAddPreDoughModal,
@@ -2059,8 +2260,10 @@
                         handleIngredientInput,
                         handleIngredientBlur,
                         selectSuggestion,
-                        scrollTabs,
-                        updateTabScrollButtons,
+                        scrollVersionTabs,
+                        updateVersionTabScrollButtons,
+                        scrollProductTabs,
+                        updateProductTabScrollButtons,
                         addMainDoughIngredient,
                         removeMainDoughIngredient,
                         addMainDoughProcedureStep,
