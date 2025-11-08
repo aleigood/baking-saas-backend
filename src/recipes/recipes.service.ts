@@ -1,3 +1,8 @@
+// G-Code-Note: Service (NestJS)
+// 路径: src/recipes/recipes.service.ts
+// [核心重构] 完整重写以支持 preDoughId 和 extraId 拆分的新 schema
+// [G-Code-Note] [核心修复] 增加了禁止 EXTRA 引用 PRE_DOUGH 和 PRE_DOUGH 引用 EXTRA 的业务逻辑
+
 import {
     Injectable,
     NotFoundException,
@@ -798,8 +803,9 @@ export class RecipesService {
 
             // 预加载所有引用的配方 (PRE_DOUGH 或 EXTRA)
             const linkedFamilies = await this.preloadLinkedFamilies(tenantId, ingredients, tx);
-            // 验证比例并计算总 ratio
-            this.calculateAndValidateLinkedFamilyRatios(ingredients, linkedFamilies);
+
+            // [G-Code-Note] [核心修改] 传入父配方的 type
+            this.calculateAndValidateLinkedFamilyRatios(type, ingredients, linkedFamilies);
 
             // 验证面粉总和 (保持不变)
             this._validateBakerPercentage(type, category, ingredients);
@@ -1080,7 +1086,7 @@ export class RecipesService {
                     }
                 }
 
-                // 修复 (v: any) 导致的 no-unsafe-member-access
+                // [G-Code-Note] [核心修复] 修复 (v: any) 导致的 no-unsafe-member-access
                 const hasActiveVersion = recipeFamily.versions.some((v: RecipeVersion) => v.isActive);
                 const nextVersionNumber =
                     recipeFamily.versions.length > 0
@@ -1138,8 +1144,9 @@ export class RecipesService {
 
         // 预加载所有引用的配方 (PRE_DOUGH 或 EXTRA)
         const linkedFamilies = await this.preloadLinkedFamilies(tenantId, ingredients, tx);
-        // 验证比例并计算总 ratio
-        this.calculateAndValidateLinkedFamilyRatios(ingredients, linkedFamilies);
+
+        // [G-Code-Note] [核心修改] 传入父配方的 type
+        this.calculateAndValidateLinkedFamilyRatios(type, ingredients, linkedFamilies);
 
         // 验证面粉总和 (保持不变)
         this._validateBakerPercentage(type, category, ingredients);
@@ -1875,7 +1882,7 @@ export class RecipesService {
                                 waterContent: 0,
                             };
                         } else if (standardIngredient) {
-                            // 移除不必要的 '!' 断言
+                            // [G-Code-Note] [核心修复] 移除不必要的 '!' 断言
                             return {
                                 id: standardIngredient.id,
                                 name: standardIngredient.name,
@@ -2148,8 +2155,9 @@ export class RecipesService {
         return new Map(families.map((f) => [f.name, f as PreloadedRecipeFamily]));
     }
 
-    //  替换 `calculatePreDoughTotalRatio`
+    //  [G-Code-Note] [核心修改] 增加 parentType 参数并添加新业务逻辑
     private calculateAndValidateLinkedFamilyRatios(
+        parentType: RecipeType, // 接收父配方类型
         ingredients: ComponentIngredientDto[],
         linkedFamilies: Map<string, PreloadedRecipeFamily>,
     ) {
@@ -2170,6 +2178,13 @@ export class RecipesService {
 
             // 这是一个配方引用
             if (linkedFamily.type === 'PRE_DOUGH') {
+                // [G-Code-Note] [核心新增] 检查父配方是否是 EXTRA
+                if (parentType === 'EXTRA') {
+                    throw new BadRequestException(
+                        `逻辑错误：配方 "${ing.name}" 是面种(PRE_DOUGH)，但当前配方是附加项(EXTRA)。附加项配方不能引用面种。`,
+                    );
+                }
+
                 // 场景1: 引用 PRE_DOUGH (面种)
                 if (ing.flourRatio === undefined || ing.flourRatio === null) {
                     throw new BadRequestException(
@@ -2202,6 +2217,14 @@ export class RecipesService {
                 }
             } else {
                 // 场景2: 引用 EXTRA (馅料)
+
+                // [G-Code-Note] [核心新增] 检查父配方是否是 PRE_DOUGH
+                if (parentType === 'PRE_DOUGH') {
+                    throw new BadRequestException(
+                        `逻辑错误：配方 "${ing.name}" 是附加项(EXTRA)，但当前配方是面种(PRE_DOUGH)。面种配方不能引用附加项。`,
+                    );
+                }
+
                 if (ing.ratio === undefined || ing.ratio === null) {
                     // prettier-ignore
                     throw new BadRequestException( // 修复 Prettier 错误
