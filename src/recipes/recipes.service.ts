@@ -1,7 +1,7 @@
 // G-Code-Note: Service (NestJS)
 // 路径: src/recipes/recipes.service.ts
 // [核心重构] 完整重写以支持 preDoughId 和 extraId 拆分的新 schema
-// [G-Code-Note] [核心修复] 增加了禁止 EXTRA 引用 PRE_DOUGH 和 PRE_DOUGH 引用 EXTRA 的业务逻辑
+// [G-Code-Note] [核心新增] 增加了【自引用】和【循环引用】的验证逻辑
 
 import {
     Injectable,
@@ -804,6 +804,10 @@ export class RecipesService {
             // 预加载所有引用的配方 (PRE_DOUGH 或 EXTRA)
             const linkedFamilies = await this.preloadLinkedFamilies(tenantId, ingredients, tx);
 
+            // [G-Code-Note] [核心新增] 在计算比例前，进行循环引用和自引用检查
+            await this._validateCircularReference(familyId, updateRecipeDto.name, ingredients, linkedFamilies, tx);
+
+            // 验证比例并计算总 ratio
             // [G-Code-Note] [核心修改] 传入父配方的 type
             this.calculateAndValidateLinkedFamilyRatios(type, ingredients, linkedFamilies);
 
@@ -1086,7 +1090,7 @@ export class RecipesService {
                     }
                 }
 
-                // [G-Code-Note] [核心修复] 修复 (v: any) 导致的 no-unsafe-member-access
+                // 修复 (v: any) 导致的 no-unsafe-member-access
                 const hasActiveVersion = recipeFamily.versions.some((v: RecipeVersion) => v.isActive);
                 const nextVersionNumber =
                     recipeFamily.versions.length > 0
@@ -1145,6 +1149,22 @@ export class RecipesService {
         // 预加载所有引用的配方 (PRE_DOUGH 或 EXTRA)
         const linkedFamilies = await this.preloadLinkedFamilies(tenantId, ingredients, tx);
 
+        // [G-Code-Note] [核心新增] 获取父配方信息以进行循环引用检查
+        const parentVersion = await tx.recipeVersion.findUnique({
+            where: { id: versionId },
+            include: { family: { select: { id: true, name: true } } },
+        });
+        if (!parentVersion) {
+            // This should never happen if called from createVersionInternal
+            throw new NotFoundException('无法找到配方版本');
+        }
+        const parentFamilyId = parentVersion.family.id;
+        const parentRecipeName = parentVersion.family.name;
+
+        // [G-Code-Note] [核心新增] 进行循环引用和自引用检查
+        await this._validateCircularReference(parentFamilyId, parentRecipeName, ingredients, linkedFamilies, tx);
+
+        // 验证比例并计算总 ratio
         // [G-Code-Note] [核心修改] 传入父配方的 type
         this.calculateAndValidateLinkedFamilyRatios(type, ingredients, linkedFamilies);
 
@@ -1228,9 +1248,8 @@ export class RecipesService {
             }
         }
 
-        const version = await tx.recipeVersion.findUnique({ where: { id: versionId } });
         return tx.recipeFamily.findUnique({
-            where: { id: version?.familyId },
+            where: { id: parentFamilyId }, // [G-Code-Note] [核心修复] 使用已知 ID
             include: recipeFamilyWithDetailsInclude,
         });
     }
@@ -1882,7 +1901,7 @@ export class RecipesService {
                                 waterContent: 0,
                             };
                         } else if (standardIngredient) {
-                            // [G-Code-Note] [核心修复] 移除不必要的 '!' 断言
+                            // 移除不必要的 '!' 断言
                             return {
                                 id: standardIngredient.id,
                                 name: standardIngredient.name,
@@ -2153,6 +2172,88 @@ export class RecipesService {
         });
 
         return new Map(families.map((f) => [f.name, f as PreloadedRecipeFamily]));
+    }
+
+    // [G-Code-Note] [核心新增] 用于递归检查循环引用的辅助函数
+    private async _getDescendantFamilyIds(
+        familyId: string,
+        tx: Prisma.TransactionClient,
+        visited: Set<string>, // 使用 Set 来跟踪访问过的节点
+    ): Promise<Set<string>> {
+        // 1. 如果我们在此次检查中已经访问过这个节点，说明存在循环，但我们在这里只返回空，让上层去判断
+        if (visited.has(familyId)) {
+            return new Set<string>();
+        }
+        visited.add(familyId); // 标记当前节点为已访问
+
+        // 2. 查找此配方激活版本的原料
+        const activeVersion = await tx.recipeVersion.findFirst({
+            where: { familyId: familyId, isActive: true },
+            include: {
+                components: {
+                    include: {
+                        ingredients: {
+                            select: { preDoughId: true, extraId: true }, // 只需要引用的配方 ID
+                        },
+                    },
+                },
+            },
+        });
+
+        // 如果没有激活版本或没有原料，它就没有子配方
+        if (!activeVersion?.components[0]) {
+            return new Set<string>();
+        }
+
+        const childRecipeIds = new Set<string>();
+        for (const ing of activeVersion.components[0].ingredients) {
+            if (ing.preDoughId) childRecipeIds.add(ing.preDoughId);
+            if (ing.extraId) childRecipeIds.add(ing.extraId);
+        }
+
+        // 3. 递归查找所有子孙配方
+        const allDescendants = new Set<string>(childRecipeIds);
+        for (const childId of childRecipeIds) {
+            // [G-Code-Note] 重要的：将 *同一个* visited 集合传递下去，以跟踪整个调用链
+            const grandChildren = await this._getDescendantFamilyIds(childId, tx, visited);
+            grandChildren.forEach((gcId) => allDescendants.add(gcId));
+        }
+
+        // [G-Code-Note] 完成此分支的递归后，将当前节点移出 visited，以便其他分支可以正常检查
+        // [G-Code-Note] (虽然在此特定场景下可能不是必须的，但这是图遍历的标准做法)
+        // [G-Code-Note] 修正：不应该移除，visited 应该贯穿整个顶层调用
+        return allDescendants;
+    }
+
+    // [G-Code-Note] [核心新增] 检查自引用和循环引用的主函数
+    private async _validateCircularReference(
+        parentFamilyId: string,
+        parentRecipeName: string,
+        ingredients: ComponentIngredientDto[],
+        linkedFamilies: Map<string, PreloadedRecipeFamily>, // 我们可以重用已加载的配方
+        tx: Prisma.TransactionClient,
+    ) {
+        for (const ingredientDto of ingredients) {
+            const linkedFamily = linkedFamilies.get(ingredientDto.name);
+            if (!linkedFamily) continue; // 这是一个标准原料
+
+            // 1. 检查自引用 (A -> A)
+            if (linkedFamily.id === parentFamilyId) {
+                throw new BadRequestException(`配方 "${parentRecipeName}" 不能引用自己作为原料。`);
+            }
+
+            // 2. 检查循环引用 (A -> B -> ... -> A)
+            // 我们需要获取这个原料的所有子孙配方
+            // [G-Code-Note] 每次顶层检查都必须使用一个新的 visited Set
+            const descendants = await this._getDescendantFamilyIds(linkedFamily.id, tx, new Set<string>());
+
+            // 如果父配方的 ID 出现在子配方的“后代”列表中，则存在循环引用
+            if (descendants.has(parentFamilyId)) {
+                throw new BadRequestException(
+                    `循环引用：配方 "${linkedFamily.name}" 已经（或间接）引用了您正在保存的配方 "${parentRecipeName}"。`,
+                );
+            }
+        }
     }
 
     //  [G-Code-Note] [核心修改] 增加 parentType 参数并添加新业务逻辑
