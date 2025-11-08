@@ -1,3 +1,8 @@
+// G-Code-Note: Service (NestJS)
+// 路径: src/costing/costing.service.ts
+// [核心重构] 完整文件，以支持新 schema (preDoughId/extraId) 并修复 isRecipe 字段
+// [G-Code-Note] [核心修复] 修复了 TS2551, TS2304, 和 no-unused-vars 错误
+
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
@@ -15,13 +20,7 @@ import {
     IngredientType,
 } from '@prisma/client';
 
-interface ConsumptionDetail {
-    ingredientId: string;
-    ingredientName: string;
-    activeSkuId: string | null;
-    totalConsumed: number; // in grams
-}
-
+// [核心修改] 增加 isRecipe
 export interface CalculatedIngredientInfo {
     name: string;
     ratio: number;
@@ -29,6 +28,7 @@ export interface CalculatedIngredientInfo {
     pricePerKg: number;
     cost: number;
     extraInfo?: string;
+    isRecipe: boolean; // [G-Code-Note] 修复问题3：添加 isRecipe
 }
 
 // [核心新增] 定义用于排序的类型
@@ -41,6 +41,7 @@ export interface CalculatedComponentGroup {
     totalCost: number;
 }
 
+// [核心修改] 增加 isRecipe
 export interface CalculatedExtraIngredientInfo {
     id: string;
     name: string;
@@ -49,6 +50,7 @@ export interface CalculatedExtraIngredientInfo {
     weightInGrams: number;
     ratio?: number;
     extraInfo?: string;
+    isRecipe: boolean; // [G-Code-Note] 修复问题3：添加 isRecipe
 }
 
 export interface CalculatedProductCostDetails {
@@ -77,15 +79,40 @@ export interface CalculatedRecipeDetails {
     ingredients: CalculatedRecipeIngredient[];
 }
 
-// 深入定义类型以支持递归查询
+// [G-Code-Note] [核心新增] 修复 TS2304
+interface ConsumptionDetail {
+    ingredientId: string;
+    ingredientName: string;
+    activeSkuId: string | null;
+    totalConsumed: number;
+}
+
+// [G-Code-Note] [核心重构] 深入定义类型以支持递归查询 (支持新 schema)
 type FullComponentIngredient = ComponentIngredient & {
     ingredient: Ingredient | null;
-    linkedPreDough:
-        | (RecipeFamily & {
+    linkedPreDough: // 面种
+    | (RecipeFamily & {
               versions: (RecipeVersion & {
                   components: (RecipeComponent & {
                       ingredients: (ComponentIngredient & {
                           ingredient: Ingredient | null;
+                          // [G-Code-Note] 开始嵌套
+                          linkedPreDough: RecipeFamily | null;
+                          linkedExtra: RecipeFamily | null;
+                      })[];
+                  })[];
+              })[];
+          })
+        | null;
+    linkedExtra: // 馅料
+    | (RecipeFamily & {
+              versions: (RecipeVersion & {
+                  components: (RecipeComponent & {
+                      ingredients: (ComponentIngredient & {
+                          ingredient: Ingredient | null;
+                          // [G-Code-Note] 开始嵌套
+                          linkedPreDough: RecipeFamily | null;
+                          linkedExtra: RecipeFamily | null;
                       })[];
                   })[];
               })[];
@@ -102,11 +129,16 @@ type FullRecipeVersion = RecipeVersion & {
 // 深入定义 FullProductIngredient 以支持 linkedExtra 的递归损耗计算
 type FullProductIngredient = ProductIngredient & {
     ingredient: Ingredient | null;
-    linkedExtra:
-        | (RecipeFamily & {
+    linkedExtra: // 产品中的馅料/装饰
+    | (RecipeFamily & {
               versions: (RecipeVersion & {
                   components: (RecipeComponent & {
-                      ingredients: (ComponentIngredient & { ingredient: Ingredient | null })[];
+                      ingredients: (ComponentIngredient & {
+                          ingredient: Ingredient | null;
+                          // [G-Code-Note] 开始嵌套
+                          linkedPreDough: RecipeFamily | null;
+                          linkedExtra: RecipeFamily | null;
+                      })[];
                   })[];
               })[];
           })
@@ -130,7 +162,12 @@ type SnapshotRecipeFamily = {
             procedure: string[];
             ingredients: {
                 ratio: number | string | null;
+                // [G-Code-Note] [核心重构] 快照中可能同时包含两者 (虽然逻辑上不应该)
                 linkedPreDough: {
+                    id: string;
+                    name: string;
+                } | null;
+                linkedExtra: {
                     id: string;
                     name: string;
                 } | null;
@@ -173,6 +210,7 @@ export class CostingService {
                                             },
                                         },
                                         linkedPreDough: true,
+                                        linkedExtra: true, // [G-Code-Note] [核心重构] 包含 linkedExtra
                                     },
                                 },
                             },
@@ -223,6 +261,15 @@ export class CostingService {
                     return {
                         ingredientId: ing.linkedPreDough.id, // [核心修改]
                         name: ing.linkedPreDough.name,
+                        weightInGrams: weight.toNumber(),
+                        isRecipe: true,
+                        brand: null,
+                    };
+                } else if (ing.linkedExtra) {
+                    // [G-Code-Note] [核心重构] 增加 linkedExtra
+                    return {
+                        ingredientId: ing.linkedExtra.id,
+                        name: ing.linkedExtra.name,
                         weightInGrams: weight.toNumber(),
                         isRecipe: true,
                         brand: null,
@@ -317,6 +364,15 @@ export class CostingService {
                     return {
                         ingredientId: ing.linkedPreDough.id,
                         name: ing.linkedPreDough.name,
+                        weightInGrams: weight.toNumber(),
+                        isRecipe: true,
+                        brand: null,
+                    };
+                } else if (ing.linkedExtra) {
+                    // [G-Code-Note] [核心重构] 增加 linkedExtra
+                    return {
+                        ingredientId: ing.linkedExtra.id,
+                        name: ing.linkedExtra.name,
                         weightInGrams: weight.toNumber(),
                         isRecipe: true,
                         brand: null,
@@ -611,8 +667,8 @@ export class CostingService {
             for (const ing of component.ingredients) {
                 const ingredientInputWeight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
 
-                // 检查这个“原料”是不是又是一个配方
-                const linkedRecipe = ing.linkedPreDough; // (在ProductIngredient中字段名叫linkedExtra,但在ComponentIngredient中叫linkedPreDough, 复用此逻辑)
+                // [G-Code-Note] [核心重构] 检查这个“原料”是不是又是一个配方
+                const linkedRecipe = ing.linkedPreDough || ing.linkedExtra; // [G-Code-Note] 检查两种
                 if (linkedRecipe) {
                     const subComponent = linkedRecipe.versions?.[0]?.components?.[0];
                     if (subComponent) {
@@ -659,21 +715,42 @@ export class CostingService {
                 new Prisma.Decimal(0),
             );
 
-            if (totalRatio.isZero() && !isBaseComponent) return group;
+            // [G-Code-Note] [核心修复] flourRatio 不计入 totalRatio，因此 totalRatio 可能为 0
+            // if (totalRatio.isZero() && !isBaseComponent) return group;
 
-            const currentFlourWeight = isBaseComponent ? flourWeightReference : componentWeight.div(totalRatio);
+            // [G-Code-Note] [核心修复] 基础重量计算
+            // 1. 如果是面粉基准 (BREAD or PRE_DOUGH)，使用 flourWeightReference
+            // 2. 如果是非面粉基准 (PASTRY, DESSERT, EXTRA)，使用 componentWeight / totalRatio
+            const isFlourBased = category === 'BREAD' || type === 'PRE_DOUGH';
+            let currentFlourWeight = new Prisma.Decimal(0); // 面粉基准
+            let weightPerRatioPoint = new Prisma.Decimal(0); // 常规比例基准
 
+            if (isFlourBased) {
+                currentFlourWeight = isBaseComponent ? flourWeightReference : componentWeight.div(totalRatio);
+            } else {
+                if (!totalRatio.isZero()) {
+                    weightPerRatioPoint = componentWeight.div(totalRatio);
+                }
+            }
+
+            // [G-Code-Note] [核心修复] 修复 TS2551
             const { cleanedProcedure, ingredientNotes } = this._parseProcedureForNotes(
                 component.procedure,
-                currentFlourWeight,
+                currentFlourWeight, // 百分比替换仍然使用面粉基准
             );
             group.procedure = cleanedProcedure;
 
             for (const ingredient of component.ingredients) {
                 const preDough = ingredient.linkedPreDough?.versions?.[0];
+                const extra = ingredient.linkedExtra?.versions?.[0]; // [G-Code-Note] [核心重构] 检查 Extra
 
                 let weight: Prisma.Decimal;
+                let cost = new Prisma.Decimal(0);
+                let pricePerKg = 0;
+                let effectiveRatio = new Prisma.Decimal(0);
+
                 if (preDough && ingredient.flourRatio) {
+                    // [G-Code-Note] 场景1: 引用 PRE_DOUGH (面种)
                     const preDoughRecipe = preDough.components[0];
                     const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
                         (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
@@ -681,20 +758,11 @@ export class CostingService {
                     );
                     const flourForPreDough = flourWeightReference.mul(new Prisma.Decimal(ingredient.flourRatio));
                     weight = flourForPreDough.mul(preDoughTotalRatio);
-                } else {
-                    weight = currentFlourWeight.mul(new Prisma.Decimal(ingredient.ratio ?? 0));
-                }
 
-                if (preDough && preDough.components[0]) {
-                    const preDoughRecipe = preDough.components[0];
                     let newConversionFactor: Prisma.Decimal;
                     if (ingredient.flourRatio && new Prisma.Decimal(ingredient.flourRatio).gt(0)) {
                         newConversionFactor = parentConversionFactor.mul(new Prisma.Decimal(ingredient.flourRatio));
                     } else {
-                        const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
-                            (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
-                            new Prisma.Decimal(0),
-                        );
                         newConversionFactor = !preDoughTotalRatio.isZero()
                             ? parentConversionFactor.mul(
                                   new Prisma.Decimal(ingredient.ratio ?? 0).div(preDoughTotalRatio),
@@ -714,13 +782,41 @@ export class CostingService {
                     );
                     preDoughGroup.name = `${ingredient.linkedPreDough?.name}`;
                     componentGroups.push(preDoughGroup);
-                } else if (ingredient.ingredient) {
-                    const pricePerKg = getPricePerKg(ingredient.ingredient.id);
-                    const cost = new Prisma.Decimal(pricePerKg).div(1000).mul(weight);
+                } else if (extra && ingredient.ratio) {
+                    // [G-Code-Note] [核心重构] 场景2: 引用 EXTRA (馅料)
+                    weight = isFlourBased
+                        ? currentFlourWeight.mul(new Prisma.Decimal(ingredient.ratio)) // BREAD/PRE_DOUGH 引用 EXTRA
+                        : weightPerRatioPoint.mul(new Prisma.Decimal(ingredient.ratio)); // EXTRA/OTHER 引用 EXTRA
 
-                    const effectiveRatio = new Prisma.Decimal(ingredient.ratio ?? 0).mul(parentConversionFactor);
+                    const extraComponent = extra.components[0];
+                    if (extraComponent) {
+                        cost = getExtraRecipeCost(extraComponent as FullRecipeVersion['components'][0], weight);
+                    }
+                    effectiveRatio = new Prisma.Decimal(ingredient.ratio ?? 0).mul(parentConversionFactor);
+
+                    group.ingredients.push({
+                        name: ingredient.linkedExtra!.name,
+                        ratio: effectiveRatio.toNumber(),
+                        weightInGrams: weight.toNumber(),
+                        pricePerKg: 0, // 这是一个配方，没有单价
+                        cost: cost.toNumber(),
+                        extraInfo: ingredientNotes.get(ingredient.linkedExtra!.name) || undefined,
+                        isFlour: false,
+                        isRecipe: true, // [G-Code-Note] 修复问题3
+                    });
+                    group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
+                } else if (ingredient.ingredient && ingredient.ratio) {
+                    // [G-Code-Note] 场景3: 标准原料
+                    weight = isFlourBased
+                        ? currentFlourWeight.mul(new Prisma.Decimal(ingredient.ratio)) // BREAD/PRE_DOUGH
+                        : weightPerRatioPoint.mul(new Prisma.Decimal(ingredient.ratio)); // EXTRA/OTHER
+
+                    pricePerKg = getPricePerKg(ingredient.ingredient.id);
+                    cost = new Prisma.Decimal(pricePerKg).div(1000).mul(weight);
+                    effectiveRatio = new Prisma.Decimal(ingredient.ratio ?? 0).mul(parentConversionFactor);
 
                     const extraInfoParts: string[] = [];
+                    // [G-Code-Note] [核心修复] 修复 TS2551 相关的 no-unsafe-call  和 no-unsafe-member-access
                     const procedureNote = ingredientNotes.get(ingredient.ingredient.name);
                     if (procedureNote) {
                         extraInfoParts.push(procedureNote);
@@ -731,9 +827,10 @@ export class CostingService {
                         ratio: effectiveRatio.toNumber(),
                         weightInGrams: weight.toNumber(),
                         pricePerKg: pricePerKg,
-                        cost: cost.toNumber(), // [核心修复] 移除 .toDP()
+                        cost: cost.toNumber(),
                         extraInfo: extraInfoParts.length > 0 ? extraInfoParts.join('\n') : undefined,
                         isFlour: ingredient.ingredient.isFlour, // [核心新增]
+                        isRecipe: false, // [G-Code-Note] 修复问题3
                     });
                     group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
                 }
@@ -748,32 +845,53 @@ export class CostingService {
         };
 
         const baseComponent = product.recipeVersion.components[0];
-        const calculateTotalRatioForMain = (component: FullRecipeVersion['components'][0]): Prisma.Decimal => {
-            return component.ingredients.reduce((sum, i) => {
+        // [G-Code-Note] [核心修复] 移除未使用的变量 'calculateTotalRatioForMain'
+
+        // [G-Code-Note] [核心修复] 面粉基准计算逻辑
+        const calculateFlourWeightReference = (component: FullRecipeVersion['components'][0]): Prisma.Decimal => {
+            // 1. 计算总的面粉比例 (来自面粉原料 + 来自面种的 flourRatio)
+            const totalFlourRatio = component.ingredients.reduce((sum, i) => {
                 if (i.flourRatio && i.linkedPreDough) {
-                    const preDough = i.linkedPreDough.versions?.[0]?.components?.[0];
-                    if (preDough) {
-                        const preDoughTotalRatio = preDough.ingredients.reduce(
-                            (s, pi) => s.add(new Prisma.Decimal(pi.ratio ?? 0)),
-                            new Prisma.Decimal(0),
-                        );
-                        return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio));
-                    }
+                    return sum.add(new Prisma.Decimal(i.flourRatio));
                 }
-                return sum.add(new Prisma.Decimal(i.ratio ?? 0));
+                if (i.ingredient?.isFlour) {
+                    return sum.add(new Prisma.Decimal(i.ratio ?? 0));
+                }
+                return sum;
             }, new Prisma.Decimal(0));
+
+            // 2. 如果没有面粉，基准为 0
+            if (totalFlourRatio.isZero()) {
+                return new Prisma.Decimal(0);
+            }
+
+            // 3. 计算所有 *非面粉* 和 *非面种* 原料的比例
+            const otherRatio = component.ingredients.reduce((sum, i) => {
+                if ((!i.ingredient?.isFlour && i.ratio) || i.linkedExtra) {
+                    return sum.add(new Prisma.Decimal(i.ratio ?? 0));
+                }
+                return sum;
+            }, new Prisma.Decimal(0));
+
+            // 4. (总重 - 分割损耗) / (面粉总比 + 其他总比) = 面粉基准
+            const netWeight = new Prisma.Decimal(product.baseDoughWeight);
+            const totalRatioSum = totalFlourRatio.add(otherRatio);
+            if (totalRatioSum.isZero()) {
+                return new Prisma.Decimal(0);
+            }
+            return netWeight.div(totalRatioSum);
         };
 
-        const baseComponentTotalRatio = calculateTotalRatioForMain(baseComponent);
+        let flourWeightReference = new Prisma.Decimal(0);
         const adjustedBaseComponentWeight = new Prisma.Decimal(product.baseDoughWeight);
 
-        const flourWeightReference = !baseComponentTotalRatio.isZero()
-            ? adjustedBaseComponentWeight.div(baseComponentTotalRatio)
-            : new Prisma.Decimal(0);
+        if (recipeCategory === 'BREAD') {
+            flourWeightReference = calculateFlourWeightReference(baseComponent);
+        }
 
         const baseComponentGroup = processComponent(
             baseComponent,
-            new Prisma.Decimal(product.baseDoughWeight),
+            adjustedBaseComponentWeight,
             new Prisma.Decimal(1),
             true,
             flourWeightReference,
@@ -801,6 +919,7 @@ export class CostingService {
                 let finalWeightInGrams = new Prisma.Decimal(0);
                 let cost = new Prisma.Decimal(0);
                 let pricePerKg = 0; // 仅当是基础原料时有效
+                let isRecipe = false; // [G-Code-Note] 修复问题3
 
                 if (ing.type === 'MIX_IN' && ing.ratio) {
                     finalWeightInGrams = flourWeightReference.mul(new Prisma.Decimal(ing.ratio));
@@ -812,8 +931,10 @@ export class CostingService {
                     // 是基础原料
                     pricePerKg = getPricePerKg(ing.ingredientId);
                     cost = new Prisma.Decimal(pricePerKg).div(1000).mul(finalWeightInGrams);
+                    isRecipe = false; // [G-Code-Note] 修复问题3
                 } else if (ing.linkedExtraId) {
                     // 是配方 (linkedExtra)
+                    isRecipe = true; // [G-Code-Note] 修复问题3
                     const extraComponent = ing.linkedExtra?.versions?.[0]?.components?.[0];
                     if (extraComponent) {
                         // 调用我们新增的辅助函数来计算这个配方的成本
@@ -835,6 +956,7 @@ export class CostingService {
                     weightInGrams: finalWeightInGrams.toNumber(),
                     ratio: ing.ratio ? ing.ratio.toNumber() : undefined,
                     extraInfo: undefined,
+                    isRecipe: isRecipe, // [G-Code-Note] 修复问题3
                     // pricePerKg: pricePerKg, // 这一行可以去掉，因为对于配方它是无效的
                 };
             })
@@ -849,6 +971,7 @@ export class CostingService {
                 type: '原料',
                 cost: componentGroups.reduce((sum, g) => sum + g.totalCost, 0),
                 weightInGrams: product.baseDoughWeight.toNumber(),
+                isRecipe: false, // [G-Code-Note] 修复问题3
             },
             ...extraIngredients,
         ];
@@ -967,6 +1090,29 @@ export class CostingService {
                                                                 ingredients: {
                                                                     include: {
                                                                         ingredient: true,
+                                                                        linkedPreDough: true, // [G-Code-Note] [核心重构] 嵌套
+                                                                        linkedExtra: true, // [G-Code-Note] [核心重构] 嵌套
+                                                                    },
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                        linkedExtra: {
+                                            // [G-Code-Note] [核心重构] 包含 linkedExtra
+                                            include: {
+                                                versions: {
+                                                    where: { isActive: true },
+                                                    include: {
+                                                        components: {
+                                                            include: {
+                                                                ingredients: {
+                                                                    include: {
+                                                                        ingredient: true,
+                                                                        linkedPreDough: true, // [G-Code-Note] [核心重构] 嵌套
+                                                                        linkedExtra: true, // [G-Code-Note] [核心重构] 嵌套
                                                                     },
                                                                 },
                                                             },
@@ -994,6 +1140,8 @@ export class CostingService {
                                                 ingredients: {
                                                     include: {
                                                         ingredient: true,
+                                                        linkedPreDough: true, // [G-Code-Note] [核心重构] 嵌套
+                                                        linkedExtra: true, // [G-Code-Note] [核心重构] 嵌套
                                                     },
                                                 },
                                             },
@@ -1022,8 +1170,14 @@ export class CostingService {
                 if (ing.ingredient) {
                     map.set(ing.ingredient.id, ing.ingredient);
                 }
+                // [G-Code-Note] [核心重构] 递归检查
                 if (ing.linkedPreDough) {
                     ing.linkedPreDough.versions.forEach((v) =>
+                        v.components.forEach((c) => processComponent(c as FullRecipeVersion['components'][0])),
+                    );
+                }
+                if (ing.linkedExtra) {
+                    ing.linkedExtra.versions.forEach((v) =>
                         v.components.forEach((c) => processComponent(c as FullRecipeVersion['components'][0])),
                     );
                 }
@@ -1083,12 +1237,13 @@ export class CostingService {
                 // 计算当前“原料”按配比需要投入的克重
                 const ingredientInputWeight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
 
-                // 如果这个“原料”本身是另一个配方（如预制面种），则递归调用本函数
-                if (ing.linkedPreDough) {
-                    const preDoughComponent = ing.linkedPreDough.versions?.[0]?.components?.[0];
-                    if (preDoughComponent) {
+                // [G-Code-Note] [核心重构] 如果这个“原料”本身是另一个配方（如预制面种或馅料），则递归调用本函数
+                const linkedRecipe = ing.linkedPreDough || ing.linkedExtra;
+                if (linkedRecipe) {
+                    const subComponent = linkedRecipe.versions?.[0]?.components?.[0];
+                    if (subComponent) {
                         processComponentRecursively(
-                            preDoughComponent as FullRecipeVersion['components'][0],
+                            subComponent as FullRecipeVersion['components'][0],
                             ingredientInputWeight, // 此时，对于下一层面种来说，这个投入量就是它的“目标产出量”
                         );
                     }
@@ -1262,7 +1417,8 @@ export class CostingService {
         for (const ing of component.ingredients) {
             const ingredientInputWeight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
 
-            const linkedRecipe = ing.linkedPreDough; // (在ProductIngredient中字段名叫linkedExtra,但在ComponentIngredient中叫linkedPreDough, 复用此逻辑)
+            // [G-Code-Note] [核心重构] 检查这个“原料”是不是又是一个配方
+            const linkedRecipe = ing.linkedPreDough || ing.linkedExtra;
             if (linkedRecipe) {
                 const subComponent = linkedRecipe.versions?.[0]?.components?.[0];
                 if (subComponent) {
