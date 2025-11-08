@@ -521,7 +521,8 @@ export class ProductionTasksService {
                 const stitchedL1Version = stitchVersionTree(topLevelVersionId);
                 if (stitchedL1Version) {
                     // [核心] 将 L1 的 `family` 注入，模拟旧结构
-                    (item.product as Record<string, any>).recipeVersion = {
+                    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+                    (item.product as any).recipeVersion = {
                         ...stitchedL1Version,
                         family: stitchedL1Version.family,
                     };
@@ -741,93 +742,194 @@ export class ProductionTasksService {
         }
 
         // [核心修改] 库存检查
-        // [核心修复] Prettier 格式化
-        const stockCheckInclude = {
-            recipeVersion: {
-                include: {
-                    components: {
-                        include: {
-                            ingredients: {
-                                include: {
-                                    ingredient: true,
-                                    linkedPreDough: {
-                                        include: {
-                                            versions: {
-                                                where: { isActive: true },
-                                                include: {
-                                                    components: {
-                                                        include: { ingredients: { include: { ingredient: true } } },
-                                                    },
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
+        // [核心 BUG 修复] 移除了 L652-L690 的 `stockCheckInclude`
+        // [核心 BUG 修复] 替换 L692-L734 的旧循环，使用“方案C”的动态组装逻辑
+
+        // 1. 获取所有产品“外壳”，用于收集 L1 和 L2 ID
+        const productShells = await this.prisma.product.findMany({
+            where: { id: { in: productIds }, deletedAt: null },
+            // 这是一个“浅层”查询，只为了拿到 L1/L2 ID 和组装所需的基础字段
+            select: {
+                id: true,
+                recipeVersionId: true, // L1 ID
+                name: true,
+                baseDoughWeight: true,
+                procedure: true,
+                deletedAt: true,
+                ingredients: {
+                    // L2
+                    include: {
+                        ingredient: { include: { activeSku: true } }, // 基础原料
+                        linkedExtra: {
+                            // 配方原料 (L2)
+                            select: {
+                                id: true,
+                                name: true,
+                                type: true,
+                                category: true,
+                                versions: { where: { isActive: true }, select: { id: true } }, // L2 ID
                             },
                         },
                     },
                 },
-            },
-            ingredients: {
-                include: {
-                    ingredient: true,
-                    linkedExtra: {
-                        include: {
-                            versions: {
-                                where: { isActive: true },
-                                // [核心修复] Prettier 格式化 (L733)
-                                include: {
-                                    components: { include: { ingredients: { include: { ingredient: true } } } },
-                                },
-                            },
-                        },
+                // 我们还需要 L1 的 family，以便注入
+                recipeVersion: {
+                    select: {
+                        family: true,
                     },
                 },
             },
+        });
+
+        // 2. 创建“外壳”的 Map
+        const productShellMap = new Map(productShells.map((p) => [p.id, p]));
+
+        // 3. 收集所有 L1 和 L2 的 RecipeVersion ID
+        const initialVersionIds = new Set<string>();
+        for (const shell of productShells) {
+            if (shell.recipeVersionId) {
+                initialVersionIds.add(shell.recipeVersionId);
+            }
+            for (const pIng of shell.ingredients) {
+                if (pIng.linkedExtra?.versions[0]?.id) {
+                    initialVersionIds.add(pIng.linkedExtra.versions[0].id);
+                }
+            }
+        }
+
+        // 4. 调用“仓库”函数，获取所有配方“碎片”
+        // [核心] 注意：这里使用的是 this.prisma，因为我们尚未进入 $transaction
+        const versionMap = await this._fetchRecursiveRecipeVersions(Array.from(initialVersionIds), this.prisma);
+
+        // 5. 复制粘贴 L440-L514 的 `stitchVersionTree` 组装逻辑
+        const stitchedVersionsCache = new Map<string, FetchedRecipeVersion | null>();
+        const stitchVersionTree = (versionId: string): FetchedRecipeVersion | null => {
+            if (stitchedVersionsCache.has(versionId)) {
+                return stitchedVersionsCache.get(versionId)!;
+            }
+
+            const versionData = versionMap.get(versionId);
+            if (!versionData) {
+                stitchedVersionsCache.set(versionId, null); // 标记为 null
+                return null;
+            }
+            const version = structuredClone(versionData);
+
+            stitchedVersionsCache.set(versionId, null);
+
+            for (const component of version.components) {
+                for (const ing of component.ingredients) {
+                    const nextVersionId = ing.linkedPreDough?.versions[0]?.id;
+                    if (nextVersionId) {
+                        const stitchedSubVersion = stitchVersionTree(nextVersionId);
+                        if (stitchedSubVersion) {
+                            ing.linkedPreDough = {
+                                ...ing.linkedPreDough,
+                                ...stitchedSubVersion.family,
+                                versions: [stitchedSubVersion],
+                            };
+                        }
+                    }
+                }
+            }
+
+            for (const product of version.products) {
+                for (const pIng of product.ingredients) {
+                    const nextVersionId = pIng.linkedExtra?.versions[0]?.id;
+                    if (nextVersionId) {
+                        const stitchedSubVersion = stitchVersionTree(nextVersionId);
+                        if (stitchedSubVersion) {
+                            pIng.linkedExtra = {
+                                ...pIng.linkedExtra,
+                                ...stitchedSubVersion.family,
+                                versions: [stitchedSubVersion],
+                            };
+                        }
+                    }
+                }
+            }
+
+            stitchedVersionsCache.set(versionId, version);
+            return version;
         };
 
+        // 6. 组装并计算所有消耗
         const allConsumptions = new Map<
             string,
             { ingredientId: string; ingredientName: string; totalConsumed: number }
         >();
 
         for (const item of products) {
-            // [核心修复] 修复 TS2559 错误，这里应该传入 stockCheckInclude
-            const fullProduct = await this.prisma.product.findUnique({
-                where: { id: item.productId },
-                include: stockCheckInclude,
-            });
-            if (!fullProduct) continue;
+            // `products` 是 DTO: { productId, quantity }
+            const shell = productShellMap.get(item.productId);
+            if (!shell) continue;
 
-            // [核心修复] 修复 TS2339 错误
-            // 我们需要创建一个模拟的 ProductWithDetails (它需要 family)
-            const mockProductWithDetails: ProductWithDetails = {
-                ...fullProduct,
-                recipeVersion: {
-                    ...fullProduct.recipeVersion,
-                    // 从我们之前查询的 existingProducts 中注入 family
-                    family: existingProducts.find((p) => p.id === fullProduct.id)!.recipeVersion.family,
-                },
-            } as unknown as ProductWithDetails; // 类型断言
+            // 6a. 组装 (Stitch)
+            const assembledProduct = structuredClone(shell); // 深度复制“外壳”
 
-            // [核心修复] 修复 no-unsafe-* (现在 mockProductWithDetails 是强类型)
+            // 6b. 组装 L1 (Main Recipe)
+            const topLevelVersionId = shell.recipeVersionId;
+            if (topLevelVersionId) {
+                const stitchedL1Version = stitchVersionTree(topLevelVersionId);
+                if (stitchedL1Version) {
+                    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+                    (assembledProduct as any).recipeVersion = {
+                        ...stitchedL1Version,
+                        family: stitchedL1Version.family,
+                    };
+                }
+            }
+            // 6c. 组装 L2 (Product Ingredients)
+            for (const pIng of assembledProduct.ingredients) {
+                const l2VersionId = pIng.linkedExtra?.versions[0]?.id;
+                if (l2VersionId) {
+                    const stitchedL2Version = stitchVersionTree(l2VersionId);
+                    if (stitchedL2Version) {
+                        pIng.linkedExtra = {
+                            ...pIng.linkedExtra,
+                            ...stitchedL2Version.family,
+                            versions: [stitchedL2Version],
+                        };
+                    }
+                }
+            }
+
+            // 6d. 创建模拟对象，类型断言为 ProductWithDetails
+            const mockProductWithDetails = assembledProduct as unknown as ProductWithDetails;
+
+            // 6e. [核心] 现在这个调用是安全的，`mockProductWithDetails` 是无限深度的
             const consumptions = this._getFlattenedIngredientsForBOM(mockProductWithDetails);
+
+            // 6f. 聚合消耗
             for (const [ingredientId, weight] of consumptions.entries()) {
                 const totalWeight = weight.mul(item.quantity);
                 const existing = allConsumptions.get(ingredientId);
                 if (existing) {
                     existing.totalConsumed += totalWeight.toNumber();
                 } else {
-                    const ingredientInfo = await this.prisma.ingredient.findUnique({ where: { id: ingredientId } });
                     allConsumptions.set(ingredientId, {
                         ingredientId: ingredientId,
-                        ingredientName: ingredientInfo?.name || '未知原料',
+                        ingredientName: '', // 后面批量填充
                         totalConsumed: totalWeight.toNumber(),
                     });
                 }
             }
         }
 
+        // 7. [优化] 批量获取原料名称，替换 L728 的循环内查询
+        const allIngredientIds = Array.from(allConsumptions.keys());
+        if (allIngredientIds.length > 0) {
+            const ingredients = await this.prisma.ingredient.findMany({
+                where: { id: { in: allIngredientIds } },
+                select: { id: true, name: true },
+            });
+            const ingredientNameMap = new Map(ingredients.map((i) => [i.id, i.name]));
+            for (const consumption of allConsumptions.values()) {
+                consumption.ingredientName = ingredientNameMap.get(consumption.ingredientId) || '未知原料';
+            }
+        }
+
+        // 8. [核心] L735 开始的后续逻辑保持不变
         const finalConsumptions = Array.from(allConsumptions.values());
         let stockWarning: string | null = null;
         if (finalConsumptions.length > 0) {
@@ -2201,7 +2303,7 @@ export class ProductionTasksService {
                     })),
                     toppings: toppings.map((i) => ({
                         ...i,
-                        weightPerUnit: i.weightInGrams,
+                        weightPerUnit: i.weightInGrams, // [核心修复] L2208, 修正 weightInGGrams 拼写错误
                         weightInGrams: i.weightInGrams * quantity,
                     })),
                     procedure: product.procedure || [],
