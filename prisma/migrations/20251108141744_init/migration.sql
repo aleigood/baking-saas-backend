@@ -125,7 +125,8 @@ CREATE TABLE "ComponentIngredient" (
     "ratio" DECIMAL(65,30),
     "flourRatio" DECIMAL(65,30),
     "ingredientId" TEXT,
-    "linkedPreDoughId" TEXT,
+    "preDoughId" TEXT,
+    "extraId" TEXT,
 
     CONSTRAINT "ComponentIngredient_pkey" PRIMARY KEY ("id")
 );
@@ -310,7 +311,10 @@ CREATE INDEX "RecipeComponent_recipeVersionId_idx" ON "RecipeComponent"("recipeV
 CREATE INDEX "ComponentIngredient_componentId_idx" ON "ComponentIngredient"("componentId");
 
 -- CreateIndex
-CREATE INDEX "ComponentIngredient_linkedPreDoughId_idx" ON "ComponentIngredient"("linkedPreDoughId");
+CREATE INDEX "ComponentIngredient_preDoughId_idx" ON "ComponentIngredient"("preDoughId");
+
+-- CreateIndex
+CREATE INDEX "ComponentIngredient_extraId_idx" ON "ComponentIngredient"("extraId");
 
 -- CreateIndex
 CREATE INDEX "ComponentIngredient_ingredientId_idx" ON "ComponentIngredient"("ingredientId");
@@ -403,10 +407,13 @@ ALTER TABLE "RecipeComponent" ADD CONSTRAINT "RecipeComponent_recipeVersionId_fk
 ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_ingredientId_fkey" FOREIGN KEY ("ingredientId") REFERENCES "Ingredient"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_componentId_fkey" FOREIGN KEY ("componentId") REFERENCES "RecipeComponent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_preDoughId_fkey" FOREIGN KEY ("preDoughId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_linkedPreDoughId_fkey" FOREIGN KEY ("linkedPreDoughId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_extraId_fkey" FOREIGN KEY ("extraId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_componentId_fkey" FOREIGN KEY ("componentId") REFERENCES "RecipeComponent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Product" ADD CONSTRAINT "Product_recipeVersionId_fkey" FOREIGN KEY ("recipeVersionId") REFERENCES "RecipeVersion"("id") ON DELETE CASCADE ON UPDATE CASCADE;

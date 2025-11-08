@@ -16,10 +16,9 @@ datasource db {
 }
 
 // ================================================================= //
-//                            ENUMS                                  //
+//                            ENUMS                                //
 // ================================================================= //
 
-// [核心新增] 新增配方品类枚举，用于区分不同类型的烘焙产品
 enum RecipeCategory {
   BREAD // 面包类 (将强制执行烘焙百分比验证)
   PASTRY // 西点类
@@ -160,20 +159,24 @@ model Invitation {
 // 配方族：用于管理一个配方的所有版本
 // 例如，“甜面团”是一个Family，它可能有V1, V2等多个Version
 model RecipeFamily {
-  id               String                @id @default(uuid())
+  id               String                 @id @default(uuid())
   name             String // 配方名称，如“甜面团”、“烫种”
   tenantId         String
   type             RecipeType // 配方类型 (主配方, 预制面团, 或附加项)
-  category         RecipeCategory        @default(BREAD) // [核心新增] 配方品类
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  category         RecipeCategory         @default(BREAD) // [核心新增] 配方品类
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
   deletedAt        DateTime?
-  tenant           Tenant                @relation(fields: [tenantId], references: [id])
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id])
   versions         RecipeVersion[] // 一个配方族包含多个版本
-  // 当此配方作为预制面团在其他配方中使用时
-  usedInComponents ComponentIngredient[] @relation("PreDoughLink") // [核心重命名] usedInDoughs -> usedInComponents
-  // 当此配方作为附加项(馅料/装饰)在其他配方中使用时
-  usedInProducts   ProductIngredient[]   @relation("ExtraLink")
+  
+  // [核心修改] 当此配方作为预制面团在其他配方中使用时
+  usedInComponentsAsPreDough ComponentIngredient[] @relation("PreDoughLink")
+  // [核心修改] 当此配方作为附加项(馅料/装饰)在其他配方中使用时
+  usedInComponentsAsExtra    ComponentIngredient[] @relation("ExtraLink_Component") // [G-Code-Note] 新增的 relation name
+  
+  // [G-Code-Note] 这个关系是用于 ProductIngredient 的，保持不变
+  usedInProducts             ProductIngredient[]   @relation("ExtraLink")
 
   @@unique([tenantId, name, deletedAt])
   @@index([tenantId])
@@ -217,14 +220,26 @@ model ComponentIngredient {
   componentId      String // [核心重命名] doughId -> componentId
   ratio            Decimal?
   flourRatio       Decimal?
+  
+  // G-Code-Note: 这是一个原料（如“面粉”）
   ingredientId     String? // [核心修改] 用于关联Ingredient模型
   ingredient       Ingredient?     @relation(fields: [ingredientId], references: [id], onUpdate: Cascade, onDelete: SetNull)
-  linkedPreDoughId String?
+  
+  // [G-Code-Note] [核心修改] 字段重命名并拆分
+  
+  // G-Code-Note: 这是一个面种配方 (如 "烫种")
+  preDoughId       String?
+  linkedPreDough   RecipeFamily?   @relation("PreDoughLink", fields: [preDoughId], references: [id])
+  
+  // G-Code-Note: 这是一个馅料配方 (如 "卡仕达酱")
+  extraId          String?
+  linkedExtra      RecipeFamily?   @relation("ExtraLink_Component", fields: [extraId], references: [id])
+  
   component        RecipeComponent @relation(fields: [componentId], references: [id], onDelete: Cascade) // [核心重命名] dough -> component
-  linkedPreDough   RecipeFamily?   @relation("PreDoughLink", fields: [linkedPreDoughId], references: [id])
 
   @@index([componentId]) // [核心重命名] doughId -> componentId
-  @@index([linkedPreDoughId])
+  @@index([preDoughId]) // [G-Code-Note] 原来的 linkedPreDoughId
+  @@index([extraId]) // [G-Code-Note] 新增
   @@index([ingredientId])
 }
 
