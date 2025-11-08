@@ -165,14 +165,6 @@ const taskWithDetailsInclude = {
 
 // [核心新增] 方案C (修正版) 所需的“浅层Include”
 const recipeVersionRecursiveBatchInclude = {
-    // 包含所有 RecipeVersion 自己的字段
-    id: true,
-    familyId: true,
-    version: true,
-    notes: true,
-    isActive: true,
-    createdAt: true,
-    updatedAt: true,
     // 包含 family 信息，用于类型判断和组装
     family: {
         select: {
@@ -464,7 +456,7 @@ export class ProductionTasksService {
             // [核心] 复制一份数据，避免修改 map 中的原始缓存
             // 我们需要深度复制，但 Prisma 的 payload 很复杂，
             // structuredClone 是一个现代且安全的方式
-            const version = structuredClone(versionData);
+            const version = JSON.parse(JSON.stringify(versionData)) as FetchedRecipeVersion;
 
             // 标记此ID正在处理中 (用于循环依赖检测)
             stitchedVersionsCache.set(versionId, null);
@@ -513,7 +505,7 @@ export class ProductionTasksService {
 
         // 5. 启动组装
         // [核心] 我们必须修改 `task` 对象本身，将其从“浅层”变为“深层”
-        const assembledTask = structuredClone(task); // 深度复制 task
+        const assembledTask = JSON.parse(JSON.stringify(task)) as typeof task; // 深度复制 task
         for (const item of assembledTask.items) {
             // 5a. 组装 L1 (Main Recipe)
             const topLevelVersionId = item.product.recipeVersionId;
@@ -813,7 +805,7 @@ export class ProductionTasksService {
                 stitchedVersionsCache.set(versionId, null); // 标记为 null
                 return null;
             }
-            const version = structuredClone(versionData);
+            const version = JSON.parse(JSON.stringify(versionData)) as FetchedRecipeVersion;
 
             stitchedVersionsCache.set(versionId, null);
 
@@ -865,7 +857,7 @@ export class ProductionTasksService {
             if (!shell) continue;
 
             // 6a. 组装 (Stitch)
-            const assembledProduct = structuredClone(shell); // 深度复制“外壳”
+            const assembledProduct = JSON.parse(JSON.stringify(shell)) as typeof shell; // 深度复制“外壳”
 
             // 6b. 组装 L1 (Main Recipe)
             const topLevelVersionId = shell.recipeVersionId;
