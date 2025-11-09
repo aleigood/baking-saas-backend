@@ -1039,7 +1039,9 @@ export class CostingService {
                 name: summaryRowName,
                 type: '原料',
                 cost: componentGroups.reduce((sum, g) => sum + g.totalCost, 0),
-                weightInGrams: product.baseDoughWeight.toNumber(),
+                // [G-Code-Note] [核心修复] 由于 product 来自 JSON.parse, baseDoughWeight 不再是 Decimal 对象
+                // 必须像 L907 和 L916 一样重新包装
+                weightInGrams: new Prisma.Decimal(product.baseDoughWeight).toNumber(),
                 isRecipe: false, // [G-Code-Note] 修复问题3
             },
             ...extraIngredients,
