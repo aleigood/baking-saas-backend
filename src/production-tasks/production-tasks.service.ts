@@ -1,6 +1,6 @@
 // G-Code-Note: Service (NestJS)
 // 路径: src/production-tasks/production-tasks.service.ts
-// [核心修改] 修复上一版重构（方案C）引入的 151 个 ESLint 错误
+// [核心重构] 完整文件，修复了对 ComponentIngredient.linkedExtra 的遗漏支持
 
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,6 +8,7 @@ import { CreateProductionTaskDto } from './dto/create-production-task.dto';
 import { UpdateProductionTaskDto } from './dto/update-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
 import {
+    Ingredient, // [G-Code-Note] [核心修复] 导入 Ingredient
     IngredientType,
     Prisma,
     ProductIngredientType,
@@ -69,6 +70,7 @@ const taskWithDetailsInclude = {
                                                                         // L3
                                                                         include: {
                                                                             ingredient: true,
+                                                                            // [核心修正] 匹配新 schema，L3 也能引用 L4
                                                                             linkedPreDough: {
                                                                                 // L4
                                                                                 include: {
@@ -82,6 +84,99 @@ const taskWithDetailsInclude = {
                                                                                                         include: {
                                                                                                             ingredient: true,
                                                                                                             linkedPreDough: true, // 停止在 L6
+                                                                                                            linkedExtra: true, // 停止在 L6
+                                                                                                        },
+                                                                                                    },
+                                                                                                },
+                                                                                            },
+                                                                                        },
+                                                                                    },
+                                                                                },
+                                                                            },
+                                                                            // [核心修正] 匹配新 schema，L3 也能引用 L4
+                                                                            linkedExtra: {
+                                                                                // L4
+                                                                                include: {
+                                                                                    versions: {
+                                                                                        where: { isActive: true },
+                                                                                        include: {
+                                                                                            components: {
+                                                                                                include: {
+                                                                                                    ingredients: {
+                                                                                                        // L5
+                                                                                                        include: {
+                                                                                                            ingredient: true,
+                                                                                                            linkedPreDough: true, // 停止在 L6
+                                                                                                            linkedExtra: true, // 停止在 L6
+                                                                                                        },
+                                                                                                    },
+                                                                                                },
+                                                                                            },
+                                                                                        },
+                                                                                    },
+                                                                                },
+                                                                            },
+                                                                        },
+                                                                    },
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                            // [核心修正] 匹配新 schema, L1 也能引用 L2
+                                            linkedExtra: {
+                                                // L2
+                                                include: {
+                                                    versions: {
+                                                        where: { isActive: true },
+                                                        include: {
+                                                            components: {
+                                                                include: {
+                                                                    ingredients: {
+                                                                        // L3
+                                                                        include: {
+                                                                            ingredient: true,
+                                                                            // [G-Code-Note] [核心修复] 修复 L2938, L2947 (TS2339)
+                                                                            // L138 的定义必须与 L78 匹配
+                                                                            linkedPreDough: {
+                                                                                // L4
+                                                                                include: {
+                                                                                    versions: {
+                                                                                        where: { isActive: true },
+                                                                                        include: {
+                                                                                            components: {
+                                                                                                include: {
+                                                                                                    ingredients: {
+                                                                                                        // L5
+                                                                                                        include: {
+                                                                                                            ingredient: true,
+                                                                                                            linkedPreDough: true, // 停止在 L6
+                                                                                                            linkedExtra: true, // 停止在 L6
+                                                                                                        },
+                                                                                                    },
+                                                                                                },
+                                                                                            },
+                                                                                        },
+                                                                                    },
+                                                                                },
+                                                                            },
+                                                                            // [G-Code-Note] [核心修复] 修复 L2938, L2947 (TS2339)
+                                                                            // L139 的定义必须与 L99 匹配
+                                                                            linkedExtra: {
+                                                                                // L4
+                                                                                include: {
+                                                                                    versions: {
+                                                                                        where: { isActive: true },
+                                                                                        include: {
+                                                                                            components: {
+                                                                                                include: {
+                                                                                                    ingredients: {
+                                                                                                        // L5
+                                                                                                        include: {
+                                                                                                            ingredient: true,
+                                                                                                            linkedPreDough: true, // 停止在 L6
+                                                                                                            linkedExtra: true, // 停止在 L6
                                                                                                         },
                                                                                                     },
                                                                                                 },
@@ -133,6 +228,29 @@ const taskWithDetailsInclude = {
                                                                                         include: {
                                                                                             ingredient: true,
                                                                                             linkedPreDough: true, // 停止在 L6
+                                                                                            linkedExtra: true, // 停止在 L6
+                                                                                        },
+                                                                                    },
+                                                                                },
+                                                                            },
+                                                                        },
+                                                                    },
+                                                                },
+                                                            },
+                                                            linkedExtra: {
+                                                                // L4
+                                                                include: {
+                                                                    versions: {
+                                                                        where: { isActive: true },
+                                                                        include: {
+                                                                            components: {
+                                                                                include: {
+                                                                                    ingredients: {
+                                                                                        // L5
+                                                                                        include: {
+                                                                                            ingredient: true,
+                                                                                            linkedPreDough: true, // 停止在 L6
+                                                                                            linkedExtra: true, // 停止在 L6
                                                                                         },
                                                                                     },
                                                                                 },
@@ -183,6 +301,16 @@ const recipeVersionRecursiveBatchInclude = {
                     ingredient: { include: { activeSku: true } },
                     // [核心] 对于“配方原料”，只获取下一层的 RecipeVersion ID
                     linkedPreDough: {
+                        select: {
+                            id: true, // Family ID
+                            name: true,
+                            type: true,
+                            category: true,
+                            versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
+                        },
+                    },
+                    // [G-Code-Note] [核心修正] 补上 schema.prisma 中 ComponentIngredient.linkedExtra 的支持
+                    linkedExtra: {
                         select: {
                             id: true, // Family ID
                             name: true,
@@ -279,6 +407,36 @@ type SnapshotRecipeFamilyStub = {
                         components: {
                             ingredients: {
                                 ratio: number | string | null;
+                                // [G-Code-Note] [核心修正] 嵌套的 pre-dough
+                                linkedPreDough: {
+                                    id: string;
+                                    versions: { id: string }[];
+                                } | null;
+                                // [G-Code-Note] [核心修正] 嵌套的 extra (虽然 recipes.service 禁止了)
+                                linkedExtra: {
+                                    id: string;
+                                    versions: { id: string }[];
+                                } | null;
+                            }[];
+                        }[];
+                    }[];
+                } | null;
+                // [G-Code-Note] [核心修正] 补全快照类型
+                linkedExtra: {
+                    id: string; // family.id
+                    versions: {
+                        id: string; // version.id
+                        components: {
+                            ingredients: {
+                                ratio: number | string | null;
+                                linkedPreDough: {
+                                    id: string;
+                                    versions: { id: string }[];
+                                } | null;
+                                linkedExtra: {
+                                    id: string;
+                                    versions: { id: string }[];
+                                } | null;
                             }[];
                         }[];
                     }[];
@@ -343,10 +501,16 @@ export class ProductionTasksService {
                     for (const component of version.components) {
                         for (const ing of component.ingredients) {
                             // 检查 PreDough
-                            const nextVersionId = ing.linkedPreDough?.versions[0]?.id;
-                            if (nextVersionId && !versionsToFetch.has(nextVersionId)) {
-                                versionsToFetch.add(nextVersionId);
-                                versionsInQueue.push(nextVersionId); // 放入“待办”队列
+                            const nextPreDoughId = ing.linkedPreDough?.versions[0]?.id;
+                            if (nextPreDoughId && !versionsToFetch.has(nextPreDoughId)) {
+                                versionsToFetch.add(nextPreDoughId);
+                                versionsInQueue.push(nextPreDoughId); // 放入“待办”队列
+                            }
+                            // [G-Code-Note] [核心修正] 检查 Extra
+                            const nextExtraId = ing.linkedExtra?.versions[0]?.id;
+                            if (nextExtraId && !versionsToFetch.has(nextExtraId)) {
+                                versionsToFetch.add(nextExtraId);
+                                versionsInQueue.push(nextExtraId); // 放入“待办”队列
                             }
                         }
                     }
@@ -461,9 +625,10 @@ export class ProductionTasksService {
             // 标记此ID正在处理中 (用于循环依赖检测)
             stitchedVersionsCache.set(versionId, null);
 
-            // 4b. 递归组装 Components (linkedPreDough)
+            // 4b. 递归组装 Components (linkedPreDough 和 linkedExtra)
             for (const component of version.components) {
                 for (const ing of component.ingredients) {
+                    // [核心] 组装 PreDough
                     const nextVersionId = ing.linkedPreDough?.versions[0]?.id;
                     if (nextVersionId) {
                         // [核心] 递归调用
@@ -475,6 +640,19 @@ export class ProductionTasksService {
                                 ...ing.linkedPreDough,
                                 ...stitchedSubVersion.family,
                                 versions: [stitchedSubVersion], // [核心] 替换掉 [ {id: '...'} ]
+                            };
+                        }
+                    }
+
+                    // [G-Code-Note] [核心修正] 补上 ComponentIngredient.linkedExtra 的递归组装
+                    const nextExtraVersionId = ing.linkedExtra?.versions[0]?.id;
+                    if (nextExtraVersionId) {
+                        const stitchedSubVersion = stitchVersionTree(nextExtraVersionId);
+                        if (stitchedSubVersion) {
+                            ing.linkedExtra = {
+                                ...ing.linkedExtra,
+                                ...stitchedSubVersion.family,
+                                versions: [stitchedSubVersion],
                             };
                         }
                     }
@@ -822,6 +1000,18 @@ export class ProductionTasksService {
                             };
                         }
                     }
+                    // [G-Code-Note] [核心修正] 补上 L788 的遗漏
+                    const nextExtraVersionId = ing.linkedExtra?.versions[0]?.id;
+                    if (nextExtraVersionId) {
+                        const stitchedSubVersion = stitchVersionTree(nextExtraVersionId);
+                        if (stitchedSubVersion) {
+                            ing.linkedExtra = {
+                                ...ing.linkedExtra,
+                                ...stitchedSubVersion.family,
+                                versions: [stitchedSubVersion],
+                            };
+                        }
+                    }
                 }
             }
 
@@ -867,7 +1057,7 @@ export class ProductionTasksService {
                     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
                     (assembledProduct as any).recipeVersion = {
                         ...stitchedL1Version,
-                        family: stitchedL1Version.family,
+                        family: shell.recipeVersion.family, // [G-Code-Note] [核心修正] 保持 L1 的 family
                     };
                 }
             }
@@ -1039,6 +1229,24 @@ export class ProductionTasksService {
                         weight,
                     );
                 }
+
+                // [G-Code-Note] [核心修正] 递归检查 ComponentIngredient.linkedExtra
+                if (ing.linkedExtra) {
+                    const subVersion = ing.linkedExtra.versions[0];
+                    if (!subVersion) continue;
+                    const subVersionId = subVersion.id;
+
+                    const existing = requiredPrepItems.get(subVersionId);
+                    if (existing) {
+                        existing.totalWeight = existing.totalWeight.add(weight);
+                    } else {
+                        requiredPrepItems.set(subVersionId, {
+                            family: ing.linkedExtra as unknown as PrepItemFamily,
+                            totalWeight: weight,
+                        });
+                    }
+                    resolveDependencies(subVersionId, ing.linkedExtra as unknown as SnapshotRecipeFamilyStub, weight);
+                }
             }
         };
 
@@ -1083,6 +1291,34 @@ export class ProductionTasksService {
                             resolveDependencies(
                                 preDoughVersionId,
                                 preDoughFamily as unknown as SnapshotRecipeFamilyStub,
+                                weight,
+                            );
+                        }
+                    }
+
+                    // [G-Code-Note] [核心修正] 检查 ComponentIngredient.linkedExtra
+                    if (ing.linkedExtra && ing.ratio) {
+                        const extraFamily = ing.linkedExtra;
+                        const extraVersion = extraFamily.versions[0];
+                        const extraRecipe = extraVersion?.components[0];
+
+                        if (extraRecipe && extraVersion) {
+                            const extraVersionId = extraVersion.id;
+                            // [G-Code-Note] 面包/面种类引用 EXTRA，使用面粉基准
+                            const weight = totalFlourWeight.mul(new Prisma.Decimal(ing.ratio)).mul(item.quantity);
+
+                            const existing = requiredPrepItems.get(extraVersionId);
+                            if (existing) {
+                                existing.totalWeight = existing.totalWeight.add(weight);
+                            } else {
+                                requiredPrepItems.set(extraVersionId, {
+                                    family: extraFamily,
+                                    totalWeight: weight,
+                                });
+                            }
+                            resolveDependencies(
+                                extraVersionId,
+                                extraFamily as unknown as SnapshotRecipeFamilyStub,
                                 weight,
                             );
                         }
@@ -1272,7 +1508,7 @@ export class ProductionTasksService {
         };
 
         const [prepItems, billOfMaterials] = await Promise.all([
-            this._getPrepItemsForTask(tenantId, combinedTaskItems),
+            this._getPrepItemsForTask(tenantId, combinedTaskItems), // [G-Code-Note] 同步函数，无需 await
             this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks),
         ]);
 
@@ -1360,7 +1596,7 @@ export class ProductionTasksService {
         };
 
         const [prepItems, billOfMaterials] = await Promise.all([
-            this._getPrepItemsForTask(tenantId, combinedTaskItems),
+            this._getPrepItemsForTask(tenantId, combinedTaskItems), // [G-Code-Note] 同步函数，无需 await
             this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks),
         ]);
 
@@ -1604,7 +1840,7 @@ export class ProductionTasksService {
     }
 
     /**
-     * [核心修改] 此函数基于传入的“产品详情”（来自快照或实时）计算BOM
+     * [核心修改] 此方法基于传入的“产品详情”（来自快照或实时）计算BOM
      * [核心修复] 修复 no-unsafe-* (参数类型从 any 改回 ProductWithDetails)
      */
     private _getFlattenedIngredientsForBOM(product: ProductWithDetails): Map<string, Prisma.Decimal> {
@@ -1648,6 +1884,12 @@ export class ProductionTasksService {
                         // [核心修复] 恢复强类型 & Prettier 格式化 (L1532)
                         processComponentWithLoss(preDoughComponent as ComponentWithIngredients, ingredientInputWeight);
                     }
+                } else if (ing.linkedExtra) {
+                    // [G-Code-Note] [核心修正] BOM 计算必须包含 ComponentIngredient.linkedExtra
+                    const extraComponent = ing.linkedExtra.versions?.[0]?.components?.[0];
+                    if (extraComponent) {
+                        processComponentWithLoss(extraComponent as ComponentWithIngredients, ingredientInputWeight);
+                    }
                 } else if (ing.ingredientId) {
                     const currentWeight = flattenedIngredients.get(ing.ingredientId) || new Prisma.Decimal(0);
                     flattenedIngredients.set(ing.ingredientId, currentWeight.add(ingredientInputWeight));
@@ -1674,6 +1916,10 @@ export class ProductionTasksService {
                     .mul(preDoughTotalRatio);
             } else if (ing.ingredient && ing.ratio) {
                 theoreticalWeight = theoreticalFlourWeightPerUnit.mul(new Prisma.Decimal(ing.ratio));
+            } else if (ing.linkedExtra && ing.ratio) {
+                // [G-Code-Note] [核心修正] BOM 计算必须包含 ComponentIngredient.linkedExtra
+                // 它的 theoreticalWeight 就是按 ratio 算的
+                theoreticalWeight = theoreticalFlourWeightPerUnit.mul(new Prisma.Decimal(ing.ratio));
             } else {
                 continue;
             }
@@ -1685,6 +1931,12 @@ export class ProductionTasksService {
                 if (preDoughComponent) {
                     // [核心修复] 恢复强类型 & Prettier 格式化 (L1573)
                     processComponentWithLoss(preDoughComponent as ComponentWithIngredients, requiredOutputWeight);
+                }
+            } else if (ing.linkedExtra) {
+                // [G-Code-Note] [核心修正] BOM 计算必须包含 ComponentIngredient.linkedExtra
+                const extraComponent = ing.linkedExtra.versions?.[0]?.components?.[0];
+                if (extraComponent) {
+                    processComponentWithLoss(extraComponent as ComponentWithIngredients, requiredOutputWeight);
                 }
             } else if (ing.ingredientId) {
                 const currentWeight = flattenedIngredients.get(ing.ingredientId) || new Prisma.Decimal(0);
@@ -2031,6 +2283,7 @@ export class ProductionTasksService {
         const canCalculateIce =
             mixerType !== undefined && envTemp !== undefined && flourTemp !== undefined && waterTemp !== undefined;
 
+        // [G-Code-Note] [核心修复] 修复 L2239 (TS2551)，应使用 product.id
         const originalItemsMap = new Map(originalItems.map((item) => [item.product.id, item]));
 
         const componentsMap = new Map<
@@ -2130,6 +2383,14 @@ export class ProductionTasksService {
                         name = ing.ingredient.name;
                         brand = ing.ingredient.activeSku?.brand || null;
                         isFlour = ing.ingredient.isFlour;
+                    } else if (ing.linkedExtra && ing.ratio) {
+                        // [G-Code-Note] [核心修正] 计算 ComponentIngredient.linkedExtra
+                        // 它的算法和标准原料一样，都是 (面粉基准 * 比例)
+                        weight = totalFlour.mul(new Prisma.Decimal(ing.ratio));
+                        id = ing.linkedExtra.id;
+                        name = ing.linkedExtra.name;
+                        isRecipe = true;
+                        brand = '自制原料';
                     } else {
                         continue;
                     }
@@ -2373,6 +2634,25 @@ export class ProductionTasksService {
                                 waterContent: new Prisma.Decimal(ing.ingredient.waterContent),
                             });
                         }
+                    } else if (ing.linkedExtra && ing.ratio) {
+                        // [G-Code-Note] [核心修正] 递归展开 ComponentIngredient.linkedExtra
+                        const extraRecipe = ing.linkedExtra.versions[0]?.components[0];
+                        if (extraRecipe) {
+                            // [G-Code-Note] 注意：这里是BREAD/PRE_DOUGH 引用 EXTRA
+                            // 它的算法是 (面粉基准 * 比例)，所以我们 *不* 传递 flourForPreDough
+                            // 我们需要计算这个 Extra 配方本身需要的原料
+
+                            // [G-Code-Note] 修正逻辑：Extra 配方不使用面粉基准
+                            // 我们需要计算这个 Extra 配方的总重
+                            const extraWeight = flourWeightRef.mul(new Prisma.Decimal(ing.ratio ?? 0));
+                            // [G-Code-Note] Extra 配方内部使用 ratio
+                            // [G-Code-Note] [核心修复] 修复 L2658 (TS2339)，传递 flattened map
+                            this._flattenExtraRecipe(
+                                extraRecipe as ComponentWithRecursiveIngredients,
+                                extraWeight,
+                                flattened,
+                            );
+                        }
                     }
                 }
             };
@@ -2414,6 +2694,52 @@ export class ProductionTasksService {
         return flattened;
     }
 
+    // [G-Code-Note] [核心新增] _flattenIngredientsForProduct 的辅助函数，用于展开 EXTRA 配方
+    // [G-Code-Note] [核心修复] 修复 L2658 (TS2339)，接收 flattened map
+    private _flattenExtraRecipe(
+        dough: ComponentWithRecursiveIngredients,
+        totalWeight: Prisma.Decimal,
+        flattened: Map<string, FlattenedIngredient>,
+    ) {
+        const totalRatio = dough.ingredients.reduce(
+            (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
+            new Prisma.Decimal(0),
+        );
+        if (totalRatio.isZero()) return;
+
+        const weightPerRatioPoint = totalWeight.div(totalRatio);
+
+        for (const ing of dough.ingredients) {
+            const weight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
+
+            if (ing.ingredient && ing.ratio) {
+                // [G-Code-Note] [核心修复] 修复 L2658 (TS2339)，使用传入的 flattened
+                const existing = flattened.get(ing.ingredient.id);
+                if (existing) {
+                    existing.weight = existing.weight.add(weight);
+                } else {
+                    // [G-Code-Note] [核心修复] 修复 L2662 (TS2339)，使用传入的 flattened
+                    flattened.set(ing.ingredient.id, {
+                        id: ing.ingredient.id,
+                        name: ing.ingredient.name,
+                        weight: weight,
+                        brand: ing.ingredient.activeSku?.brand || null,
+                        isRecipe: false,
+                        waterContent: new Prisma.Decimal(ing.ingredient.waterContent),
+                    });
+                }
+            } else if (ing.linkedExtra && ing.ratio) {
+                // [G-Code-Note] 递归调用
+                const extraRecipe = ing.linkedExtra.versions[0]?.components[0];
+                if (extraRecipe) {
+                    // [G-Code-Note] [核心修复] 修复 L2658 (TS2339)，传递 flattened map
+                    this._flattenExtraRecipe(extraRecipe as ComponentWithRecursiveIngredients, weight, flattened);
+                }
+            }
+            // [G-Code-Note] 根据 recipes.service，EXTRA 不应引用 PRE_DOUGH，故此处省略
+        }
+    }
+
     /**
      * [核心修改] 此方法现在基于“快照”中的 product 对象计算
      * [核心修复] 修复 no-unsafe-* (参数类型从 any 改回 ProductWithDetails)
@@ -2439,6 +2765,9 @@ export class ProductionTasksService {
                         );
                         return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio));
                     }
+                } else if (i.linkedExtra && i.ratio) {
+                    // [G-Code-Note] [核心修正] 理论重量计算必须包含 ComponentIngredient.linkedExtra
+                    return sum.add(new Prisma.Decimal(i.ratio));
                 }
                 return sum.add(new Prisma.Decimal(i.ratio ?? 0));
             }, new Prisma.Decimal(0));
@@ -2477,6 +2806,45 @@ export class ProductionTasksService {
                         const ratioDecimal = new Prisma.Decimal(ing.ratio);
                         const waterWeight = flourRef.mul(ratioDecimal).mul(waterContentDecimal);
                         totalWaterWeight = totalWaterWeight.add(waterWeight);
+                    }
+                } else if (ing.linkedExtra && ing.ratio) {
+                    // [G-Code-Note] [核心修正] 水量计算必须包含 ComponentIngredient.linkedExtra
+                    const extraComponent = ing.linkedExtra.versions[0]?.components[0];
+                    if (extraComponent) {
+                        // [G-Code-Note] EXTRA 配方不使用面粉基准，计算其总重
+                        const extraWeight = flourRef.mul(new Prisma.Decimal(ing.ratio));
+                        // [G-Code-Note] 递归查找 EXTRA 配方中的水
+                        // [G-Code-Note] [核心修复] 修复 L2756 (TS2551)，移除 this.
+                        findWaterInExtraRecipe(extraComponent as ComponentWithRecursiveIngredients, extraWeight);
+                    }
+                }
+            }
+        };
+
+        // [G-Code-Note] [核心新增] _calculateTotalWaterWeightForProduct 的辅助函数
+        // [G-Code-Note] [核心修复] 修复 L2763 (eslint no-unused-vars)
+        const findWaterInExtraRecipe = (component: ComponentWithRecursiveIngredients, totalWeight: Prisma.Decimal) => {
+            const totalRatio = component.ingredients.reduce(
+                (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
+                new Prisma.Decimal(0),
+            );
+            if (totalRatio.isZero()) return;
+            const weightPerRatioPoint = totalWeight.div(totalRatio);
+
+            for (const ing of component.ingredients) {
+                const weight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
+
+                if (ing.ingredient?.waterContent && ing.ratio) {
+                    const waterContentDecimal = new Prisma.Decimal(ing.ingredient.waterContent);
+                    if (waterContentDecimal.gt(0)) {
+                        // [G-Code-Note] 注意：这里是总重 * 水含量，不是 (面粉基准 * 比例 * 水含量)
+                        const waterWeight = weight.mul(waterContentDecimal);
+                        totalWaterWeight = totalWaterWeight.add(waterWeight);
+                    }
+                } else if (ing.linkedExtra && ing.ratio) {
+                    const extraComponent = ing.linkedExtra.versions[0]?.components[0];
+                    if (extraComponent) {
+                        findWaterInExtraRecipe(extraComponent as ComponentWithRecursiveIngredients, weight);
                     }
                 }
             }
@@ -2521,6 +2889,9 @@ export class ProductionTasksService {
                         );
                         return sum.add(new Prisma.Decimal(i.flourRatio).mul(preDoughTotalRatio));
                     }
+                } else if (i.linkedExtra && i.ratio) {
+                    // [G-Code-Note] [核心修正] 总比例计算必须包含 ComponentIngredient.linkedExtra
+                    return sum.add(new Prisma.Decimal(i.ratio));
                 }
                 return sum.add(new Prisma.Decimal(i.ratio ?? 0));
             }, new Prisma.Decimal(0));
@@ -2545,12 +2916,14 @@ export class ProductionTasksService {
             for (const [ingredientId, weight] of consumptions.entries()) {
                 const totalWeight = weight.mul(item.quantity);
                 const existing = totalIngredientsMap.get(ingredientId);
+                // [G-Code-Note] [核心修复] 修复 L2856 (eslint no-unsafe-assignment)
                 const ingInfo = this._findIngredientInSnapshot(task, ingredientId);
 
                 if (existing) {
                     existing.totalWeight += totalWeight.toNumber();
                 } else {
                     totalIngredientsMap.set(ingredientId, {
+                        // [G-Code-Note] [核心修复] 修复 L2862 (eslint no-unsafe-member-access)
                         name: ingInfo?.name || '未知原料',
                         totalWeight: totalWeight.toNumber(),
                     });
@@ -2586,11 +2959,13 @@ export class ProductionTasksService {
     // [核心新增] 辅助函数：从复杂的快照对象中查找原料信息
     // [核心修复] 修复 no-unsafe-* (参数类型从 any 改回 TaskWithDetails)
     // [核心修复] 移除所有不必要的 `as any[]` 和 `(ci as any)`
-    private _findIngredientInSnapshot(task: TaskWithDetails, ingredientId: string) {
+    // [G-Code-Note] [核心修复] 修复 L2856, L2862，添加返回类型
+    private _findIngredientInSnapshot(task: TaskWithDetails, ingredientId: string): Ingredient | null {
         for (const item of task.items) {
             for (const component of item.product.recipeVersion?.components || []) {
                 for (const ing of component.ingredients) {
                     if (ing.ingredient?.id === ingredientId) return ing.ingredient;
+                    // [G-Code-Note] [核心修正] 递归查找 PreDough
                     if (ing.linkedPreDough) {
                         for (const v of ing.linkedPreDough.versions) {
                             for (const c of v.components) {
@@ -2598,6 +2973,44 @@ export class ProductionTasksService {
                                     if (ci.ingredient?.id === ingredientId) return ci.ingredient;
                                     if (ci.linkedPreDough) {
                                         for (const v2 of ci.linkedPreDough.versions) {
+                                            for (const c2 of v2.components) {
+                                                for (const ci2 of c2.ingredients) {
+                                                    if (ci2.ingredient?.id === ingredientId) return ci2.ingredient;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // [G-Code-Note] [核心修正] 查找 PreDough -> Extra
+                                    if (ci.linkedExtra) {
+                                        for (const v2 of ci.linkedExtra.versions) {
+                                            for (const c2 of v2.components) {
+                                                for (const ci2 of c2.ingredients) {
+                                                    if (ci2.ingredient?.id === ingredientId) return ci2.ingredient;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // [G-Code-Note] [核心修正] 递归查找 Extra
+                    if (ing.linkedExtra) {
+                        for (const v of ing.linkedExtra.versions) {
+                            for (const c of v.components) {
+                                for (const ci of c.ingredients) {
+                                    if (ci.ingredient?.id === ingredientId) return ci.ingredient;
+                                    if (ci.linkedPreDough) {
+                                        for (const v2 of ci.linkedPreDough.versions) {
+                                            for (const c2 of v2.components) {
+                                                for (const ci2 of c2.ingredients) {
+                                                    if (ci2.ingredient?.id === ingredientId) return ci2.ingredient;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (ci.linkedExtra) {
+                                        for (const v2 of ci.linkedExtra.versions) {
                                             for (const c2 of v2.components) {
                                                 for (const ci2 of c2.ingredients) {
                                                     if (ci2.ingredient?.id === ingredientId) return ci2.ingredient;
@@ -2613,14 +3026,27 @@ export class ProductionTasksService {
             }
             for (const pIng of item.product.ingredients || []) {
                 if (pIng.ingredient?.id === ingredientId) return pIng.ingredient;
+                // [G-Code-Note] [核心修正] 递归查找 ProductIngredient -> Extra
                 if (pIng.linkedExtra) {
                     for (const v of pIng.linkedExtra.versions) {
                         for (const c of v.components) {
                             for (const ci of c.ingredients) {
                                 if (ci.ingredient?.id === ingredientId) return ci.ingredient;
                                 // [核心修复] 这里的 ci 是 L3，它有 L4 的 linkedPreDough
+                                // [G-Code-Note] [核心修复] 修复 L2938 (TS2339)
                                 if (ci.linkedPreDough) {
                                     for (const v2 of ci.linkedPreDough.versions) {
+                                        for (const c2 of v2.components) {
+                                            for (const ci2 of c2.ingredients) {
+                                                if (ci2.ingredient?.id === ingredientId) return ci2.ingredient;
+                                            }
+                                        }
+                                    }
+                                }
+                                // [G-Socket-Note] [核心修正] 递归查找 ProductIngredient -> Extra -> Extra
+                                // [G-Code-Note] [核心修复] 修复 L2947 (TS2339)
+                                if (ci.linkedExtra) {
+                                    for (const v2 of ci.linkedExtra.versions) {
                                         for (const c2 of v2.components) {
                                             for (const ci2 of c2.ingredients) {
                                                 if (ci2.ingredient?.id === ingredientId) return ci2.ingredient;
