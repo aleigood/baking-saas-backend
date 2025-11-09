@@ -3,7 +3,12 @@
 // [核心重构] 完整文件，以支持新 schema (preDoughId/extraId) 并修复 isRecipe 字段
 // [G-Code-Note] [核心修复] 修复了 TS2551, TS2304, 和 no-unused-vars 错误
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+// [G-Code-Note] [核心重构] 导入在 "批量组装" 策略中需要用到的类型
+import {
+    Injectable,
+    NotFoundException,
+    // [G-Code-Note] 导入 Prisma 类型
+} from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
     Prisma,
@@ -88,6 +93,7 @@ interface ConsumptionDetail {
 }
 
 // [G-Code-Note] [核心重构] 深入定义类型以支持递归查询 (支持新 schema)
+// [G-Code-Note] 这个类型现在描述的是 "组装后" 的对象结构
 type FullComponentIngredient = ComponentIngredient & {
     ingredient: Ingredient | null;
     linkedPreDough: // 面种
@@ -182,6 +188,69 @@ type SnapshotRecipeFamily = {
         }[];
     }[];
 };
+
+// [G-Code-Note] [核心重构] 复制自 production-tasks.service.ts 的 "浅层 Include"
+// 用于 "批量查询" 策略
+const recipeVersionRecursiveBatchInclude = {
+    family: {
+        select: {
+            id: true,
+            name: true,
+            type: true,
+            category: true,
+        },
+    },
+    components: {
+        include: {
+            ingredients: {
+                include: {
+                    ingredient: { include: { activeSku: true } },
+                    linkedPreDough: {
+                        select: {
+                            id: true,
+                            name: true,
+                            type: true,
+                            category: true,
+                            versions: { where: { isActive: true }, select: { id: true } },
+                        },
+                    },
+                    linkedExtra: {
+                        select: {
+                            id: true,
+                            name: true,
+                            type: true,
+                            category: true,
+                            versions: { where: { isActive: true }, select: { id: true } },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    products: {
+        where: { deletedAt: null },
+        include: {
+            ingredients: {
+                include: {
+                    ingredient: { include: { activeSku: true } },
+                    linkedExtra: {
+                        select: {
+                            id: true,
+                            name: true,
+                            type: true,
+                            category: true,
+                            versions: { where: { isActive: true }, select: { id: true } },
+                        },
+                    },
+                },
+            },
+        },
+    },
+};
+// [G-Code-Note] [核心重构] "浅层 Include" 的 TS 类型
+type FetchedRecipeVersion = Prisma.RecipeVersionGetPayload<{
+    include: typeof recipeVersionRecursiveBatchInclude;
+}>;
 
 @Injectable()
 export class CostingService {
@@ -1068,92 +1137,178 @@ export class CostingService {
         return sortedBreakdown;
     }
 
+    // [G-Code-Note] [核心重构] 废弃原有的 "庞大 include" (L1101-L1212)
+    // [G-Code-Note] 采用 "批量查询 + 内存组装" 策略，与 production-tasks.service 一致
     private async getFullProduct(tenantId: string, productId: string): Promise<FullProduct | null> {
-        return this.prisma.product.findFirst({
-            where: { id: productId, recipeVersion: { family: { tenantId } } },
-            include: {
-                recipeVersion: {
-                    include: {
-                        family: true,
-                        components: {
-                            include: {
-                                ingredients: {
-                                    include: {
-                                        ingredient: true,
-                                        linkedPreDough: {
-                                            include: {
-                                                versions: {
-                                                    where: { isActive: true },
-                                                    include: {
-                                                        components: {
-                                                            include: {
-                                                                ingredients: {
-                                                                    include: {
-                                                                        ingredient: true,
-                                                                        linkedPreDough: true, // [G-Code-Note] [核心重构] 嵌套
-                                                                        linkedExtra: true, // [G-Code-Note] [核心重构] 嵌套
-                                                                    },
-                                                                },
-                                                            },
-                                                        },
-                                                    },
-                                                },
-                                            },
-                                        },
-                                        linkedExtra: {
-                                            // [G-Code-Note] [核心重构] 包含 linkedExtra
-                                            include: {
-                                                versions: {
-                                                    where: { isActive: true },
-                                                    include: {
-                                                        components: {
-                                                            include: {
-                                                                ingredients: {
-                                                                    include: {
-                                                                        ingredient: true,
-                                                                        linkedPreDough: true, // [G-Code-Note] [核心重构] 嵌套
-                                                                        linkedExtra: true, // [G-Code-Note] [核心重构] 嵌套
-                                                                    },
-                                                                },
-                                                            },
-                                                        },
-                                                    },
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
+        // 1. Query 1 (L1)：获取“浅层”的产品信息
+        // 这是一个“浅层”查询，只为了拿到 L1/L2 ID 和组装所需的基础字段
+        const shallowProductInclude = {
+            recipeVersion: {
+                select: {
+                    id: true, // L1 RecipeVersion ID
+                    family: true, // L1 Family (用于 tenantId 校验)
                 },
-                ingredients: {
-                    include: {
-                        ingredient: true,
-                        linkedExtra: {
-                            include: {
-                                versions: {
-                                    where: { isActive: true },
-                                    include: {
-                                        components: {
-                                            include: {
-                                                ingredients: {
-                                                    include: {
-                                                        ingredient: true,
-                                                        linkedPreDough: true, // [G-Code-Note] [核心重构] 嵌套
-                                                        linkedExtra: true, // [G-Code-Note] [核心重构] 嵌套
-                                                    },
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
+            },
+            ingredients: {
+                // L2 (Product Ingredients)
+                include: {
+                    ingredient: { include: { activeSku: true } }, // 基础原料
+                    linkedExtra: {
+                        // 配方原料 (L2)
+                        select: {
+                            id: true,
+                            name: true,
+                            type: true,
+                            category: true,
+                            versions: { where: { isActive: true }, select: { id: true } }, // L2 ID
                         },
                     },
                 },
             },
-        }) as Promise<FullProduct | null>;
+        };
+
+        const product = await this.prisma.product.findFirst({
+            where: {
+                id: productId,
+                recipeVersion: { family: { tenantId } },
+                deletedAt: null, // 确保产品未被删除
+            },
+            include: shallowProductInclude,
+        });
+
+        if (!product) {
+            // [G-Code-Note] 增加一个友好的错误提示
+            const exists = await this.prisma.product.findUnique({ where: { id: productId } });
+            if (!exists) {
+                throw new NotFoundException(`产品 (ID: ${productId}) 不存在。`);
+            }
+            if (exists.deletedAt) {
+                throw new NotFoundException(`产品 (ID: ${productId}) 已被删除。`);
+            }
+            // 剩下的情况是 tenantId 不匹配
+            throw new NotFoundException(`无法访问产品 (ID: ${productId})，可能不属于该店铺或已被删除。`);
+        }
+
+        // 2. 初始化：收集所有 L1 和 L2 的 RecipeVersion ID
+        const initialVersionIds = new Set<string>();
+        if (product.recipeVersionId) {
+            initialVersionIds.add(product.recipeVersionId);
+        }
+        for (const pIng of product.ingredients) {
+            if (pIng.linkedExtra?.versions[0]?.id) {
+                initialVersionIds.add(pIng.linkedExtra.versions[0].id);
+            }
+        }
+
+        // 3. 调用“批量查询”
+        const versionMap = await this._fetchRecursiveRecipeVersions(Array.from(initialVersionIds), this.prisma);
+
+        // 4. “内存组装” (与 production-tasks.service.ts 相同的逻辑)
+        const stitchedVersionsCache = new Map<string, FetchedRecipeVersion | null>();
+
+        const stitchVersionTree = (versionId: string): FetchedRecipeVersion | null => {
+            if (stitchedVersionsCache.has(versionId)) {
+                return stitchedVersionsCache.get(versionId)!;
+            }
+
+            const versionData = versionMap.get(versionId);
+            if (!versionData) {
+                stitchedVersionsCache.set(versionId, null);
+                return null;
+            }
+
+            // 深度复制，防止污染缓存
+            const version = JSON.parse(JSON.stringify(versionData)) as FetchedRecipeVersion;
+            stitchedVersionsCache.set(versionId, null); // 标记为正在处理 (防循环)
+
+            // 4b. 递归组装 Components (linkedPreDough 和 linkedExtra)
+            for (const component of version.components) {
+                for (const ing of component.ingredients) {
+                    const nextPreDoughId = ing.linkedPreDough?.versions[0]?.id;
+                    if (nextPreDoughId) {
+                        const stitchedSubVersion = stitchVersionTree(nextPreDoughId);
+                        if (stitchedSubVersion) {
+                            ing.linkedPreDough = {
+                                ...ing.linkedPreDough,
+                                ...stitchedSubVersion.family,
+                                versions: [stitchedSubVersion],
+                            };
+                        }
+                    }
+
+                    const nextExtraId = ing.linkedExtra?.versions[0]?.id;
+                    if (nextExtraId) {
+                        const stitchedSubVersion = stitchVersionTree(nextExtraId);
+                        if (stitchedSubVersion) {
+                            ing.linkedExtra = {
+                                ...ing.linkedExtra,
+                                ...stitchedSubVersion.family,
+                                versions: [stitchedSubVersion],
+                            };
+                        }
+                    }
+                }
+            }
+
+            // 4c. 递归组装 Products (linkedExtra) - (对于配方内部的产品)
+            for (const p of version.products) {
+                for (const pIng of p.ingredients) {
+                    const nextVersionId = pIng.linkedExtra?.versions[0]?.id;
+                    if (nextVersionId) {
+                        const stitchedSubVersion = stitchVersionTree(nextVersionId);
+                        if (stitchedSubVersion) {
+                            pIng.linkedExtra = {
+                                ...pIng.linkedExtra,
+                                ...stitchedSubVersion.family,
+                                versions: [stitchedSubVersion],
+                            };
+                        }
+                    }
+                }
+            }
+
+            stitchedVersionsCache.set(versionId, version); // 存入缓存
+            return version;
+        };
+
+        // 5. 启动组装
+        const assembledProduct = JSON.parse(JSON.stringify(product)) as typeof product;
+
+        // 5a. 组装 L1 (Main Recipe)
+        const topLevelVersionId = assembledProduct.recipeVersionId;
+        const stitchedL1Version = stitchVersionTree(topLevelVersionId);
+        if (stitchedL1Version) {
+            // [G-Code-Note] 组装 recipeVersion 对象，使其匹配 FullProduct 类型
+            assembledProduct.recipeVersion = {
+                ...stitchedL1Version,
+                // [G-Code-Note] [核心修复] 使用 "assembledProduct.recipeVersion.family" (L1222 抓取的完整 Family)
+                // 替换 "stitchedL1Version.family" (L222 抓取的部分 family)
+                family: assembledProduct.recipeVersion.family,
+            } as FullRecipeVersion & { family: RecipeFamily };
+        } else {
+            // L1 组装失败，说明配方数据有问题
+            throw new NotFoundException(
+                `产品 (ID: ${productId}) 关联的配方版本 (ID: ${topLevelVersionId}) 丢失或数据不完整。`,
+            );
+        }
+
+        // 5b. 组装 L2 (Product Ingredients)
+        for (const pIng of assembledProduct.ingredients) {
+            const l2VersionId = pIng.linkedExtra?.versions[0]?.id;
+            if (l2VersionId) {
+                const stitchedL2Version = stitchVersionTree(l2VersionId);
+                if (stitchedL2Version) {
+                    pIng.linkedExtra = {
+                        ...pIng.linkedExtra,
+                        ...stitchedL2Version.family,
+                        versions: [stitchedL2Version],
+                    } as unknown as FullProductIngredient['linkedExtra']; // [G-Code-Note] [核心修复] 添加 'unknown'
+                }
+            }
+        }
+
+        // 6. 返回组装好的对象，它现在符合 FullProduct 类型
+        return assembledProduct as unknown as FullProduct;
     }
 
     /**
@@ -1601,6 +1756,64 @@ export class CostingService {
         }
 
         return result;
+    }
+
+    // [G-Code-Note] [核心重构] 复制自 production-tasks.service.ts (L386)
+    // 采用 "批量查询" 策略，替换 "庞大 include"
+    private async _fetchRecursiveRecipeVersions(
+        initialVersionIds: string[],
+        tx: Prisma.TransactionClient, // [G-Code-Note] 修正为接收 Prisma.TransactionClient 或 PrismaService
+    ): Promise<Map<string, FetchedRecipeVersion>> {
+        // 1. 初始化队列和“仓库”
+        const versionsToFetch = new Set<string>(initialVersionIds);
+        const versionsInQueue = [...initialVersionIds];
+        const allFetchedVersions = new Map<string, FetchedRecipeVersion>();
+
+        // 2. 启动循环
+        while (versionsInQueue.length > 0) {
+            const batchIds = [...new Set(versionsInQueue.splice(0))];
+
+            // 3. 批量查询
+            // [G-Code-Note] 修正：使用 tx (传入的 prisma 客户端)
+            const results = await tx.recipeVersion.findMany({
+                where: { id: { in: batchIds } },
+                include: recipeVersionRecursiveBatchInclude,
+            });
+
+            // 4. 分析
+            for (const version of results) {
+                if (!allFetchedVersions.has(version.id)) {
+                    allFetchedVersions.set(version.id, version);
+
+                    // 4b. 深度优先：查找下一层的新ID
+                    for (const component of version.components) {
+                        for (const ing of component.ingredients) {
+                            const nextPreDoughId = ing.linkedPreDough?.versions[0]?.id;
+                            if (nextPreDoughId && !versionsToFetch.has(nextPreDoughId)) {
+                                versionsToFetch.add(nextPreDoughId);
+                                versionsInQueue.push(nextPreDoughId);
+                            }
+                            const nextExtraId = ing.linkedExtra?.versions[0]?.id;
+                            if (nextExtraId && !versionsToFetch.has(nextExtraId)) {
+                                versionsToFetch.add(nextExtraId);
+                                versionsInQueue.push(nextExtraId);
+                            }
+                        }
+                    }
+                    for (const product of version.products) {
+                        for (const pIng of product.ingredients) {
+                            const nextVersionId = pIng.linkedExtra?.versions[0]?.id;
+                            if (nextVersionId && !versionsToFetch.has(nextVersionId)) {
+                                versionsToFetch.add(nextVersionId);
+                                versionsInQueue.push(nextVersionId);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 5. 循环结束，返回完整的“仓库”
+        return allFetchedVersions;
     }
 
     private async _getPricePerGramMap(tenantId: string, ingredientIds: string[]): Promise<Map<string, Prisma.Decimal>> {
