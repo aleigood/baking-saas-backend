@@ -7,8 +7,8 @@ async function main() {
     console.log('开始执行种子脚本...');
 
     // 1. 创建超级管理员
-    const adminPhone = process.env.SUPER_ADMIN_PHONE || '13955555555';
-    const adminPassword = process.env.SUPER_ADMIN_PASSWORD || 'admin';
+    const adminPhone = process.env.SUPER_ADMIN_PHONE || '13888888888';
+    const adminPassword = process.env.SUPER_ADMIN_PASSWORD || 'Hoston0859';
     const hashedAdminPassword = await bcrypt.hash(adminPassword, 10);
 
     await prisma.user.upsert({
@@ -25,8 +25,8 @@ async function main() {
     console.log(`超级管理员已创建/确认存在: ${adminPhone}`);
 
     // 2. 创建一个测试用的店主（Owner）账户
-    const leoPhone = '13966666666';
-    const leoPassword = '123';
+    const leoPhone = '13951958163';
+    const leoPassword = 'Hulei1234';
     const hashedLeoPassword = await bcrypt.hash(leoPassword, 10);
 
     const leo = await prisma.user.upsert({
