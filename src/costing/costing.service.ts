@@ -1023,10 +1023,10 @@ export class CostingService {
                     type: getProductIngredientTypeName(ing.type),
                     cost: cost.toNumber(), // [核心修复] 移除 .toDP()
                     weightInGrams: finalWeightInGrams.toNumber(),
-                    ratio: ing.ratio ? ing.ratio.toNumber() : undefined,
+                    // [G-Code-Note] [核心修复] 同 L948, ing.ratio 来自 JSON.parse，必须重新包装
+                    ratio: ing.ratio ? new Prisma.Decimal(ing.ratio).toNumber() : undefined,
                     extraInfo: undefined,
                     isRecipe: isRecipe, // [G-Code-Note] 修复问题3
-                    // pricePerKg: pricePerKg, // 这一行可以去掉，因为对于配方它是无效的
                 };
             })
             // [核心新增] 按用量（克重）倒序排序附加原料
