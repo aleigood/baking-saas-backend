@@ -6,7 +6,9 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { QueryDto } from './dto/query.dto';
+// [G-Code-Note] [核心修改] 导入批量导入 DTO
 import { CreateRecipeDto } from '../recipes/dto/create-recipe.dto';
+import { BatchImportRecipeDto } from '../recipes/dto/batch-import-recipe.dto'; // 假设这是你的 DTO 路径
 import { RecipesService } from '../recipes/recipes.service';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
@@ -234,5 +236,28 @@ export class SuperAdminService {
     // --- Recipe Management ---
     async createRecipeForTenant(tenantId: string, recipeDto: CreateRecipeDto) {
         return this.recipesService.create(tenantId, recipeDto);
+    }
+
+    // [G-Code-Note] [核心新增] 批量导入配方到指定店铺
+    async batchImportRecipesForTenant(tenantId: string, recipesDto: BatchImportRecipeDto[]) {
+        // 1. 作为超级管理员，我们首先要找到这个店铺的 OWNER
+        //    因为 recipesService 内部的逻辑是基于 OWNER 权限的
+        const tenantOwner = await this.prisma.tenantUser.findFirst({
+            where: {
+                tenantId: tenantId,
+                role: Role.OWNER,
+            },
+            select: {
+                userId: true,
+            },
+        });
+
+        if (!tenantOwner || !tenantOwner.userId) {
+            throw new NotFoundException(`无法找到 ID 为 ${tenantId} 的店铺的 OWNER，无法代表其执行导入。`);
+        }
+
+        // 2. [核心] 调用 recipesService 的批量导入功能
+        // 我们传入 OWNER 的 userId，并限定只导入到这一个 tenantId
+        return this.recipesService.batchImportRecipes(tenantOwner.userId, recipesDto, [tenantId]);
     }
 }

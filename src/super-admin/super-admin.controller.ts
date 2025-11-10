@@ -7,7 +7,9 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+// [G-Code-Note] [核心修改] 导入 CreateRecipeDto 和 BatchImportRecipeDto
 import { CreateRecipeDto } from '../recipes/dto/create-recipe.dto';
+import { BatchImportRecipeDto } from '../recipes/dto/batch-import-recipe.dto'; // [G-Code-Note] 确保这个 DTO 路径正确
 import { UpdateTenantStatusDto } from './dto/update-tenant-status.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 
@@ -74,11 +76,26 @@ export class SuperAdminController {
     }
 
     // --- Recipe endpoints ---
+
+    /**
+     * 为指定租户创建【单个】配方
+     */
     @Post('tenants/:tenantId/recipes')
     createRecipeForTenant(
         @Param('tenantId', ParseUUIDPipe) tenantId: string,
-        @Body() createRecipeDto: CreateRecipeDto,
+        @Body() createRecipeDto: CreateRecipeDto, // [G-Code-Note] 接收一个对象 {}
     ) {
         return this.superAdminService.createRecipeForTenant(tenantId, createRecipeDto);
+    }
+
+    /**
+     * [G-Code-Note] [核心新增] 为指定租户【批量导入】配方
+     */
+    @Post('tenants/:tenantId/recipes/batch-import')
+    batchImportRecipesForTenant(
+        @Param('tenantId', ParseUUIDPipe) tenantId: string,
+        @Body() batchImportRecipesDto: BatchImportRecipeDto[], // [G-Code-Note] 接收一个数组 []
+    ) {
+        return this.superAdminService.batchImportRecipesForTenant(tenantId, batchImportRecipesDto);
     }
 }

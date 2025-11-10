@@ -57,7 +57,7 @@ type PreloadedRecipeFamily = RecipeFamily & {
 
 //  为“显示”创建一个统一的、类型安全的接口
 // 这将替换所有 'any' 和 'eslint-disable'
-interface DisplayIngredient {
+export interface DisplayIngredient {
     id: string;
     name: string;
     tenantId: string;
