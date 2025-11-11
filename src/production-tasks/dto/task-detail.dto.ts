@@ -3,8 +3,6 @@
  * 文件描述: [核心重构] 将与“面团”相关的命名更新为通用的“组件”。
  */
 import { ProductionTaskStatus, RecipeCategory } from '@prisma/client';
-// [核心修改] 从新的 DTO 文件导入 PrepTask
-import { PrepTask } from './preparation.dto';
 
 // 定义原料详情的数据结构
 export interface TaskIngredientDetail {
@@ -30,6 +28,13 @@ export interface ProductComponentSummary {
 export interface ProductDetails {
     id: string;
     name: string;
+    // [G-Code-Note] [需求修改] 新增 baseComponent 字段，用于存放原 products 数组中的信息
+    baseComponent: {
+        name: string; // 根据品类显示 "面团" 或 "主料"
+        quantity: number;
+        totalBaseComponentWeight: number;
+        divisionWeight: number;
+    };
     mixIns: TaskIngredientDetail[];
     fillings: TaskIngredientDetail[];
     toppings: TaskIngredientDetail[];
@@ -47,7 +52,8 @@ export interface ComponentGroup {
     totalComponentWeight: number; // [核心重命名] totalDoughWeight -> totalComponentWeight
     baseComponentIngredients: TaskIngredientDetail[]; // [核心重命名] mainDoughIngredients -> baseComponentIngredients
     baseComponentProcedure: string[]; // [核心重命名] mainDoughProcedure -> baseComponentProcedure
-    products: ProductComponentSummary[];
+    // [G-Code-Note] [需求修改] 移除 products 字段，其信息已整合到 productDetails.baseComponent
+    // products: ProductComponentSummary[];
     productDetails: ProductDetails[];
 }
 
@@ -64,7 +70,8 @@ export interface TaskDetailResponseDto {
     status: ProductionTaskStatus;
     notes: string | null;
     stockWarning: string | null;
-    prepTask: PrepTask | null;
+    // [G-Code-Note] [需求修改] 移除 prepTask 字段
+    // prepTask: PrepTask | null;
     componentGroups: ComponentGroup[]; // [核心重命名] doughGroups -> componentGroups
     items: TaskCompletionItem[];
 }

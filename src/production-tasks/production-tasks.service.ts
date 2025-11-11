@@ -21,13 +21,7 @@ import {
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
 import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
-import {
-    ComponentGroup,
-    ProductComponentSummary,
-    ProductDetails,
-    TaskDetailResponseDto,
-    TaskIngredientDetail,
-} from './dto/task-detail.dto';
+import { ComponentGroup, ProductDetails, TaskDetailResponseDto, TaskIngredientDetail } from './dto/task-detail.dto';
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 import { BillOfMaterialsResponseDto, BillOfMaterialsItem, PrepTask } from './dto/preparation.dto';
 
@@ -2165,20 +2159,21 @@ export class ProductionTasksService {
         const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, task.items);
         const { stockWarning } = await this._calculateStockWarning(tenantId, taskDataForCalc);
 
-        // [核心修复] _getPrepItemsForTask 现在是同步的，移除 await
-        const prepItems = this._getPrepItemsForTask(tenantId, taskDataForCalc);
+        // [G-Code-Note] [需求修改] 移除 prepItems 的计算，因为 prepTask 被移除了
+        // const prepItems = this._getPrepItemsForTask(tenantId, taskDataForCalc);
 
         return {
             id: task.id,
             status: task.status,
             notes: task.notes,
             stockWarning,
-            prepTask: {
-                id: 'prep-task-combined',
-                title: '前置准备任务',
-                details: prepItems.length > 0 ? `包含 ${prepItems.length} 种预制件` : '',
-                items: prepItems,
-            },
+            // [G-Code-Note] [需求修改] 移除 prepTask 字段
+            // prepTask: {
+            //     id: 'prep-task-combined',
+            //     title: '前置准备任务',
+            //     details: prepItems.length > 0 ? `包含 ${prepItems.length} 种预制件` : '',
+            //     items: prepItems,
+            // },
             componentGroups,
             items: task.items.map((item) => ({
                 id: item.product.id,
@@ -2461,8 +2456,13 @@ export class ProductionTasksService {
                 }
             }
 
-            const products: ProductComponentSummary[] = [];
+            // [G-Code-Note] [需求修改] 移除 `products` 数组
+            // const products: ProductComponentSummary[] = [];
             const productDetails: ProductDetails[] = [];
+
+            // [G-Code-Note] [需求修改] 根据品类确定基础组件的名称
+            const baseComponentName = data.category === 'BREAD' ? '面团' : '主料';
+
             // [核心修复] 修复 no-unsafe-* (使用强类型)
             data.items.forEach((item) => {
                 const originalItem = originalItemsMap.get(item.productId);
@@ -2537,17 +2537,18 @@ export class ProductionTasksService {
 
                 const totalBaseComponentWeightWithLoss = singleUnitInputWeight.mul(quantity);
 
-                products.push({
-                    id: product.id,
-                    name: product.name,
-                    quantity: quantity,
-                    totalBaseComponentWeight: totalBaseComponentWeightWithLoss.toNumber(),
-                    divisionWeight: correctedDivisionWeight.toNumber(),
-                });
+                // [G-Code-Note] [需求修改] 移除 `products.push`
 
                 productDetails.push({
                     id: product.id,
                     name: product.name,
+                    // [G-Code-Note] [需求修改] 新增 `baseComponent` 字段，将原 `products` 数组的信息整合进来
+                    baseComponent: {
+                        name: baseComponentName, // 使用前面定义的名称
+                        quantity: quantity,
+                        totalBaseComponentWeight: totalBaseComponentWeightWithLoss.toNumber(),
+                        divisionWeight: correctedDivisionWeight.toNumber(),
+                    },
                     mixIns: mixIns.map((i) => ({ ...i, weightInGrams: i.weightInGrams * quantity })),
                     fillings: fillings.map((i) => ({
                         ...i,
@@ -2583,7 +2584,8 @@ export class ProductionTasksService {
                     data.type,
                 ),
                 baseComponentProcedure: processedProcedure,
-                products,
+                // [G-Code-Note] [需求修改] 移除 `products` 字段
+                // products,
                 productDetails,
             });
         }

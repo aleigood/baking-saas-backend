@@ -61,7 +61,8 @@ export interface CalculatedExtraIngredientInfo {
 export interface CalculatedProductCostDetails {
     totalCost: number;
     componentGroups: CalculatedComponentGroup[];
-    extraIngredients: CalculatedExtraIngredientInfo[];
+    // [G-Code-Note] [需求修改] 移除 extraIngredients 字段，因为它与 groupedExtraIngredients 重复
+    // extraIngredients: CalculatedExtraIngredientInfo[];
     groupedExtraIngredients: Record<string, CalculatedExtraIngredientInfo[]>;
     productProcedure: string[];
 }
@@ -1032,12 +1033,12 @@ export class CostingService {
             // [核心新增] 按用量（克重）倒序排序附加原料
             .sort((a, b) => b.weightInGrams - a.weightInGrams);
 
-        const summaryRowName = product.recipeVersion.family.category === RecipeCategory.BREAD ? '基础面团' : '基础原料';
+        const summaryRowName = product.recipeVersion.family.category === RecipeCategory.BREAD ? '面团' : '主料';
         const allExtraIngredients: CalculatedExtraIngredientInfo[] = [
             {
                 id: 'component-summary',
                 name: summaryRowName,
-                type: '原料',
+                type: '基础原料',
                 cost: componentGroups.reduce((sum, g) => sum + g.totalCost, 0),
                 // [G-Code-Note] [核心修复] 由于 product 来自 JSON.parse, baseDoughWeight 不再是 Decimal 对象
                 // 必须像 L907 和 L916 一样重新包装
@@ -1063,7 +1064,8 @@ export class CostingService {
         return {
             totalCost: totalCost.toNumber(), // [核心修复] 移除 .toDP()
             componentGroups: componentGroups,
-            extraIngredients: allExtraIngredients,
+            // [G-Code-Note] [需求修改] 移除 extraIngredients 字段
+            // extraIngredients: allExtraIngredients,
             groupedExtraIngredients,
             productProcedure: product.procedure,
         };
