@@ -30,7 +30,6 @@ const spoilageStages = [
     { key: 'other', label: '其他原因' },
 ];
 
-// 1. 恢复原始的 taskWithDetailsInclude (仅用于类型定义)
 // 这个 include 对象不再用于 *查询*，而是用于 *让 Prisma 生成强类型*
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const taskWithDetailsInclude = {
@@ -59,7 +58,6 @@ const taskWithDetailsInclude = {
                                                                         // L3
                                                                         include: {
                                                                             ingredient: true,
-                                                                            // 匹配新 schema，L3 也能引用 L4
                                                                             linkedPreDough: {
                                                                                 // L4
                                                                                 include: {
@@ -82,7 +80,6 @@ const taskWithDetailsInclude = {
                                                                                     },
                                                                                 },
                                                                             },
-                                                                            // 匹配新 schema，L3 也能引用 L4
                                                                             linkedExtra: {
                                                                                 // L4
                                                                                 include: {
@@ -113,7 +110,6 @@ const taskWithDetailsInclude = {
                                                     },
                                                 },
                                             },
-                                            // 匹配新 schema, L1 也能引用 L2
                                             linkedExtra: {
                                                 // L2
                                                 include: {
@@ -194,7 +190,6 @@ const taskWithDetailsInclude = {
                                         include: {
                                             components: {
                                                 include: {
-                                                    // 这里的 L3 定义必须与 L71 的 L3 定义匹配
                                                     ingredients: {
                                                         // L3
                                                         include: {
@@ -265,7 +260,7 @@ const taskWithDetailsInclude = {
     },
 };
 
-// 方案C (修正版) 所需的“浅层Include”
+// 用于递归批量查询的“浅层Include”
 const recipeVersionRecursiveBatchInclude = {
     // 包含 family 信息，用于类型判断和组装
     family: {
@@ -293,7 +288,7 @@ const recipeVersionRecursiveBatchInclude = {
                             versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
                         },
                     },
-                    // 补上 schema.prisma 中 ComponentIngredient.linkedExtra 的支持
+                    // 支持 ComponentIngredient.linkedExtra
                     linkedExtra: {
                         select: {
                             id: true, // Family ID
@@ -335,7 +330,7 @@ type FetchedRecipeVersion = Prisma.RecipeVersionGetPayload<{
     include: typeof recipeVersionRecursiveBatchInclude;
 }>;
 
-// 任务列表 include (原 L121)
+// 任务列表 include
 const taskListItemsInclude = {
     items: {
         select: {
@@ -356,7 +351,7 @@ const taskListItemsInclude = {
     },
 };
 
-// 2. 恢复基于 Prisma GetPayload 的强类型定义，替换掉 `any`
+// 基于 Prisma GetPayload 的强类型定义
 type TaskWithDetails = Prisma.ProductionTaskGetPayload<{
     include: typeof taskWithDetailsInclude;
 }>;
@@ -369,6 +364,7 @@ type ComponentWithRecursiveIngredients = ProductWithDetails['recipeVersion']['co
 type PrepItemFamily = RecipeFamily;
 type RequiredPrepItem = { family: PrepItemFamily; totalWeight: Prisma.Decimal };
 
+// 快照中用于递归计算的配方家族类型定义 (存根)
 type SnapshotRecipeFamilyStub = {
     id: string;
     name: string;
@@ -395,7 +391,7 @@ type SnapshotRecipeFamilyStub = {
                                     id: string;
                                     versions: { id: string }[];
                                 } | null;
-                                // 嵌套的 extra (虽然 recipes.service 禁止了)
+                                // 嵌套的 extra
                                 linkedExtra: {
                                     id: string;
                                     versions: { id: string }[];
@@ -404,7 +400,6 @@ type SnapshotRecipeFamilyStub = {
                         }[];
                     }[];
                 } | null;
-                // 补全快照类型
                 linkedExtra: {
                     id: string; // family.id
                     versions: {
@@ -453,33 +448,31 @@ export class ProductionTasksService {
         private readonly costingService: CostingService,
     ) {}
 
-    // 方案C (修正版) 辅助函数：批量递归获取所有 RecipeVersion
+    // 辅助函数：批量递归获取所有 RecipeVersion
     private async _fetchRecursiveRecipeVersions(
         initialVersionIds: string[],
         tx: Prisma.TransactionClient,
     ): Promise<Map<string, FetchedRecipeVersion>> {
-        // 1. 初始化队列和“仓库” (如你所建议)
         const versionsToFetch = new Set<string>(initialVersionIds); // 跟踪所有已发现的ID (防重)
         const versionsInQueue = [...initialVersionIds]; // “待办”队列
         const allFetchedVersions = new Map<string, FetchedRecipeVersion>(); // “仓库”
 
-        // 2. 启动循环 (如你所建议)
         while (versionsInQueue.length > 0) {
             const batchIds = [...new Set(versionsInQueue.splice(0))]; // 取出当前队列所有ID
 
-            // 3. Query N (Batch)：批量查询
+            // 批量查询
             const results = await tx.recipeVersion.findMany({
                 where: { id: { in: batchIds } },
                 include: recipeVersionRecursiveBatchInclude, // 使用我们定义的递归 include
             });
 
-            // 4. 分析 (Analyze)
+            // 分析
             for (const version of results) {
-                // 4a. 存入“仓库”
+                // 存入“仓库”
                 if (!allFetchedVersions.has(version.id)) {
                     allFetchedVersions.set(version.id, version);
 
-                    // 4b. 深度优先：查找下一层的新ID
+                    // 深度优先：查找下一层的新ID
                     // 遍历 Components
                     for (const component of version.components) {
                         for (const ing of component.ingredients) {
@@ -511,13 +504,13 @@ export class ProductionTasksService {
                 }
             }
         }
-        // 5. 循环结束，返回完整的“仓库”
+        // 循环结束，返回完整的“仓库”
         return allFetchedVersions;
     }
 
     // 核心函数：获取并“组装”完整的任务详情
     private async _getTaskWithAssembledDetails(taskId: string, tx: Prisma.TransactionClient): Promise<TaskWithDetails> {
-        // 1. Query 1 (L1)：获取“浅层”的任务信息
+        // Query 1 (L1)：获取“浅层”的任务信息
         const shallowTaskInclude = {
             items: {
                 include: {
@@ -567,7 +560,7 @@ export class ProductionTasksService {
             throw new NotFoundException('任务未找到 (ID: ${taskId})');
         }
 
-        // 2. 初始化：收集所有 L1 和 L2 的 RecipeVersion ID
+        // 初始化：收集所有 L1 和 L2 的 RecipeVersion ID
         const initialVersionIds = new Set<string>();
         for (const item of task.items) {
             if (item.product.recipeVersionId) {
@@ -580,15 +573,14 @@ export class ProductionTasksService {
             }
         }
 
-        // 3. 调用批量递归获取，拿到所有“碎片”
+        // 调用批量递归获取，拿到所有“碎片”
         const versionMap = await this._fetchRecursiveRecipeVersions(Array.from(initialVersionIds), tx);
 
-        // 4. 组装 (Assemble)：(如你所建议，这是最复杂的一步)
-        // 我们需要一个递归的“组装”函数，并使用 memoization 来防止循环依赖
+        // 组装 (Assemble)：使用 memoization 来防止循环依赖
         const stitchedVersionsCache = new Map<string, FetchedRecipeVersion | null>();
 
         const stitchVersionTree = (versionId: string): FetchedRecipeVersion | null => {
-            // 4a. 检查缓存 (防重/防循环)
+            // 检查缓存 (防重/防循环)
             if (stitchedVersionsCache.has(versionId)) {
                 return stitchedVersionsCache.get(versionId)!;
             }
@@ -600,24 +592,22 @@ export class ProductionTasksService {
             }
 
             // [核心] 复制一份数据，避免修改 map 中的原始缓存
-            // 我们需要深度复制，但 Prisma 的 payload 很复杂，
             // structuredClone 是一个现代且安全的方式
             const version = JSON.parse(JSON.stringify(versionData)) as FetchedRecipeVersion;
 
             // 标记此ID正在处理中 (用于循环依赖检测)
             stitchedVersionsCache.set(versionId, null);
 
-            // 4b. 递归组装 Components (linkedPreDough 和 linkedExtra)
+            // 递归组装 Components (linkedPreDough 和 linkedExtra)
             for (const component of version.components) {
                 for (const ing of component.ingredients) {
-                    // [核心] 组装 PreDough
+                    // 组装 PreDough
                     const nextVersionId = ing.linkedPreDough?.versions[0]?.id;
                     if (nextVersionId) {
-                        // [核心] 递归调用
+                        // 递归调用
                         const stitchedSubVersion = stitchVersionTree(nextVersionId);
                         if (stitchedSubVersion) {
-                            // [核心] 将 L4/L6 的“家族”信息，附加到 L2/L4 的 linkedPreDough 对象上
-                            // (这是为了模拟旧 `taskWithDetailsInclude` 的数据结构)
+                            // 将子配方的家族信息，附加到 linkedPreDough 对象上 (模拟旧数据结构)
                             ing.linkedPreDough = {
                                 ...ing.linkedPreDough,
                                 ...stitchedSubVersion.family,
@@ -641,7 +631,7 @@ export class ProductionTasksService {
                 }
             }
 
-            // 4c. 递归组装 Products (linkedExtra)
+            // 递归组装 Products (linkedExtra)
             for (const product of version.products) {
                 for (const pIng of product.ingredients) {
                     const nextVersionId = pIng.linkedExtra?.versions[0]?.id;
@@ -658,21 +648,21 @@ export class ProductionTasksService {
                 }
             }
 
-            // 4d. 存入缓存并返回
+            // 存入缓存并返回
             stitchedVersionsCache.set(versionId, version);
             return version;
         };
 
-        // 5. 启动组装
+        // 启动组装
         // [核心] 我们必须修改 `task` 对象本身，将其从“浅层”变为“深层”
         const assembledTask = JSON.parse(JSON.stringify(task)) as typeof task; // 深度复制 task
         for (const item of assembledTask.items) {
-            // 5a. 组装 L1 (Main Recipe)
+            // 组装 Main Recipe
             const topLevelVersionId = item.product.recipeVersionId;
             if (topLevelVersionId) {
                 const stitchedL1Version = stitchVersionTree(topLevelVersionId);
                 if (stitchedL1Version) {
-                    // [核心] 将 L1 的 `family` 注入，模拟旧结构
+                    // 将 family 注入，模拟旧结构
                     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
                     (item.product as any).recipeVersion = {
                         ...stitchedL1Version,
@@ -680,7 +670,7 @@ export class ProductionTasksService {
                     };
                 }
             }
-            // 5b. 组装 L2 (Product Ingredients)
+            // 组装 Product Ingredients
             for (const pIng of item.product.ingredients) {
                 const l2VersionId = pIng.linkedExtra?.versions[0]?.id;
                 if (l2VersionId) {
@@ -696,27 +686,26 @@ export class ProductionTasksService {
             }
         }
 
-        // 4. 在‘污染源’出口使用 as unknown as ...
-        // 这是我们隔离 `any` 的唯一地方。
+        // 类型断言：这是我们隔离 `any` 的唯一地方。
         return assembledTask as unknown as TaskWithDetails;
     }
 
-    // [核心重构] _fetchAndSerializeSnapshot 现在调用新的“组装”函数
+    // 获取任务详情并序列化为快照
     private async _fetchAndSerializeSnapshot(
         taskId: string,
         tx?: Prisma.TransactionClient,
     ): Promise<Prisma.JsonObject> {
         const prismaClient = tx || this.prisma;
 
-        // 调用我们新的“治本”方案
+        // 调用“组装”函数
         const taskWithDetails = await this._getTaskWithAssembledDetails(taskId, prismaClient);
 
         if (!taskWithDetails) {
-            // (理论上 _getTaskWithAssembledDetails 内部会抛出 NotFoundException)
+            // _getTaskWithAssembledDetails 内部会抛出 NotFoundException
             throw new NotFoundException('无法生成快照：任务未找到。');
         }
 
-        // 过滤已删除产品的逻辑保持不变
+        // 过滤已删除产品的逻辑
         const snapshot = {
             ...taskWithDetails,
             items: taskWithDetails.items.filter((item) => !item.product.deletedAt),
@@ -840,7 +829,6 @@ export class ProductionTasksService {
         );
     }
 
-    // [核心重构] create 方法不再使用 taskWithDetailsInclude
     async create(tenantId: string, userId: string, createProductionTaskDto: CreateProductionTaskDto) {
         const { startDate, endDate, notes, products } = createProductionTaskDto;
 
@@ -889,7 +877,7 @@ export class ProductionTasksService {
         }
 
         // 库存检查
-        // 1. 获取所有产品“外壳”，用于收集 L1 和 L2 ID
+        // 获取所有产品“外壳”，用于收集 L1 和 L2 ID
         const productShells = await this.prisma.product.findMany({
             where: { id: { in: productIds }, deletedAt: null },
             // 这是一个“浅层”查询，只为了拿到 L1/L2 ID 和组装所需的基础字段
@@ -925,10 +913,9 @@ export class ProductionTasksService {
             },
         });
 
-        // 2. 创建“外壳”的 Map
         const productShellMap = new Map(productShells.map((p) => [p.id, p]));
 
-        // 3. 收集所有 L1 和 L2 的 RecipeVersion ID
+        // 收集所有 L1 和 L2 的 RecipeVersion ID
         const initialVersionIds = new Set<string>();
         for (const shell of productShells) {
             if (shell.recipeVersionId) {
@@ -941,11 +928,11 @@ export class ProductionTasksService {
             }
         }
 
-        // 4. 调用“仓库”函数，获取所有配方“碎片”
+        // 调用“仓库”函数，获取所有配方“碎片”
         // [核心] 注意：这里使用的是 this.prisma，因为我们尚未进入 $transaction
         const versionMap = await this._fetchRecursiveRecipeVersions(Array.from(initialVersionIds), this.prisma);
 
-        // 5. 复制粘贴 L440-L514 的 `stitchVersionTree` 组装逻辑
+        // 组装逻辑
         const stitchedVersionsCache = new Map<string, FetchedRecipeVersion | null>();
         const stitchVersionTree = (versionId: string): FetchedRecipeVersion | null => {
             if (stitchedVersionsCache.has(versionId)) {
@@ -974,7 +961,6 @@ export class ProductionTasksService {
                             };
                         }
                     }
-                    // 补上 L788 的遗漏
                     const nextExtraVersionId = ing.linkedExtra?.versions[0]?.id;
                     if (nextExtraVersionId) {
                         const stitchedSubVersion = stitchVersionTree(nextExtraVersionId);
@@ -1009,7 +995,7 @@ export class ProductionTasksService {
             return version;
         };
 
-        // 6. 组装并计算所有消耗
+        // 组装并计算所有消耗
         const allConsumptions = new Map<
             string,
             { ingredientId: string; ingredientName: string; totalConsumed: number }
@@ -1020,10 +1006,10 @@ export class ProductionTasksService {
             const shell = productShellMap.get(item.productId);
             if (!shell) continue;
 
-            // 6a. 组装 (Stitch)
+            // 组装 (Stitch)
             const assembledProduct = JSON.parse(JSON.stringify(shell)) as typeof shell; // 深度复制“外壳”
 
-            // 6b. 组装 L1 (Main Recipe)
+            // 组装 Main Recipe
             const topLevelVersionId = shell.recipeVersionId;
             if (topLevelVersionId) {
                 const stitchedL1Version = stitchVersionTree(topLevelVersionId);
@@ -1035,7 +1021,7 @@ export class ProductionTasksService {
                     };
                 }
             }
-            // 6c. 组装 L2 (Product Ingredients)
+            // 组装 Product Ingredients
             for (const pIng of assembledProduct.ingredients) {
                 const l2VersionId = pIng.linkedExtra?.versions[0]?.id;
                 if (l2VersionId) {
@@ -1050,13 +1036,13 @@ export class ProductionTasksService {
                 }
             }
 
-            // 6d. 创建模拟对象，类型断言为 ProductWithDetails
+            // 创建模拟对象，类型断言为 ProductWithDetails
             const mockProductWithDetails = assembledProduct as unknown as ProductWithDetails;
 
-            // 6e. [核心] 现在这个调用是安全的，`mockProductWithDetails` 是无限深度的
+            // [核心] 现在这个调用是安全的，`mockProductWithDetails` 是无限深度的
             const consumptions = this._getFlattenedIngredientsForBOM(mockProductWithDetails);
 
-            // 6f. 聚合消耗
+            // 聚合消耗
             for (const [ingredientId, weight] of consumptions.entries()) {
                 const totalWeight = weight.mul(item.quantity);
                 const existing = allConsumptions.get(ingredientId);
@@ -1072,7 +1058,7 @@ export class ProductionTasksService {
             }
         }
 
-        // 7. [优化] 批量获取原料名称，替换 L728 的循环内查询
+        // [优化] 批量获取原料名称
         const allIngredientIds = Array.from(allConsumptions.keys());
         if (allIngredientIds.length > 0) {
             const ingredients = await this.prisma.ingredient.findMany({
@@ -1085,11 +1071,11 @@ export class ProductionTasksService {
             }
         }
 
-        // 8. [核心] L735 开始的后续逻辑保持不变
+        // [核心] 后续逻辑保持不变
         const finalConsumptions = Array.from(allConsumptions.values());
         let stockWarning: string | null = null;
         if (finalConsumptions.length > 0) {
-            // ... (库存检查逻辑保持不变)
+            // ... (库存检查逻辑)
             const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
             const ingredients = await this.prisma.ingredient.findMany({
                 where: { id: { in: ingredientIds } },
@@ -1126,7 +1112,7 @@ export class ProductionTasksService {
                 },
             });
 
-            // [核心重构] 调用新的快照生成器
+            // 调用新的快照生成器
             const snapshot = await this._fetchAndSerializeSnapshot(task.id, tx);
 
             // 仅更新快照
@@ -1137,17 +1123,17 @@ export class ProductionTasksService {
                 },
             });
 
-            // [核心重构] 不再使用 include，而是调用新的“组装”函数来获取返回数据
+            // 调用“组装”函数来获取返回数据
             return await this._getTaskWithAssembledDetails(task.id, tx);
         });
 
-        // [核心重构] _sanitizeTask 现在接收的是我们组装好的对象
+        // _sanitizeTask 现在接收的是我们组装好的对象
         return { task: this._sanitizeTask(createdTask), warning: stockWarning };
     }
 
     /**
      * 此方法现在基于“快照”计算预制件需求
-     * 移除 async，此函数现在是同步的
+     * 此函数现在是同步的
      */
     private _getPrepItemsForTask(tenantId: string, task: TaskWithDetails): CalculatedRecipeDetails[] {
         if (!task || !task.items || task.items.length === 0) {
@@ -1259,7 +1245,6 @@ export class ProductionTasksService {
                                     totalWeight: weight,
                                 });
                             }
-                            // 移除 await
                             resolveDependencies(
                                 preDoughVersionId,
                                 preDoughFamily as unknown as SnapshotRecipeFamilyStub,
@@ -1476,7 +1461,7 @@ export class ProductionTasksService {
         };
 
         const [prepItems, billOfMaterials] = await Promise.all([
-            this._getPrepItemsForTask(tenantId, combinedTaskItems), // 同步函数，无需 await
+            this._getPrepItemsForTask(tenantId, combinedTaskItems), // 同步函数
             this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks),
         ]);
 
@@ -1562,7 +1547,7 @@ export class ProductionTasksService {
         };
 
         const [prepItems, billOfMaterials] = await Promise.all([
-            this._getPrepItemsForTask(tenantId, combinedTaskItems), // 同步函数，无需 await
+            this._getPrepItemsForTask(tenantId, combinedTaskItems), // 同步函数
             this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks),
         ]);
 
@@ -1823,7 +1808,7 @@ export class ProductionTasksService {
             ? new Prisma.Decimal(1)
             : baseDoughWeight.add(divisionLoss).div(baseDoughWeight);
 
-        // 恢复强类型
+        // 强类型
         const processComponentWithLoss = (
             component: ComponentWithIngredients,
             requiredOutputWeight: Prisma.Decimal,
@@ -2121,21 +2106,11 @@ export class ProductionTasksService {
         const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, task.items);
         const { stockWarning } = await this._calculateStockWarning(tenantId, taskDataForCalc);
 
-        // [需求修改] 移除 prepItems 的计算，因为 prepTask 被移除了
-        // const prepItems = this._getPrepItemsForTask(tenantId, taskDataForCalc);
-
         return {
             id: task.id,
             status: task.status,
             notes: task.notes,
             stockWarning,
-            // [需求修改] 移除 prepTask 字段
-            // prepTask: {
-            //     id: 'prep-task-combined',
-            //     title: '前置准备任务',
-            //     details: prepItems.length > 0 ? `包含 ${prepItems.length} 种预制件` : '',
-            //     items: prepItems,
-            // },
             componentGroups,
             items: task.items.map((item) => ({
                 id: item.product.id,
@@ -2282,7 +2257,6 @@ export class ProductionTasksService {
                 totalFlourForFamily,
             );
 
-            // 明确 Map 的类型
             const baseComponentIngredientsMap = new Map<string, SortableTaskIngredient>();
             let totalComponentWeight = new Prisma.Decimal(0);
 
@@ -2374,11 +2348,9 @@ export class ProductionTasksService {
                 if (waterIngredient && waterIngredient.weightInGrams > 0) {
                     const autoCalculatedParts: string[] = [];
 
-                    // 1. 获取“实际液态水”和“总水分”
                     const actualLiquidWaterWeight = waterIngredient.weightInGrams;
                     const totalMoistureWeight = totalWaterForFamily.toNumber();
 
-                    // 2. 计算目标水温（不变）
                     const targetWaterTemp = this._calculateWaterTemp(
                         new Prisma.Decimal(baseComponentInfo.targetTemp).toNumber(),
                         mixerType,
@@ -2386,22 +2358,16 @@ export class ProductionTasksService {
                         envTemp,
                     );
 
-                    // 3. 用“实际液态水”重量去计算所需冰量
                     const iceWeight = this._calculateIce(
                         targetWaterTemp,
                         actualLiquidWaterWeight, // <-- 使用“实际液态水”重量
                         waterTemp,
                     );
 
-                    // 4. 检查所需冰量是否 > 你拥有的“实际液态水”
                     if (iceWeight > actualLiquidWaterWeight) {
                         // 场景 3：所需冰量 > 可用液态水
                         // 触发反向计算，提示冷却其他液体
 
-                        // 5. 调用反向计算函数
-                        // 参数1: 目标水温
-                        // 参数2: 总水分 (totalRecipeWater)
-                        // 参数3: 可被替换成冰的水量 (availableWaterToReplace)
                         const requiredTemp = this._calculateRequiredWetIngredientTemp(
                             targetWaterTemp,
                             totalMoistureWeight, // <-- 使用“总水分”
@@ -2527,7 +2493,7 @@ export class ProductionTasksService {
                     })),
                     toppings: toppings.map((i) => ({
                         ...i,
-                        weightPerUnit: i.weightInGrams, // L2208, 修正 weightInGGrams 拼写错误
+                        weightPerUnit: i.weightInGrams,
                         weightInGrams: i.weightInGrams * quantity,
                     })),
                     procedure: product.procedure || [],
@@ -2574,7 +2540,7 @@ export class ProductionTasksService {
         const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
 
         if (includeDough) {
-            // 恢复强类型
+            // 强类型
             const processDough = (dough: ComponentWithRecursiveIngredients, flourWeightRef: Prisma.Decimal) => {
                 for (const ing of dough.ingredients) {
                     if (ing.linkedPreDough && ing.flourRatio) {
@@ -2603,10 +2569,6 @@ export class ProductionTasksService {
                         // 递归展开 ComponentIngredient.linkedExtra
                         const extraRecipe = ing.linkedExtra.versions[0]?.components[0];
                         if (extraRecipe) {
-                            // 注意：这里是BREAD/PRE_DOUGH 引用 EXTRA
-                            // 它的算法是 (面粉基准 * 比例)，所以我们 *不* 传递 flourForPreDough
-                            // 我们需要计算这个 Extra 配方本身需要的原料
-
                             // 修正逻辑：Extra 配方不使用面粉基准
                             // 我们需要计算这个 Extra 配方的总重
                             const extraWeight = flourWeightRef.mul(new Prisma.Decimal(ing.ratio ?? 0));
@@ -2710,7 +2672,7 @@ export class ProductionTasksService {
 
         const theoreticalDoughWeight = new Prisma.Decimal(product.baseDoughWeight);
 
-        // 恢复强类型
+        // 强类型
         const calculateTotalRatio = (dough: ComponentWithRecursiveIngredients): Prisma.Decimal => {
             return dough.ingredients.reduce((sum, i) => {
                 if (i.linkedPreDough && i.flourRatio) {
@@ -2746,7 +2708,7 @@ export class ProductionTasksService {
         const totalFlourWeight = this._calculateTotalFlourWeightForProduct(product);
         let totalWaterWeight = new Prisma.Decimal(0);
 
-        // 恢复强类型
+        // 强类型
         const findWaterRecursively = (component: ComponentWithRecursiveIngredients, flourRef: Prisma.Decimal) => {
             for (const ing of component.ingredients) {
                 if (ing.linkedPreDough && ing.flourRatio) {
@@ -2829,7 +2791,7 @@ export class ProductionTasksService {
         const targetBaseDoughWeight = new Prisma.Decimal(product.baseDoughWeight).add(divisionLoss);
         const adjustedDoughWeight = targetBaseDoughWeight.div(divisor);
 
-        // 恢复强类型
+        // 强类型
         const calculateTotalRatio = (dough: ComponentWithRecursiveIngredients): Prisma.Decimal => {
             return dough.ingredients.reduce((sum, i) => {
                 if (i.linkedPreDough && i.flourRatio) {
@@ -2905,7 +2867,6 @@ export class ProductionTasksService {
     }
 
     // 辅助函数：从复杂的快照对象中查找原料信息
-    // 移除所有不必要的 `as any[]` 和 `(ci as any)`
     private _findIngredientInSnapshot(task: TaskWithDetails, ingredientId: string): Ingredient | null {
         for (const item of task.items) {
             for (const component of item.product.recipeVersion?.components || []) {
@@ -2978,7 +2939,6 @@ export class ProductionTasksService {
                         for (const c of v.components) {
                             for (const ci of c.ingredients) {
                                 if (ci.ingredient?.id === ingredientId) return ci.ingredient;
-                                // 这里的 ci 是 L3，它有 L4 的 linkedPreDough
                                 if (ci.linkedPreDough) {
                                     for (const v2 of ci.linkedPreDough.versions) {
                                         for (const c2 of v2.components) {
@@ -3006,7 +2966,6 @@ export class ProductionTasksService {
         return null;
     }
 
-    // [核心重构] updateTaskDetails 方法不再使用 taskWithDetailsInclude
     async updateTaskDetails(tenantId: string, id: string, updateDto: UpdateTaskDetailsDto) {
         return this.prisma.$transaction(async (tx) => {
             const task = await tx.productionTask.findFirst({
@@ -3082,7 +3041,7 @@ export class ProductionTasksService {
                 },
             });
 
-            // [核心重构] 重新生成并保存快照
+            // 重新生成并保存快照
             const snapshot = await this._fetchAndSerializeSnapshot(id, tx);
             await tx.productionTask.update({
                 where: { id },
@@ -3091,7 +3050,7 @@ export class ProductionTasksService {
                 },
             });
 
-            // [核心重构] 调用新的“组装”函数来获取返回数据
+            // 调用“组装”函数来获取返回数据
             const taskWithSnapshot = await this._getTaskWithAssembledDetails(id, tx);
             return this._sanitizeTask(taskWithSnapshot);
         });
