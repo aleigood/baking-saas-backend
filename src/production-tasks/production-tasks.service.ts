@@ -1,4 +1,3 @@
-// G-Code-Note: Service (NestJS)
 // 路径: src/production-tasks/production-tasks.service.ts
 // [核心修复] 修正 complete 函数中的库存检查逻辑，使其跳过 UNTRACKED (非追踪) 原料
 
@@ -3167,17 +3166,17 @@ export class ProductionTasksService {
 
         const neededIngredientIds = Array.from(totalInputNeeded.keys());
         if (neededIngredientIds.length > 0) {
-            // [中文注释] [核心修改] 这里只查询 STANDARD 类型的原料
+            // 这里只查询 STANDARD 类型的原料
             const ingredientsInStock = await this.prisma.ingredient.findMany({
                 where: { id: { in: neededIngredientIds }, type: IngredientType.STANDARD },
                 select: { id: true, name: true, currentStockInGrams: true },
             });
-            // [中文注释] [核心修改] 这个 Map 现在只包含 STANDARD 原料
-            // const stockMap = new Map(ingredientsInStock.map((i) => [i.id, i.currentStockInGrams])); // [G-Code-Note] 不再需要这个Map
+            // 这个 Map 现在只包含 STANDARD 原料
+            // const stockMap = new Map(ingredientsInStock.map((i) => [i.id, i.currentStockInGrams]));
 
             const insufficientIngredients: string[] = [];
 
-            // [中文注释] [核心修改] 修正库存检查逻辑
+            // 修正库存检查逻辑
             // 我们只遍历从数据库中查询到的 STANDARD 原料列表 (ingredientsInStock)
             // 而不是遍历包含“水”在内的 totalInputNeeded 列表
             for (const ingredient of ingredientsInStock) {
@@ -3186,9 +3185,9 @@ export class ProductionTasksService {
                 if (!needed) continue; // 理论上不会发生
 
                 const currentStock = new Prisma.Decimal(ingredient.currentStockInGrams);
-                // [中文注释] 用当前库存和总需求量比较
+                // 用当前库存和总需求量比较
                 if (currentStock.lt(needed.totalConsumed)) {
-                    insufficientIngredients.push(ingredient.name); // [G-Code-Note] 使用 ingredient.name 保证名称正确
+                    insufficientIngredients.push(ingredient.name); // 使用 ingredient.name 保证名称正确
                 }
             }
 
