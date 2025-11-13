@@ -1,13 +1,9 @@
-// G-Code-Note: Service (NestJS)
 // 路径: src/costing/costing.service.ts
-// [核心重构] 完整文件，以支持新 schema (preDoughId/extraId) 并修复 isRecipe 字段
-// [G-Code-Note] [核心修复] 修复了 TS2551, TS2304, 和 no-unused-vars 错误
 
-// [G-Code-Note] [核心重构] 导入在 "批量组装" 策略中需要用到的类型
 import {
     Injectable,
     NotFoundException,
-    // [G-Code-Note] 导入 Prisma 类型
+    // 导入 Prisma 类型
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
@@ -25,7 +21,6 @@ import {
     IngredientType,
 } from '@prisma/client';
 
-// [核心修改] 增加 isRecipe
 export interface CalculatedIngredientInfo {
     name: string;
     ratio: number;
@@ -33,20 +28,19 @@ export interface CalculatedIngredientInfo {
     pricePerKg: number;
     cost: number;
     extraInfo?: string;
-    isRecipe: boolean; // [G-Code-Note] 修复问题3：添加 isRecipe
+    isRecipe: boolean;
 }
 
-// [核心新增] 定义用于排序的类型
+// 定义用于排序的类型
 type SortableCalculatedIngredient = CalculatedIngredientInfo & { isFlour?: boolean };
 
 export interface CalculatedComponentGroup {
     name: string;
-    ingredients: SortableCalculatedIngredient[]; // [核心修改] 允许 ingredients 包含 isFlour
+    ingredients: SortableCalculatedIngredient[];
     procedure?: string[];
     totalCost: number;
 }
 
-// [核心修改] 增加 isRecipe
 export interface CalculatedExtraIngredientInfo {
     id: string;
     name: string;
@@ -55,20 +49,18 @@ export interface CalculatedExtraIngredientInfo {
     weightInGrams: number;
     ratio?: number;
     extraInfo?: string;
-    isRecipe: boolean; // [G-Code-Note] 修复问题3：添加 isRecipe
+    isRecipe: boolean;
 }
 
 export interface CalculatedProductCostDetails {
     totalCost: number;
     componentGroups: CalculatedComponentGroup[];
-    // [G-Code-Note] [需求修改] 移除 extraIngredients 字段，因为它与 groupedExtraIngredients 重复
-    // extraIngredients: CalculatedExtraIngredientInfo[];
     groupedExtraIngredients: Record<string, CalculatedExtraIngredientInfo[]>;
     productProcedure: string[];
 }
 
 export interface CalculatedRecipeIngredient {
-    ingredientId: string; // [核心修改] 确保有 ingredientId
+    ingredientId: string;
     name: string;
     weightInGrams: number;
     brand?: string | null;
@@ -85,7 +77,6 @@ export interface CalculatedRecipeDetails {
     ingredients: CalculatedRecipeIngredient[];
 }
 
-// [G-Code-Note] [核心新增] 修复 TS2304
 interface ConsumptionDetail {
     ingredientId: string;
     ingredientName: string;
@@ -93,8 +84,8 @@ interface ConsumptionDetail {
     totalConsumed: number;
 }
 
-// [G-Code-Note] [核心重构] 深入定义类型以支持递归查询 (支持新 schema)
-// [G-Code-Note] 这个类型现在描述的是 "组装后" 的对象结构
+// 深入定义类型以支持递归查询 (支持新 schema)
+// 这个类型现在描述的是 "组装后" 的对象结构
 type FullComponentIngredient = ComponentIngredient & {
     ingredient: Ingredient | null;
     linkedPreDough: // 面种
@@ -103,7 +94,7 @@ type FullComponentIngredient = ComponentIngredient & {
                   components: (RecipeComponent & {
                       ingredients: (ComponentIngredient & {
                           ingredient: Ingredient | null;
-                          // [G-Code-Note] 开始嵌套
+                          // 开始嵌套
                           linkedPreDough: RecipeFamily | null;
                           linkedExtra: RecipeFamily | null;
                       })[];
@@ -117,7 +108,7 @@ type FullComponentIngredient = ComponentIngredient & {
                   components: (RecipeComponent & {
                       ingredients: (ComponentIngredient & {
                           ingredient: Ingredient | null;
-                          // [G-Code-Note] 开始嵌套
+                          // 开始嵌套
                           linkedPreDough: RecipeFamily | null;
                           linkedExtra: RecipeFamily | null;
                       })[];
@@ -142,7 +133,7 @@ type FullProductIngredient = ProductIngredient & {
                   components: (RecipeComponent & {
                       ingredients: (ComponentIngredient & {
                           ingredient: Ingredient | null;
-                          // [G-Code-Note] 开始嵌套
+                          // 开始嵌套
                           linkedPreDough: RecipeFamily | null;
                           linkedExtra: RecipeFamily | null;
                       })[];
@@ -157,7 +148,7 @@ type FullProduct = Product & {
     ingredients: FullProductIngredient[];
 };
 
-// [核心新增] 为快照中的 RecipeFamily 定义一个最小类型 (基于 Prisma 生成的类型)
+// 为快照中的 RecipeFamily 定义一个最小类型 (基于 Prisma 生成的类型)
 // 这有助于 getCalculatedRecipeDetailsFromSnapshot 的类型安全
 type SnapshotRecipeFamily = {
     id: string;
@@ -169,7 +160,7 @@ type SnapshotRecipeFamily = {
             procedure: string[];
             ingredients: {
                 ratio: number | string | null;
-                // [G-Code-Note] [核心重构] 快照中可能同时包含两者 (虽然逻辑上不应该)
+                // 快照中可能同时包含两者 (虽然逻辑上不应该)
                 linkedPreDough: {
                     id: string;
                     name: string;
@@ -190,7 +181,7 @@ type SnapshotRecipeFamily = {
     }[];
 };
 
-// [G-Code-Note] [核心重构] 复制自 production-tasks.service.ts 的 "浅层 Include"
+// 复制自 production-tasks.service.ts 的 "浅层 Include"
 // 用于 "批量查询" 策略
 const recipeVersionRecursiveBatchInclude = {
     family: {
@@ -248,7 +239,7 @@ const recipeVersionRecursiveBatchInclude = {
         },
     },
 };
-// [G-Code-Note] [核心重构] "浅层 Include" 的 TS 类型
+// "浅层 Include" 的 TS 类型
 type FetchedRecipeVersion = Prisma.RecipeVersionGetPayload<{
     include: typeof recipeVersionRecursiveBatchInclude;
 }>;
@@ -280,7 +271,7 @@ export class CostingService {
                                             },
                                         },
                                         linkedPreDough: true,
-                                        linkedExtra: true, // [G-Code-Note] [核心重构] 包含 linkedExtra
+                                        linkedExtra: true, // 包含 linkedExtra
                                     },
                                 },
                             },
@@ -329,14 +320,14 @@ export class CostingService {
 
                 if (ing.linkedPreDough) {
                     return {
-                        ingredientId: ing.linkedPreDough.id, // [核心修改]
+                        ingredientId: ing.linkedPreDough.id,
                         name: ing.linkedPreDough.name,
                         weightInGrams: weight.toNumber(),
                         isRecipe: true,
                         brand: null,
                     };
                 } else if (ing.linkedExtra) {
-                    // [G-Code-Note] [核心重构] 增加 linkedExtra
+                    // 增加 linkedExtra
                     return {
                         ingredientId: ing.linkedExtra.id,
                         name: ing.linkedExtra.name,
@@ -346,7 +337,7 @@ export class CostingService {
                     };
                 } else if (ing.ingredient) {
                     return {
-                        ingredientId: ing.ingredient.id, // [核心修改]
+                        ingredientId: ing.ingredient.id,
                         name: ing.ingredient.name,
                         weightInGrams: weight.toNumber(),
                         isRecipe: false,
@@ -361,7 +352,7 @@ export class CostingService {
             id: recipeFamily.id,
             name: recipeFamily.name,
             type: recipeFamily.type,
-            // [核心修复] 移除 .toDP()，返回完整精度的 number
+            // 移除 .toDP()，返回完整精度的 number
             totalWeight: requiredInputWeight.toNumber(),
             targetWeight: outputWeightTarget.toNumber(),
             procedure: mainComponent.procedure,
@@ -372,20 +363,20 @@ export class CostingService {
     }
 
     /**
-     * [核心新增] getCalculatedRecipeDetails 的快照版本
+     * getCalculatedRecipeDetails 的快照版本
      * 此方法是同步的，因为它只处理已传入的快照对象，不执行任何 I/O
      */
     getCalculatedRecipeDetailsFromSnapshot(
         snapshotRecipeFamily: any, // 接收来自快照的 RecipeFamily 对象
         totalWeight: number, // 目标产出重量 (Output)
     ): CalculatedRecipeDetails {
-        // [核心修正] 立即转换类型，以便后续安全访问
+        // 立即转换类型，以便后续安全访问
         const recipeFamily = snapshotRecipeFamily as SnapshotRecipeFamily;
         const outputWeightTarget = new Prisma.Decimal(totalWeight);
 
-        // [核心修改] 不再查询数据库，而是直接访问对象
+        // 不再查询数据库，而是直接访问对象
         if (!recipeFamily || !recipeFamily.versions[0]?.components[0]) {
-            // [核心修正] 使用类型安全且经过可选链检查的 'recipeFamily' 变量
+            // 使用类型安全且经过可选链检查的 'recipeFamily' 变量
             return {
                 id: recipeFamily?.id || 'unknown',
                 name: recipeFamily?.name || '快照数据不完整',
@@ -427,7 +418,7 @@ export class CostingService {
 
         const calculatedIngredients = mainComponent.ingredients
             .map((ing) => {
-                // [核心修改] 确保从快照中读取时转换为 Decimal
+                // 确保从快照中读取时转换为 Decimal
                 const weight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
 
                 if (ing.linkedPreDough) {
@@ -439,7 +430,7 @@ export class CostingService {
                         brand: null,
                     };
                 } else if (ing.linkedExtra) {
-                    // [G-Code-Note] [核心重构] 增加 linkedExtra
+                    // 增加 linkedExtra
                     return {
                         ingredientId: ing.linkedExtra.id,
                         name: ing.linkedExtra.name,
@@ -535,7 +526,7 @@ export class CostingService {
                 }
             }
             costHistory.push({
-                cost: snapshotTotalCost.toNumber(), // [核心修复] 移除 .toDP()
+                cost: snapshotTotalCost.toNumber(),
                 date: date.toISOString().split('T')[0],
             });
         }
@@ -589,7 +580,7 @@ export class CostingService {
             }
             const costPerKg = pricePerPackage.div(specWeightInGrams).mul(1000);
             return {
-                cost: costPerKg.toNumber(), // [核心修复] 移除 .toDP()
+                cost: costPerKg.toNumber(),
             };
         });
 
@@ -622,7 +613,7 @@ export class CostingService {
         return consumptionLogs.map((log) => ({ cost: log.quantityInGrams.toNumber() })).reverse();
     }
 
-    // [核心新增] 排序辅助函数
+    // 排序辅助函数
     private _sortCalculatedIngredients(
         ingredients: SortableCalculatedIngredient[],
         category: RecipeCategory,
@@ -702,21 +693,21 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        // [核心修正] flatIngredients 和 pricePerGramMap 包含了*所有*基础原料 (包括馅料的)
+        // flatIngredients 和 pricePerGramMap 包含了*所有*基础原料 (包括馅料的)
         const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
 
-        // [核心新增] 获取品类和类型用于排序
+        // 获取品类和类型用于排序
         const recipeCategory = product.recipeVersion.family.category;
         const recipeType = product.recipeVersion.family.type;
 
         const getPricePerKg = (id: string) => {
             const pricePerGram = pricePerGramMap.get(id);
-            return pricePerGram ? pricePerGram.mul(1000).toNumber() : 0; // [核心修复] 移除 .toDP()
+            return pricePerGram ? pricePerGram.mul(1000).toNumber() : 0;
         };
 
-        // [核心修正] 新增一个辅助函数，用于递归计算一个“附加配方”的总成本
+        // 新增一个辅助函数，用于递归计算一个“附加配方”的总成本
         // 这个函数是 _flattenComponentTheoretical 逻辑的“成本计算”版本
         const getExtraRecipeCost = (
             component: FullRecipeVersion['components'][0],
@@ -737,8 +728,8 @@ export class CostingService {
             for (const ing of component.ingredients) {
                 const ingredientInputWeight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
 
-                // [G-Code-Note] [核心重构] 检查这个“原料”是不是又是一个配方
-                const linkedRecipe = ing.linkedPreDough || ing.linkedExtra; // [G-Code-Note] 检查两种
+                // 检查这个“原料”是不是又是一个配方
+                const linkedRecipe = ing.linkedPreDough || ing.linkedExtra;
                 if (linkedRecipe) {
                     const subComponent = linkedRecipe.versions?.[0]?.components?.[0];
                     if (subComponent) {
@@ -761,7 +752,7 @@ export class CostingService {
         };
 
         const componentGroups: CalculatedComponentGroup[] = [];
-        let totalCost = new Prisma.Decimal(0); // [核心修正] 这是总成本累加器
+        let totalCost = new Prisma.Decimal(0); // 这是总成本累加器
 
         const processComponent = (
             component: FullRecipeVersion['components'][0],
@@ -769,7 +760,7 @@ export class CostingService {
             parentConversionFactor: Prisma.Decimal,
             isBaseComponent: boolean,
             flourWeightReference: Prisma.Decimal,
-            // [核心新增] 传入分类用于排序
+            // 传入分类用于排序
             category: RecipeCategory,
             type: RecipeType,
         ): CalculatedComponentGroup => {
@@ -785,10 +776,7 @@ export class CostingService {
                 new Prisma.Decimal(0),
             );
 
-            // [G-Code-Note] [核心修复] flourRatio 不计入 totalRatio，因此 totalRatio 可能为 0
-            // if (totalRatio.isZero() && !isBaseComponent) return group;
-
-            // [G-Code-Note] [核心修复] 基础重量计算
+            // 基础重量计算
             // 1. 如果是面粉基准 (BREAD or PRE_DOUGH)，使用 flourWeightReference
             // 2. 如果是非面粉基准 (PASTRY, DESSERT, EXTRA)，使用 componentWeight / totalRatio
             const isFlourBased = category === 'BREAD' || type === 'PRE_DOUGH';
@@ -803,7 +791,6 @@ export class CostingService {
                 }
             }
 
-            // [G-Code-Note] [核心修复] 修复 TS2551
             const { cleanedProcedure, ingredientNotes } = this._parseProcedureForNotes(
                 component.procedure,
                 currentFlourWeight, // 百分比替换仍然使用面粉基准
@@ -812,7 +799,7 @@ export class CostingService {
 
             for (const ingredient of component.ingredients) {
                 const preDough = ingredient.linkedPreDough?.versions?.[0];
-                const extra = ingredient.linkedExtra?.versions?.[0]; // [G-Code-Note] [核心重构] 检查 Extra
+                const extra = ingredient.linkedExtra?.versions?.[0];
 
                 let weight: Prisma.Decimal;
                 let cost = new Prisma.Decimal(0);
@@ -820,13 +807,15 @@ export class CostingService {
                 let effectiveRatio = new Prisma.Decimal(0);
 
                 if (preDough && ingredient.flourRatio) {
-                    // [G-Code-Note] 场景1: 引用 PRE_DOUGH (面种)
+                    // 场景1: 引用 PRE_DOUGH (面种)
                     const preDoughRecipe = preDough.components[0];
                     const preDoughTotalRatio = preDoughRecipe.ingredients.reduce(
                         (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
                         new Prisma.Decimal(0),
                     );
+                    // 用量计算：使用 FWB 和 flourRatio 计算面种所需面粉量
                     const flourForPreDough = flourWeightReference.mul(new Prisma.Decimal(ingredient.flourRatio));
+                    // 再根据面种内部总比例，计算出面种总重
                     weight = flourForPreDough.mul(preDoughTotalRatio);
 
                     let newConversionFactor: Prisma.Decimal;
@@ -846,14 +835,15 @@ export class CostingService {
                         newConversionFactor,
                         false,
                         flourWeightReference,
-                        // [核心新增] 传递预制面团的分类和类型
+                        // 传递预制面团的分类和类型
                         ingredient.linkedPreDough!.category,
                         ingredient.linkedPreDough!.type,
                     );
                     preDoughGroup.name = `${ingredient.linkedPreDough?.name}`;
                     componentGroups.push(preDoughGroup);
                 } else if (extra && ingredient.ratio) {
-                    // [G-Code-Note] [核心重构] 场景2: 引用 EXTRA (馅料)
+                    // 场景2: 引用 EXTRA (馅料)
+                    // 用量计算： BREAD/PRE_DOUGH 按 FWB，其他按 weightPerRatioPoint
                     weight = isFlourBased
                         ? currentFlourWeight.mul(new Prisma.Decimal(ingredient.ratio)) // BREAD/PRE_DOUGH 引用 EXTRA
                         : weightPerRatioPoint.mul(new Prisma.Decimal(ingredient.ratio)); // EXTRA/OTHER 引用 EXTRA
@@ -872,11 +862,12 @@ export class CostingService {
                         cost: cost.toNumber(),
                         extraInfo: ingredientNotes.get(ingredient.linkedExtra!.name) || undefined,
                         isFlour: false,
-                        isRecipe: true, // [G-Code-Note] 修复问题3
+                        isRecipe: true,
                     });
                     group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
                 } else if (ingredient.ingredient && ingredient.ratio) {
-                    // [G-Code-Note] 场景3: 标准原料
+                    // 场景3: 标准原料
+                    // 用量计算： BREAD/PRE_DOUGH 按 FWB，其他按 weightPerRatioPoint
                     weight = isFlourBased
                         ? currentFlourWeight.mul(new Prisma.Decimal(ingredient.ratio)) // BREAD/PRE_DOUGH
                         : weightPerRatioPoint.mul(new Prisma.Decimal(ingredient.ratio)); // EXTRA/OTHER
@@ -886,7 +877,6 @@ export class CostingService {
                     effectiveRatio = new Prisma.Decimal(ingredient.ratio ?? 0).mul(parentConversionFactor);
 
                     const extraInfoParts: string[] = [];
-                    // [G-Code-Note] [核心修复] 修复 TS2551 相关的 no-unsafe-call  和 no-unsafe-member-access
                     const procedureNote = ingredientNotes.get(ingredient.ingredient.name);
                     if (procedureNote) {
                         extraInfoParts.push(procedureNote);
@@ -899,27 +889,24 @@ export class CostingService {
                         pricePerKg: pricePerKg,
                         cost: cost.toNumber(),
                         extraInfo: extraInfoParts.length > 0 ? extraInfoParts.join('\n') : undefined,
-                        isFlour: ingredient.ingredient.isFlour, // [核心新增]
-                        isRecipe: false, // [G-Code-Note] 修复问题3
+                        isFlour: ingredient.ingredient.isFlour,
+                        isRecipe: false,
                     });
                     group.totalCost = new Prisma.Decimal(group.totalCost).add(cost).toNumber();
                 }
             }
 
-            // [核心新增] 在返回组之前对其原料进行排序
+            // 在返回组之前对其原料进行排序
             group.ingredients = this._sortCalculatedIngredients(group.ingredients, category, type);
 
-            // [核心修正] 将这个组件的总成本累加到产品总成本
+            // 将这个组件的总成本累加到产品总成本
             totalCost = totalCost.add(group.totalCost);
             return group;
         };
 
         const baseComponent = product.recipeVersion.components[0];
-        // [G-Code-Note] [核心修复] 移除未使用的变量 'calculateTotalRatioForMain'
 
-        // [G-Code-Note] [核心修正] 面粉基准计算逻辑
-        // [G-Code-Note] 此函数现在计算并返回“总换算比例” (例如 2.083)
-        // [G-Code-Note] 替换原 L878-L904 的 calculateFlourWeightReference
+        // 此函数现在计算并返回“总换算比例” (例如 2.083)
         const calculateTotalConvertedRatio = (component: FullRecipeVersion['components'][0]): Prisma.Decimal => {
             // 1. 计算总的换算比例
             const totalConvertedRatio = component.ingredients.reduce((sum, i) => {
@@ -953,17 +940,16 @@ export class CostingService {
         };
 
         let flourWeightReference = new Prisma.Decimal(0);
-        const adjustedBaseComponentWeight = new Prisma.Decimal(product.baseDoughWeight); // (例如 500g)
+        const adjustedBaseComponentWeight = new Prisma.Decimal(product.baseDoughWeight);
 
         if (recipeCategory === 'BREAD') {
-            // [G-Code-Note] [核心修正] 调用新的计算逻辑
-            const totalConvertedRatio = calculateTotalConvertedRatio(baseComponent); // (获取 2.083)
+            // 调用新的计算逻辑
+            const totalConvertedRatio = calculateTotalConvertedRatio(baseComponent);
 
-            // [G-Code-Note] [核心修正] FWB = 净重 / 总换算比例
+            // FWB = 净重 / 总换算比例
             if (totalConvertedRatio.gt(0)) {
-                flourWeightReference = adjustedBaseComponentWeight.div(totalConvertedRatio); // (500 / 2.083 = 240.0384)
+                flourWeightReference = adjustedBaseComponentWeight.div(totalConvertedRatio);
             }
-            // [G-Code-Note] 旧的 L878-L904 逻辑已被新函数替换
         }
 
         const baseComponentGroup = processComponent(
@@ -971,9 +957,9 @@ export class CostingService {
             adjustedBaseComponentWeight,
             new Prisma.Decimal(1),
             true,
-            flourWeightReference, // [G-Code-Note] 传入正确的 FWB (240.0384)
-            recipeCategory, // [核心新增] 传入主配方的分类
-            recipeType, // [核心新增] 传入主配方的类型
+            flourWeightReference,
+            recipeCategory, // 传入主配方的分类
+            recipeType, // 传入主配方的类型
         );
 
         if (baseComponentGroup.ingredients.length > 0) {
@@ -989,16 +975,17 @@ export class CostingService {
             return map[type] || '附加原料';
         };
 
-        // [核心修正] 此循环现在同时负责计算附加原料的成本，并累加到 totalCost
+        // 此循环现在同时负责计算附加原料的成本，并累加到 totalCost
         const extraIngredients = (product.ingredients || [])
             .map((ing) => {
                 const name = ing.ingredient?.name || ing.linkedExtra?.name || '未知';
                 let finalWeightInGrams = new Prisma.Decimal(0);
                 let cost = new Prisma.Decimal(0);
                 let pricePerKg = 0; // 仅当是基础原料时有效
-                let isRecipe = false; // [G-Code-Note] 修复问题3
+                let isRecipe = false;
 
                 if (ing.type === 'MIX_IN' && ing.ratio) {
+                    // 用量计算：使用正确的 FWB
                     finalWeightInGrams = flourWeightReference.mul(new Prisma.Decimal(ing.ratio));
                 } else if (ing.weightInGrams) {
                     finalWeightInGrams = new Prisma.Decimal(ing.weightInGrams);
@@ -1008,13 +995,13 @@ export class CostingService {
                     // 是基础原料
                     pricePerKg = getPricePerKg(ing.ingredientId);
                     cost = new Prisma.Decimal(pricePerKg).div(1000).mul(finalWeightInGrams);
-                    isRecipe = false; // [G-Code-Note] 修复问题3
+                    isRecipe = false;
                 } else if (ing.linkedExtraId) {
                     // 是配方 (linkedExtra)
-                    isRecipe = true; // [G-Code-Note] 修复问题3
+                    isRecipe = true;
                     const extraComponent = ing.linkedExtra?.versions?.[0]?.components?.[0];
                     if (extraComponent) {
-                        // 调用我们新增的辅助函数来计算这个配方的成本
+                        // 调用辅助函数来计算这个配方的成本
                         cost = getExtraRecipeCost(
                             extraComponent as FullRecipeVersion['components'][0],
                             finalWeightInGrams,
@@ -1022,22 +1009,21 @@ export class CostingService {
                     }
                 }
 
-                // [核心修正] 将这个附加原料的成本累加到产品总成本
+                // 将这个附加原料的成本累加到产品总成本
                 totalCost = totalCost.add(cost);
 
                 return {
                     id: ing.id,
                     name: name,
                     type: getProductIngredientTypeName(ing.type),
-                    cost: cost.toNumber(), // [核心修复] 移除 .toDP()
+                    cost: cost.toNumber(),
                     weightInGrams: finalWeightInGrams.toNumber(),
-                    // [G-Code-Note] [核心修复] 同 L948, ing.ratio 来自 JSON.parse，必须重新包装
                     ratio: ing.ratio ? new Prisma.Decimal(ing.ratio).toNumber() : undefined,
                     extraInfo: undefined,
-                    isRecipe: isRecipe, // [G-Code-Note] 修复问题3
+                    isRecipe: isRecipe,
                 };
             })
-            // [核心新增] 按用量（克重）倒序排序附加原料
+            // 按用量（克重）倒序排序附加原料
             .sort((a, b) => b.weightInGrams - a.weightInGrams);
 
         const summaryRowName = product.recipeVersion.family.category === RecipeCategory.BREAD ? '面团' : '主料';
@@ -1047,10 +1033,8 @@ export class CostingService {
                 name: summaryRowName,
                 type: '基础原料',
                 cost: componentGroups.reduce((sum, g) => sum + g.totalCost, 0),
-                // [G-Code-Note] [核心修复] 由于 product 来自 JSON.parse, baseDoughWeight 不再是 Decimal 对象
-                // 必须像 L907 和 L916 一样重新包装
                 weightInGrams: new Prisma.Decimal(product.baseDoughWeight).toNumber(),
-                isRecipe: false, // [G-Code-Note] 修复问题3
+                isRecipe: false,
             },
             ...extraIngredients,
         ];
@@ -1067,12 +1051,10 @@ export class CostingService {
             {} as Record<string, CalculatedExtraIngredientInfo[]>,
         );
 
-        // [核心修正] 返回正确的总成本
+        // 返回正确的总成本
         return {
-            totalCost: totalCost.toNumber(), // [核心修复] 移除 .toDP()
+            totalCost: totalCost.toNumber(),
             componentGroups: componentGroups,
-            // [G-Code-Note] [需求修改] 移除 extraIngredients 字段
-            // extraIngredients: allExtraIngredients,
             groupedExtraIngredients,
             productProcedure: product.procedure,
         };
@@ -1101,7 +1083,7 @@ export class CostingService {
         return {
             productId: product.id,
             productName: product.name,
-            totalCost: totalCost.toNumber(), // [核心修复] 移除 .toDP()
+            totalCost: totalCost.toNumber(),
         };
     }
 
@@ -1129,7 +1111,7 @@ export class CostingService {
                 const cost = pricePerGram.mul(weight);
                 costBreakdown.push({
                     name: ingredient.name,
-                    value: cost.toNumber(), // [核心修复] 移除 .toDP()
+                    value: cost.toNumber(),
                 });
             }
         }
@@ -1148,8 +1130,7 @@ export class CostingService {
         return sortedBreakdown;
     }
 
-    // [G-Code-Note] [核心重构] 废弃原有的 "庞大 include" (L1101-L1212)
-    // [G-Code-Note] 采用 "批量查询 + 内存组装" 策略，与 production-tasks.service 一致
+    // 采用 "批量查询 + 内存组装" 策略
     private async getFullProduct(tenantId: string, productId: string): Promise<FullProduct | null> {
         // 1. Query 1 (L1)：获取“浅层”的产品信息
         // 这是一个“浅层”查询，只为了拿到 L1/L2 ID 和组装所需的基础字段
@@ -1188,7 +1169,6 @@ export class CostingService {
         });
 
         if (!product) {
-            // [G-Code-Note] 增加一个友好的错误提示
             const exists = await this.prisma.product.findUnique({ where: { id: productId } });
             if (!exists) {
                 throw new NotFoundException(`产品 (ID: ${productId}) 不存在。`);
@@ -1289,11 +1269,9 @@ export class CostingService {
         const topLevelVersionId = assembledProduct.recipeVersionId;
         const stitchedL1Version = stitchVersionTree(topLevelVersionId);
         if (stitchedL1Version) {
-            // [G-Code-Note] 组装 recipeVersion 对象，使其匹配 FullProduct 类型
+            // 组装 recipeVersion 对象，使其匹配 FullProduct 类型
             assembledProduct.recipeVersion = {
                 ...stitchedL1Version,
-                // [G-Code-Note] [核心修复] 使用 "assembledProduct.recipeVersion.family" (L1222 抓取的完整 Family)
-                // 替换 "stitchedL1Version.family" (L222 抓取的部分 family)
                 family: assembledProduct.recipeVersion.family,
             } as FullRecipeVersion & { family: RecipeFamily };
         } else {
@@ -1313,7 +1291,7 @@ export class CostingService {
                         ...pIng.linkedExtra,
                         ...stitchedL2Version.family,
                         versions: [stitchedL2Version],
-                    } as unknown as FullProductIngredient['linkedExtra']; // [G-Code-Note] [核心修复] 添加 'unknown'
+                    } as unknown as FullProductIngredient['linkedExtra'];
                 }
             }
         }
@@ -1323,20 +1301,19 @@ export class CostingService {
     }
 
     /**
-     * [核心新增] 辅助函数：从 FullProduct 对象中构建一个包含所有基础原料的 Map
-     * [核心修改] 修改参数为 any，以便接收快照对象
+     * 辅助函数：从 FullProduct 对象中构建一个包含所有基础原料的 Map
      */
     private _buildIngredientMapFromProduct(product: any): Map<string, Ingredient> {
         const fullProduct = product as FullProduct; // 类型断言
         const map = new Map<string, Ingredient>();
 
         const processComponent = (component: FullRecipeVersion['components'][0]) => {
-            if (!component) return; // [核心修复] 增加安全检查
+            if (!component) return; // 增加安全检查
             for (const ing of component.ingredients) {
                 if (ing.ingredient) {
                     map.set(ing.ingredient.id, ing.ingredient);
                 }
-                // [G-Code-Note] [核心重构] 递归检查
+                // 递归检查
                 if (ing.linkedPreDough) {
                     ing.linkedPreDough.versions.forEach((v) =>
                         v.components.forEach((c) => processComponent(c as FullRecipeVersion['components'][0])),
@@ -1367,17 +1344,17 @@ export class CostingService {
     }
 
     /**
-     * [核心函数] 计算生产一个产品所需的**所有基础原料的总投入量** (含损耗)。
-     * [核心重构] 此函数现在是同步的，并且完全依赖传入的 product 对象。
+     * 计算生产一个产品所需的**所有基础原料的总投入量** (含损耗)。
+     * 此函数现在是同步的，并且完全依赖传入的 product 对象。
      * @param product 完整的产品对象 (来自快照或实时查询)
      * @returns Map<ingredientId, totalInputWeight>
      */
     private _getFlattenedIngredients(product: FullProduct): Map<string, Prisma.Decimal> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>();
-        // [核心新增] 从 product 对象中构建原料 map
+        // 从 product 对象中构建原料 map
         const ingredientMap = this._buildIngredientMapFromProduct(product);
 
-        // [核心重构] 这是一个递归函数，用于计算一个组件（面团、面种、馅料等）需要的所有基础原料的投入量
+        // 这是一个递归函数，用于计算一个组件（面团、面种、馅料等）需要的所有基础原料的投入量
         const processComponentRecursively = (
             component: FullRecipeVersion['components'][0],
             requiredOutputWeight: Prisma.Decimal, // 目标产出净重
@@ -1403,7 +1380,7 @@ export class CostingService {
                 // 计算当前“原料”按配比需要投入的克重
                 const ingredientInputWeight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
 
-                // [G-Code-Note] [核心重构] 如果这个“原料”本身是另一个配方（如预制面种或馅料），则递归调用本函数
+                // 如果这个“原料”本身是另一个配方（如预制面种或馅料），则递归调用本函数
                 const linkedRecipe = ing.linkedPreDough || ing.linkedExtra;
                 if (linkedRecipe) {
                     const subComponent = linkedRecipe.versions?.[0]?.components?.[0];
@@ -1424,16 +1401,15 @@ export class CostingService {
         // 从产品的主面团开始，进行第一次递归计算
         const mainComponent = product.recipeVersion.components[0];
         if (mainComponent) {
-            // [核心修改] 从主组件(mainComponent)获取单次分割损耗
+            // 从主组件(mainComponent)获取单次分割损耗
             const divisionLoss = new Prisma.Decimal(mainComponent.divisionLoss || 0);
 
-            // [核心修改] Product.baseDoughWeight 是最终产品需要的面团“净重”，
+            // Product.baseDoughWeight 是最终产品需要的面团“净重”，
             // 在计算总投料时，需要先加上分割损耗，再进行后续计算。
             const requiredBaseDoughOutput = new Prisma.Decimal(product.baseDoughWeight).add(divisionLoss);
             processComponentRecursively(mainComponent, requiredBaseDoughOutput);
         }
 
-        // [核心修正] 修复MIX_IN原料的损耗计算Bug
         // 步骤 1: 计算理论面粉重量 (不含损耗), 作为MIX_IN比例的基准
         const theoreticalIngredients = new Map<string, Prisma.Decimal>();
         this._flattenComponentTheoretical(
@@ -1461,9 +1437,8 @@ export class CostingService {
             : new Prisma.Decimal(product.baseDoughWeight).add(divisionLoss).div(product.baseDoughWeight);
 
         // 步骤 3: 遍历附加原料, 应用正确的损耗逻辑
-        // [原 607-628 行的循环被替换]
         for (const pIng of product.ingredients || []) {
-            let requiredInputWeight = new Prisma.Decimal(0); // 这是最终需要的 "投入量" (含损耗)
+            let requiredInputWeight = new Prisma.Decimal(0);
 
             if (pIng.weightInGrams) {
                 // 类型为 FILLING 或 TOPPING, 使用固定克重
@@ -1504,24 +1479,22 @@ export class CostingService {
     }
 
     /**
-     * [新增函数] 计算生产一个产品所需的**所有基础原料的理论净重** (不含损耗)。
-     * [核心重构] 此函数现在是同步的，并且完全依赖传入的 product 对象。
+     * 计算生产一个产品所需的**所有基础原料的理论净重** (不含损耗)。
+     * 此函数现在是同步的，并且完全依赖传入的 product 对象。
      * @param product 完整的产品对象 (来自快照或实时查询)
      * @returns Map<ingredientId, theoreticalWeight>
      */
     private _getFlattenedIngredientsTheoretical(product: FullProduct): Map<string, Prisma.Decimal> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>();
-        // [核心新增] 从 product 对象中构建原料 map
+        // 从 product 对象中构建原料 map
         const ingredientMap = this._buildIngredientMapFromProduct(product);
 
-        // [核心修正] 将递归逻辑提取到一个可复用的私有函数，并确保它能处理map的传递
         this._flattenComponentTheoretical(
             product.recipeVersion.components[0],
             new Prisma.Decimal(product.baseDoughWeight),
             flattenedIngredients,
         );
 
-        // [核心重构] 不再查询数据库，而是使用 ingredientMap
         let totalFlourInputWeight = new Prisma.Decimal(0);
         for (const [id, weight] of flattenedIngredients.entries()) {
             const ingredientInfo = ingredientMap.get(id);
@@ -1543,7 +1516,6 @@ export class CostingService {
             if (pIng.linkedExtra) {
                 const extraComponent = pIng.linkedExtra.versions?.[0]?.components?.[0];
                 if (extraComponent) {
-                    // [核心修正] 复用提取的私有函数
                     this._flattenComponentTheoretical(
                         extraComponent as FullRecipeVersion['components'][0],
                         requiredOutputWeight,
@@ -1560,34 +1532,39 @@ export class CostingService {
     }
 
     /**
-     * [核心修正] 提取 _getFlattenedIngredientsTheoretical 中的递归逻辑，使其可复用
+     * 提取 _getFlattenedIngredientsTheoretical 中的递归逻辑，使其可复用
      */
     private _flattenComponentTheoretical(
         component: FullRecipeVersion['components'][0],
         requiredOutputWeight: Prisma.Decimal,
         flattenedMap: Map<string, Prisma.Decimal>,
     ) {
-        // [核心区别] 理论计算，不考虑损耗率，直接使用 requiredOutputWeight 作为 totalInputWeight
+        // 理论计算，不考虑损耗率，直接使用 requiredOutputWeight 作为 totalInputWeight
         const totalInputWeight = requiredOutputWeight;
 
-        // [核心修复] 增加安全检查
+        // 增加安全检查
         if (!component) return;
+        // 此处 totalRatio 的计算依赖于 recipes.service 中
+        // 存入数据库的 ratio 字段是正确的
         const totalRatio = component.ingredients.reduce(
             (sum, i) => sum.add(new Prisma.Decimal(i.ratio ?? 0)),
             new Prisma.Decimal(0),
         );
         if (totalRatio.isZero()) return;
 
+        // weightPerRatioPoint 即为面粉基准重量 (FWB)
         const weightPerRatioPoint = totalInputWeight.div(totalRatio);
 
         for (const ing of component.ingredients) {
+            // ingredientInputWeight 为 FWB 乘以原料比例
             const ingredientInputWeight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ?? 0));
 
-            // [G-Code-Note] [核心重构] 检查这个“原料”是不是又是一个配方
+            // 检查这个“原料”是不是又是一个配方
             const linkedRecipe = ing.linkedPreDough || ing.linkedExtra;
             if (linkedRecipe) {
                 const subComponent = linkedRecipe.versions?.[0]?.components?.[0];
                 if (subComponent) {
+                    // 递归进入面种，使用 (FWB * flourRatio * internalRatio) 作为目标重量
                     this._flattenComponentTheoretical(
                         subComponent as FullRecipeVersion['components'][0],
                         ingredientInputWeight,
@@ -1595,6 +1572,7 @@ export class CostingService {
                     );
                 }
             } else if (ing.ingredientId) {
+                // 累加基础原料
                 const currentWeight = flattenedMap.get(ing.ingredientId) || new Prisma.Decimal(0);
                 flattenedMap.set(ing.ingredientId, currentWeight.add(ingredientInputWeight));
             }
@@ -1615,7 +1593,6 @@ export class CostingService {
             throw new NotFoundException('产品不存在');
         }
 
-        // [核心修改] 调用重构后的同步函数
         const flatIngredients = this._getFlattenedIngredients(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
@@ -1649,34 +1626,31 @@ export class CostingService {
     }
 
     /**
-     * [核心新增] 从“快照”计算生产指定数量产品所需的**总投入原料**清单 (含损耗)。
-     * [核心修正] 移除 'async' 关键字，使其变为同步方法
+     * 从“快照”计算生产指定数量产品所需的**总投入原料**清单 (含损耗)。
      */
     calculateProductConsumptionsFromSnapshot(
         snapshotProduct: any, // 接收来自快照的 product 对象
         quantity: number,
     ): ConsumptionDetail[] {
-        // [核心修正] 移除 Promise<>
-        const product = snapshotProduct as FullProduct; // 类型断言
+        const product = snapshotProduct as FullProduct;
 
-        // [核心修改] 调用重构后的同步函数
         const flatIngredients = this._getFlattenedIngredients(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
 
-        // [核心修改] 不再查询数据库，改为从快照中构建原料信息
+        // 不再查询数据库，改为从快照中构建原料信息
         const ingredientInfoMap = this._buildIngredientMapFromProduct(product);
 
         const result: ConsumptionDetail[] = [];
         for (const ingredientId of ingredientIds) {
             const totalConsumed = (flatIngredients.get(ingredientId) || new Prisma.Decimal(0)).mul(quantity);
             if (totalConsumed.gt(0)) {
-                // [核心修改] 从快照构建的 map 中获取信息
+                // 从快照构建的 map 中获取信息
                 const info = ingredientInfoMap.get(ingredientId);
                 result.push({
                     ingredientId: ingredientId,
-                    ingredientName: info?.name || '未知原料', // [核心修改]
-                    activeSkuId: info?.activeSkuId || null, // [核心修改]
+                    ingredientName: info?.name || '未知原料',
+                    activeSkuId: info?.activeSkuId || null,
                     totalConsumed: totalConsumed.toNumber(),
                 });
             }
@@ -1686,7 +1660,7 @@ export class CostingService {
     }
 
     /**
-     * [新增函数] 计算生产指定数量产品的**理论原料消耗**清单 (不含损耗)。
+     * 计算生产指定数量产品的**理论原料消耗**清单 (不含损耗)。
      * 用于【任务完成】时的库存核销。(实时查询)
      */
     async calculateTheoreticalProductConsumptions(
@@ -1699,7 +1673,6 @@ export class CostingService {
             throw new NotFoundException('产品不存在');
         }
 
-        // [核心修改] 调用重构后的同步函数
         const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
@@ -1733,34 +1706,31 @@ export class CostingService {
     }
 
     /**
-     * [核心新增] 从“快照”计算生产指定数量产品的**理论原料消耗**清单 (不含损耗)。
-     * [核心修正] 移除 'async' 关键字，使其变为同步方法
+     * 从“快照”计算生产指定数量产品的**理论原料消耗**清单 (不含损耗)。
      */
     calculateTheoreticalProductConsumptionsFromSnapshot(
         snapshotProduct: any, // 接收来自快照的 product 对象
         quantity: number,
     ): ConsumptionDetail[] {
-        // [核心修正] 移除 Promise<>
-        const product = snapshotProduct as FullProduct; // 类型断言
+        const product = snapshotProduct as FullProduct;
 
-        // [核心修改] 调用重构后的同步函数
         const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
 
-        // [核心修改] 不再查询数据库，改为从快照中构建原料信息
+        // 不再查询数据库，改为从快照中构建原料信息
         const ingredientInfoMap = this._buildIngredientMapFromProduct(product);
 
         const result: ConsumptionDetail[] = [];
         for (const ingredientId of ingredientIds) {
             const totalConsumed = (flatIngredients.get(ingredientId) || new Prisma.Decimal(0)).mul(quantity);
             if (totalConsumed.gt(0)) {
-                // [核心修改] 从快照构建的 map 中获取信息
+                // 从快照构建的 map 中获取信息
                 const info = ingredientInfoMap.get(ingredientId);
                 result.push({
                     ingredientId: ingredientId,
-                    ingredientName: info?.name || '未知原料', // [核心修改]
-                    activeSkuId: info?.activeSkuId || null, // [核心修改]
+                    ingredientName: info?.name || '未知原料',
+                    activeSkuId: info?.activeSkuId || null,
                     totalConsumed: totalConsumed.toNumber(),
                 });
             }
@@ -1769,11 +1739,10 @@ export class CostingService {
         return result;
     }
 
-    // [G-Code-Note] [核心重构] 复制自 production-tasks.service.ts (L386)
-    // 采用 "批量查询" 策略，替换 "庞大 include"
+    // 采用 "批量查询" 策略
     private async _fetchRecursiveRecipeVersions(
         initialVersionIds: string[],
-        tx: Prisma.TransactionClient, // [G-Code-Note] 修正为接收 Prisma.TransactionClient 或 PrismaService
+        tx: Prisma.TransactionClient,
     ): Promise<Map<string, FetchedRecipeVersion>> {
         // 1. 初始化队列和“仓库”
         const versionsToFetch = new Set<string>(initialVersionIds);
@@ -1785,7 +1754,7 @@ export class CostingService {
             const batchIds = [...new Set(versionsInQueue.splice(0))];
 
             // 3. 批量查询
-            // [G-Code-Note] 修正：使用 tx (传入的 prisma 客户端)
+            // 使用 tx (传入的 prisma 客户端)
             const results = await tx.recipeVersion.findMany({
                 where: { id: { in: batchIds } },
                 include: recipeVersionRecursiveBatchInclude,
@@ -1907,7 +1876,7 @@ export class CostingService {
             }
         }
 
-        // [核心修正] 确保所有请求的ID都有一个值，防止后续计算出错
+        // 确保所有请求的ID都有一个值，防止后续计算出错
         for (const id of ingredientIds) {
             if (!priceMap.has(id)) {
                 priceMap.set(id, new Prisma.Decimal(0));
