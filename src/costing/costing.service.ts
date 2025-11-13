@@ -917,46 +917,53 @@ export class CostingService {
         const baseComponent = product.recipeVersion.components[0];
         // [G-Code-Note] [核心修复] 移除未使用的变量 'calculateTotalRatioForMain'
 
-        // [G-Code-Note] [核心修复] 面粉基准计算逻辑
-        const calculateFlourWeightReference = (component: FullRecipeVersion['components'][0]): Prisma.Decimal => {
-            // 1. 计算总的面粉比例 (来自面粉原料 + 来自面种的 flourRatio)
-            const totalFlourRatio = component.ingredients.reduce((sum, i) => {
+        // [G-Code-Note] [核心修正] 面粉基准计算逻辑
+        // [G-Code-Note] 此函数现在计算并返回“总换算比例” (例如 2.083)
+        // [G-Code-Note] 替换原 L878-L904 的 calculateFlourWeightReference
+        const calculateTotalConvertedRatio = (component: FullRecipeVersion['components'][0]): Prisma.Decimal => {
+            // 1. 计算总的换算比例
+            const totalConvertedRatio = component.ingredients.reduce((sum, i) => {
                 if (i.flourRatio && i.linkedPreDough) {
-                    return sum.add(new Prisma.Decimal(i.flourRatio));
+                    // 场景 1: 这是一个 PRE_DOUGH (面种)
+                    // 找到面种的配方
+                    const preDoughComponent = i.linkedPreDough.versions?.[0]?.components?.[0];
+                    if (!preDoughComponent) return sum; // 如果找不到配方，跳过
+
+                    // 计算面种的“内部总比例” (例如 1+2+0.2+0.02 = 3.22)
+                    const internalTotalRatio = preDoughComponent.ingredients.reduce(
+                        (preDoughSum, preDoughIng) => preDoughSum.add(new Prisma.Decimal(preDoughIng.ratio ?? 0)),
+                        new Prisma.Decimal(0),
+                    );
+
+                    // 换算比例 = 面粉比例 * 内部总比例 (例如 0.08 * 3.22 = 0.2576)
+                    const convertedRatio = new Prisma.Decimal(i.flourRatio).mul(internalTotalRatio);
+                    return sum.add(convertedRatio);
                 }
-                if (i.ingredient?.isFlour) {
-                    return sum.add(new Prisma.Decimal(i.ratio ?? 0));
+
+                if (i.ratio && (i.ingredient || i.linkedExtra)) {
+                    // 场景 2: 这是一个标准原料 (高筋粉, 水) 或 EXTRA (馅料)
+                    // 直接使用其 ratio (例如 0.92, 0.4, ...)
+                    return sum.add(new Prisma.Decimal(i.ratio));
                 }
+
                 return sum;
             }, new Prisma.Decimal(0));
 
-            // 2. 如果没有面粉，基准为 0
-            if (totalFlourRatio.isZero()) {
-                return new Prisma.Decimal(0);
-            }
-
-            // 3. 计算所有 *非面粉* 和 *非面种* 原料的比例
-            const otherRatio = component.ingredients.reduce((sum, i) => {
-                if ((!i.ingredient?.isFlour && i.ratio) || i.linkedExtra) {
-                    return sum.add(new Prisma.Decimal(i.ratio ?? 0));
-                }
-                return sum;
-            }, new Prisma.Decimal(0));
-
-            // 4. (总重 - 分割损耗) / (面粉总比 + 其他总比) = 面粉基准
-            const netWeight = new Prisma.Decimal(product.baseDoughWeight);
-            const totalRatioSum = totalFlourRatio.add(otherRatio);
-            if (totalRatioSum.isZero()) {
-                return new Prisma.Decimal(0);
-            }
-            return netWeight.div(totalRatioSum);
+            return totalConvertedRatio; // (例如 2.083)
         };
 
         let flourWeightReference = new Prisma.Decimal(0);
-        const adjustedBaseComponentWeight = new Prisma.Decimal(product.baseDoughWeight);
+        const adjustedBaseComponentWeight = new Prisma.Decimal(product.baseDoughWeight); // (例如 500g)
 
         if (recipeCategory === 'BREAD') {
-            flourWeightReference = calculateFlourWeightReference(baseComponent);
+            // [G-Code-Note] [核心修正] 调用新的计算逻辑
+            const totalConvertedRatio = calculateTotalConvertedRatio(baseComponent); // (获取 2.083)
+
+            // [G-Code-Note] [核心修正] FWB = 净重 / 总换算比例
+            if (totalConvertedRatio.gt(0)) {
+                flourWeightReference = adjustedBaseComponentWeight.div(totalConvertedRatio); // (500 / 2.083 = 240.0384)
+            }
+            // [G-Code-Note] 旧的 L878-L904 逻辑已被新函数替换
         }
 
         const baseComponentGroup = processComponent(
@@ -964,7 +971,7 @@ export class CostingService {
             adjustedBaseComponentWeight,
             new Prisma.Decimal(1),
             true,
-            flourWeightReference,
+            flourWeightReference, // [G-Code-Note] 传入正确的 FWB (240.0384)
             recipeCategory, // [核心新增] 传入主配方的分类
             recipeType, // [核心新增] 传入主配方的类型
         );
