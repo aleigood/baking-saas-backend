@@ -990,7 +990,7 @@
                                 <input
                                     class="input-field ratio-input"
                                     type="number"
-                                    v-model.number="ing.ratio"
+                                    v-model.lazy.number="ing.ratio"
                                     placeholder="%"
                                 />
                                 <button class="btn btn-remove" @click="removeMainDoughIngredient(ing.id)">
@@ -1095,7 +1095,7 @@
                                             <input
                                                 class="input-field ratio-input"
                                                 type="number"
-                                                v-model.number="ing.ratio"
+                                                v-model.lazy.number="ing.ratio"
                                                 placeholder="%"
                                             />
                                             <button
@@ -1133,7 +1133,7 @@
                                             <input
                                                 class="input-field ratio-input"
                                                 type="number"
-                                                v-model.number="ing.weightInGrams"
+                                                v-model.lazy.number="ing.weightInGrams"
                                                 placeholder="g/个"
                                             />
                                             <button
@@ -1171,7 +1171,7 @@
                                             <input
                                                 class="input-field ratio-input"
                                                 type="number"
-                                                v-model.number="ing.weightInGrams"
+                                                v-model.lazy.number="ing.weightInGrams"
                                                 placeholder="g/个"
                                             />
                                             <button
@@ -1263,7 +1263,7 @@
                                 <input
                                     class="input-field ratio-input"
                                     type="number"
-                                    v-model.number="ing.ratio"
+                                    v-model.lazy.number="ing.ratio"
                                     placeholder="%"
                                 />
                                 <button class="btn btn-remove" @click="removeOtherIngredient(ing.id)">
