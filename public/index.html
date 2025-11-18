@@ -15,6 +15,8 @@
                 --danger-color: #e74c3c;
                 --border-color: #f3e9e3;
                 --sidebar-bg: #f7f4ef;
+                --tag-flour-bg: #e6a23c;
+                --tag-self-bg: #67c23a;
             }
 
             body {
@@ -135,9 +137,7 @@
                 color: var(--text-secondary);
                 border-radius: 10px;
                 cursor: pointer;
-                transition:
-                    background-color 0.2s,
-                    color 0.2s;
+                transition: background-color 0.2s, color 0.2s;
                 position: relative;
             }
             .sidebar-tab.active {
@@ -173,28 +173,25 @@
                 border-radius: 10px;
                 margin-bottom: 8px;
                 cursor: pointer;
-                transition:
-                    background-color 0.2s,
-                    box-shadow 0.2s;
+                transition: background-color 0.2s, box-shadow 0.2s;
             }
-
             .recipe-list-item:hover {
                 background-color: var(--border-color);
             }
-
             .recipe-list-item.active {
-                background-color: var(--primary-color);
+                /* [G-Code-Note] 修改: 使用较浅的颜色替代原先的 --primary-color (#8c5a3b) */
+                background-color: var(--text-secondary); /* #a98467 */
                 color: white;
                 box-shadow: 0 4px 12px rgba(140, 90, 59, 0.2);
             }
-
             .recipe-list-item.active .recipe-info span {
                 color: white !important;
             }
-            /* 修正: 激活状态下品类标签的样式 */
+            /* 品类标签 (在配方名旁边) */
             .recipe-list-item.active .recipe-info .recipe-category-tag {
                 background-color: white;
-                color: var(--primary-color) !important; /* 修正: 增加 !important 确保覆盖 */
+                /* [G-Code-Note] 修改: 文字颜色跟随选中背景色 */
+                color: var(--text-secondary) !important;
             }
 
             .recipe-info {
@@ -204,29 +201,25 @@
                 text-overflow: ellipsis;
                 white-space: nowrap;
             }
-
-            /* 新增: 用于右侧对齐的容器 */
             .recipe-item-controls {
                 display: flex;
                 align-items: center;
                 gap: 8px;
                 flex-shrink: 0;
             }
-
             .recipe-info strong {
                 font-size: 15px;
                 font-weight: 600;
             }
             
-            /* 新增: 品类标签样式 */
             .recipe-category-tag {
                 font-size: 10px;
                 font-weight: 500;
-                background-color: var(--border-color); /* 修改背景色 */
-                color: var(--text-secondary); /* 修改文字颜色 */
+                background-color: var(--border-color);
+                color: var(--text-secondary);
                 padding: 2px 6px;
                 border-radius: 5px;
-                margin-left: 6px; /* 加回 margin */
+                margin-left: 6px;
                 vertical-align: middle;
             }
 
@@ -256,10 +249,7 @@
                 background: var(--danger-color);
                 color: white;
             }
-
-            .btn-delete-recipe svg,
-            .btn-delete-dough svg,
-            .btn-remove svg {
+            .btn-delete-recipe svg, .btn-delete-dough svg, .btn-remove svg {
                 width: 100%;
                 height: 100%;
             }
@@ -299,7 +289,6 @@
             .form-item {
                 margin-bottom: 20px;
             }
-            /* 栅格布局 (新增) */
             .form-grid {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
@@ -311,8 +300,7 @@
                 font-size: 14px;
                 color: #606266;
             }
-            .input-field,
-            .picker {
+            .input-field, .picker {
                 width: 100%;
                 height: 44px;
                 line-height: 44px;
@@ -323,21 +311,18 @@
                 background-color: #f8f9fa;
                 box-sizing: border-box;
                 color: var(--text-primary);
-                transition:
-                    border-color 0.2s,
-                    box-shadow 0.2s;
+                transition: border-color 0.2s, box-shadow 0.2s;
             }
-            /* 修正对齐: 修改 ratio-input 样式 */
+            
             .input-field.ratio-input {
                 width: 100px;
                 text-align: center;
                 flex-shrink: 0;
-                flex-grow: 0; /* 修正对齐: 确保不拉伸 */
-                flex-basis: 100px; /* 修正对齐: 确保固定宽度 */
+                flex-grow: 0;
+                flex-basis: 100px;
             }
 
-            .input-field:focus,
-            .picker:focus {
+            .input-field:focus, .picker:focus {
                 outline: none;
                 border-color: var(--primary-color);
                 box-shadow: 0 0 0 3px rgba(140, 90, 59, 0.15);
@@ -355,32 +340,18 @@
                 font-weight: 500;
                 text-align: center;
                 cursor: pointer;
-                transition:
-                    transform 0.2s,
-                    box-shadow 0.28s;
+                transition: transform 0.2s, box-shadow 0.28s;
                 border: none;
             }
-            .btn:active {
-                transform: scale(0.97);
-            }
-            .btn:disabled {
-                opacity: 0.6;
-                cursor: not-allowed;
-                box-shadow: none;
-                transform: none;
-            }
+            .btn:active { transform: scale(0.97); }
+            .btn:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; transform: none; }
             .btn-primary {
                 background-image: linear-gradient(135deg, var(--accent-color) 0%, var(--primary-color) 100%);
                 color: white;
                 box-shadow: 0 4px 15px rgba(140, 90, 59, 0.2);
             }
-            .btn-secondary {
-                background-color: #f3e9e3;
-                color: var(--text-secondary);
-            }
-            .btn-full-width {
-                width: 100%;
-            }
+            .btn-secondary { background-color: #f3e9e3; color: var(--text-secondary); }
+            .btn-full-width { width: 100%; }
             .btn-dashed {
                 border: 1px dashed var(--primary-color);
                 color: var(--primary-color);
@@ -401,76 +372,65 @@
                 justify-content: center;
                 flex-shrink: 0;
             }
-            /* 修正对齐: 移除 padding, 使用 gap */
+
+            /* 列表头样式 (移除了面粉列) */
             .ingredient-header {
                 display: flex;
                 align-items: center;
                 color: var(--text-secondary);
                 font-size: 13px;
-                /* padding: 0 5px; */ /* 移除 */
                 margin-top: 15px;
                 margin-bottom: 8px;
-                gap: 10px; /* 新增 */
+                gap: 10px;
             }
-            .col-name {
-                flex: 1;
-            }
-            /* 修正对齐: 新增 "面粉?" 列的样式 */
-            .col-flour {
-                width: 50px;
-                text-align: center;
-                flex-shrink: 0;
-            }
-            .col-ratio {
-                width: 100px;
-                text-align: center;
-                /* margin-left: 10px; */ /* 移除 */
-            }
-            .col-action {
-                width: 40px;
-                text-align: right;
-            }
+            .col-name { flex: 1; }
+            .col-ratio { width: 100px; text-align: center; }
+            .col-action { width: 40px; text-align: right; }
+            
             .ingredient-row {
                 display: flex;
                 align-items: center;
                 gap: 10px;
                 margin-bottom: 10px;
             }
-            /* 修正对齐: 确保 name input (非 ratio-input) 占用 flex: 1 */
-            .ingredient-row > .input-field:not(.ratio-input) {
+            .ingredient-row > .input-with-tag-wrapper {
                 flex: 1;
             }
-            /* 修正对齐: 新增 "面粉?" 复选框 wrapper 的样式 */
-            .flour-checkbox-wrapper {
-                width: 50px;
-                text-align: center;
-                flex-shrink: 0;
+
+            /* 智能标签容器 */
+            .input-with-tag-wrapper {
+                position: relative;
+                display: flex;
+                align-items: center;
             }
-            .flour-checkbox {
-                width: 18px;
-                height: 18px;
-                cursor: pointer;
-                accent-color: var(--primary-color);
+            .input-with-tag-wrapper .input-field {
+                padding-right: 10px; /* 基础 padding */
+                flex: 1;
+                width: 100%;
             }
-            .self-made-tag {
+            /* 标签容器 (放输入框内部右侧) */
+            .tags-container {
                 position: absolute;
-                top: 50%;
                 right: 12px;
+                top: 50%;
                 transform: translateY(-50%);
+                display: flex;
+                gap: 4px;
+                pointer-events: none; /* 避免挡住输入 */
+            }
+            .ing-tag {
                 font-size: 10px;
-                background-color: var(--accent-color);
                 color: white;
                 padding: 2px 6px;
                 border-radius: 4px;
                 font-weight: 500;
             }
-            .input-with-tag-wrapper {
-                position: relative;
-                flex-grow: 1; /* 修正对齐: 确保 wrapper 占用 flex: 1 */
-            }
-            .input-with-tag-wrapper .input-field {
-                padding-right: 50px;
-            }
+            .tag-flour { background-color: var(--tag-flour-bg); }
+            .tag-self { background-color: var(--tag-self-bg); }
+
+            /* 动态 padding，给标签留位置 */
+            .input-has-1-tag { padding-right: 50px !important; }
+            .input-has-2-tags { padding-right: 90px !important; }
 
             .procedure-item {
                 display: flex;
@@ -496,7 +456,7 @@
                 margin-bottom: 15px;
             }
 
-            /* 复用 .product-tabs-wrapper 样式用于版本管理 */
+            /* Tabs Styles */
             .tabs-wrapper {
                 position: relative;
                 display: flex;
@@ -511,17 +471,13 @@
                 overflow-x: auto;
                 scrollbar-width: none;
             }
-            .tabs::-webkit-scrollbar {
-                display: none;
-            }
+            .tabs::-webkit-scrollbar { display: none; }
             .tab-item {
                 padding: 10px 15px;
                 cursor: pointer;
                 color: var(--text-secondary);
                 border-bottom: 3px solid transparent;
-                transition:
-                    color 0.3s,
-                    border-color 0.3s;
+                transition: color 0.3s, border-color 0.3s;
                 display: flex;
                 align-items: center;
                 gap: 8px;
@@ -532,10 +488,7 @@
                 border-bottom-color: var(--primary-color);
                 font-weight: 600;
             }
-            .add-tab {
-                font-weight: bold;
-                color: var(--primary-color);
-            }
+            .add-tab { font-weight: bold; color: var(--primary-color); }
             .tab-delete-btn {
                 background-color: var(--border-color);
                 border-radius: 50%;
@@ -559,10 +512,7 @@
                 visibility: visible;
                 opacity: 1;
             }
-            .tab-delete-btn:hover {
-                background-color: var(--danger-color);
-                color: white;
-            }
+            .tab-delete-btn:hover { background-color: var(--danger-color); color: white; }
             .tab-scroll-btn {
                 position: absolute;
                 top: 50%;
@@ -581,15 +531,9 @@
                 justify-content: center;
                 box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
             }
-            .tab-scroll-btn.left {
-                left: -14px;
-            }
-            .tab-scroll-btn.right {
-                right: -14px;
-            }
-            .tab-scroll-btn:hover {
-                color: var(--primary-color);
-            }
+            .tab-scroll-btn.left { left: -14px; }
+            .tab-scroll-btn.right { right: -14px; }
+            .tab-scroll-btn:hover { color: var(--primary-color); }
 
             .main-content {
                 flex-grow: 1;
@@ -619,9 +563,7 @@
                 opacity: 0.8;
                 transition: opacity 0.2s;
             }
-            .btn-delete-dough:hover {
-                opacity: 1;
-            }
+            .btn-delete-dough:hover { opacity: 1; }
 
             .suggestion-box {
                 position: absolute;
@@ -646,17 +588,19 @@
                 justify-content: space-between;
                 align-items: center;
             }
-            .suggestion-item:hover {
-                background-color: var(--sidebar-bg);
-            }
+            .suggestion-item:hover { background-color: var(--sidebar-bg); }
             .suggestion-tag {
                 font-size: 10px;
-                background-color: var(--accent-color);
                 color: white;
                 padding: 2px 6px;
                 border-radius: 4px;
                 font-weight: 500;
                 margin-left: 8px;
+            }
+            /* 建议框里的特殊选项 */
+            .suggestion-action {
+                color: var(--primary-color);
+                font-weight: 600;
             }
         </style>
     </head>
@@ -895,7 +839,6 @@
 
                                 <div class="ingredient-header" style="opacity: 0.7; margin-top: 0">
                                     <span class="col-name">原料 (换算后，基于主面团总面粉)</span>
-                                    <span class="col-flour">面粉?</span>
                                     <span class="col-ratio">比例 %</span>
                                     <span class="col-action"></span>
                                 </div>
@@ -906,15 +849,11 @@
                                     class="ingredient-row"
                                     style="opacity: 0.7"
                                 >
-                                    <input class="input-field" :value="ing.name" readonly />
-                                    <div class="flour-checkbox-wrapper">
-                                        <input
-                                            type="checkbox"
-                                            class="flour-checkbox"
-                                            :checked="ing.isFlour"
-                                            disabled
-                                            style="cursor: default"
-                                        />
+                                    <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
+                                        <input class="input-field" :value="ing.name" readonly />
+                                        <div class="tags-container">
+                                            <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
+                                        </div>
                                     </div>
                                     <input
                                         class="input-field ratio-input"
@@ -967,25 +906,22 @@
                             </div>
                             <div class="ingredient-header">
                                 <span class="col-name">原料名称</span>
-                                <span v-if="showFlourCheckbox" class="col-flour">面粉?</span>
                                 <span class="col-ratio">比例 %</span>
                                 <span class="col-action"></span>
                             </div>
                             <div v-for="ing in sortedMainDoughIngredients" :key="ing.id" class="ingredient-row">
-                                <input
-                                    class="input-field"
-                                    v-model="ing.name"
-                                    placeholder="输入原料名称"
-                                    @focus="handleIngredientInput(ing, $event)"
-                                    @input="handleIngredientInput(ing, $event)"
-                                    @blur="handleIngredientBlur(ing)"
-                                />
-                                <div v-if="showFlourCheckbox" class="flour-checkbox-wrapper">
+                                <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
                                     <input
-                                        type="checkbox"
-                                        class="flour-checkbox"
-                                        v-model="ing.isFlour"
+                                        class="input-field"
+                                        v-model="ing.name"
+                                        placeholder="输入原料名称"
+                                        @focus="handleIngredientInput(ing, $event)"
+                                        @input="handleIngredientInput(ing, $event)"
+                                        @blur="handleIngredientBlur(ing)"
                                     />
+                                    <div class="tags-container">
+                                        <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
+                                        </div>
                                 </div>
                                 <input
                                     class="input-field ratio-input"
@@ -1059,18 +995,20 @@
                                 >
                                     <div class="form-item">
                                         <label class="form-item-label">产品名称</label
-                                        ><input
+                                        >
+                                        <input
                                             class="input-field"
-                                            v-model="product.name"
+                                            v-model="currentVersion.products[prodIndex].name"
                                             :placeholder="`产品${prodIndex + 1}`"
                                         />
                                     </div>
                                     <div class="form-item">
                                         <label class="form-item-label">基础原料克重 (g)</label
-                                        ><input
+                                        >
+                                        <input
                                             class="input-field"
                                             type="number"
-                                            v-model.number="product.baseDoughWeight"
+                                            v-model.number="currentVersion.products[prodIndex].baseDoughWeight"
                                             placeholder="例如: 100"
                                         />
                                     </div>
@@ -1081,7 +1019,7 @@
                                             :key="ing.id"
                                             class="ingredient-row"
                                         >
-                                            <div class="input-with-tag-wrapper">
+                                            <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
                                                 <input
                                                     class="input-field"
                                                     v-model="ing.name"
@@ -1090,7 +1028,10 @@
                                                     @input="handleIngredientInput(ing, $event)"
                                                     @blur="handleIngredientBlur(ing)"
                                                 />
-                                                <span v-if="isSelfMade(ing.name)" class="self-made-tag">自制</span>
+                                                <div class="tags-container">
+                                                    <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
+                                                    <span v-if="isSelfMade(ing.name)" class="ing-tag tag-self">自制</span>
+                                                </div>
                                             </div>
                                             <input
                                                 class="input-field ratio-input"
@@ -1119,7 +1060,7 @@
                                             :key="ing.id"
                                             class="ingredient-row"
                                         >
-                                            <div class="input-with-tag-wrapper">
+                                            <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
                                                 <input
                                                     class="input-field"
                                                     v-model="ing.name"
@@ -1128,7 +1069,10 @@
                                                     @input="handleIngredientInput(ing, $event)"
                                                     @blur="handleIngredientBlur(ing)"
                                                 />
-                                                <span v-if="isSelfMade(ing.name)" class="self-made-tag">自制</span>
+                                                <div class="tags-container">
+                                                    <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
+                                                    <span v-if="isSelfMade(ing.name)" class="ing-tag tag-self">自制</span>
+                                                </div>
                                             </div>
                                             <input
                                                 class="input-field ratio-input"
@@ -1157,7 +1101,7 @@
                                             :key="ing.id"
                                             class="ingredient-row"
                                         >
-                                            <div class="input-with-tag-wrapper">
+                                            <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
                                                 <input
                                                     class="input-field"
                                                     v-model="ing.name"
@@ -1166,7 +1110,10 @@
                                                     @input="handleIngredientInput(ing, $event)"
                                                     @blur="handleIngredientBlur(ing)"
                                                 />
-                                                <span v-if="isSelfMade(ing.name)" class="self-made-tag">自制</span>
+                                                <div class="tags-container">
+                                                    <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
+                                                    <span v-if="isSelfMade(ing.name)" class="ing-tag tag-self">自制</span>
+                                                </div>
                                             </div>
                                             <input
                                                 class="input-field ratio-input"
@@ -1236,7 +1183,6 @@
                             </div>
                             <div class="ingredient-header">
                                 <span class="col-name">原料名称</span>
-                                <span v-if="showFlourCheckbox" class="col-flour">面粉?</span>
                                 <span class="col-ratio">比例 %</span>
                                 <span class="col-action"></span>
                             </div>
@@ -1245,20 +1191,18 @@
                                 :key="ing.id"
                                 class="ingredient-row"
                             >
-                                <input
-                                    class="input-field"
-                                    v-model="ing.name"
-                                    placeholder="输入原料名称"
-                                    @focus="handleIngredientInput(ing, $event)"
-                                    @input="handleIngredientInput(ing, $event)"
-                                    @blur="handleIngredientBlur(ing)"
-                                />
-                                <div v-if="showFlourCheckbox" class="flour-checkbox-wrapper">
+                                <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
                                     <input
-                                        type="checkbox"
-                                        class="flour-checkbox"
-                                        v-model="ing.isFlour"
+                                        class="input-field"
+                                        v-model="ing.name"
+                                        placeholder="输入原料名称"
+                                        @focus="handleIngredientInput(ing, $event)"
+                                        @input="handleIngredientInput(ing, $event)"
+                                        @blur="handleIngredientBlur(ing)"
                                     />
+                                    <div class="tags-container">
+                                        <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
+                                    </div>
                                 </div>
                                 <input
                                     class="input-field ratio-input"
@@ -1303,12 +1247,21 @@
                 <ul v-if="suggestionState.visible" class="suggestion-box" :style="suggestionBoxStyle">
                     <li
                         v-for="sugg in suggestionState.suggestions"
-                        :key="sugg.name"
+                        :key="sugg.key"
                         class="suggestion-item"
                         @mousedown="selectSuggestion(sugg)"
                     >
-                        <span>{{ sugg.name }}</span>
-                        <span v-if="sugg.selfMade" class="suggestion-tag">自制</span>
+                        <template v-if="sugg.type === 'EXISTING'">
+                            <span>{{ sugg.name }}</span>
+                            <span v-if="sugg.isFlour" class="suggestion-tag tag-flour">面粉</span>
+                            <span v-if="sugg.selfMade" class="suggestion-tag tag-self">自制</span>
+                        </template>
+                        <template v-else-if="sugg.type === 'NEW_NORMAL'">
+                            <span class="suggestion-action">✨ 新建原料: {{ sugg.name }}</span>
+                        </template>
+                        <template v-else-if="sugg.type === 'NEW_FLOUR'">
+                            <span class="suggestion-action">🌾 新建面粉: {{ sugg.name }}</span>
+                        </template>
                     </li>
                 </ul>
             </main>
@@ -1346,24 +1299,76 @@
                 setup() {
                     let nextRecipeId = 1;
                     let nextIngredientId = 1000;
-                    let nextVersionId = 10000; // 新增
+                    let nextVersionId = 10000; // [G-Code-Note] 新增
 
-                    const recipes = ref([]); // 现在是 '配方族' (Families) 数组
-                    const currentFamilyId = ref(null); // 替换 currentRecipeId
-                    const currentVersionIndex = ref(0); // 新增，跟踪当前激活的版本
+                    const recipes = ref([]); // [G-Code-Note] 现在是 '配方族' (Families) 数组
+                    const currentFamilyId = ref(null); // [G-Code-Note] 替换 currentRecipeId
+                    const currentVersionIndex = ref(0); // [G-Code-Note] 新增，跟踪当前激活的版本
                     const activeProductTab = ref(0);
                     const fileInput = ref(null);
                     const isAddPreDoughModalVisible = ref(false);
                     const activeCategory = ref('MAIN');
                     const mainContentRef = ref(null);
                     const productTabsRef = ref(null);
-                    const versionTabsRef = ref(null); // 新增
+                    const versionTabsRef = ref(null); // [G-Code-Note] 新增
                     const fileHandle = ref(null);
 
                     const savedRecipeSnapshots = ref(new Map());
                     const isFSApiSupported = computed(() => 'showOpenFilePicker' in window);
 
-                    // 检查 Family 是否被修改
+                    // [G-Code-Note] 全局原料库: Map<name, {isFlour, waterContent, ...}>
+                    const globalIngredientLibrary = ref(new Map());
+
+                    // 初始化原料库
+                    const initIngredientLibrary = () => {
+                        const defaults = [
+                            { name: '面包粉', isFlour: true, waterContent: 0 },
+                            { name: '高筋粉', isFlour: true, waterContent: 0 },
+                            { name: '中筋粉', isFlour: true, waterContent: 0 },
+                            { name: '全麦粉', isFlour: true, waterContent: 0 },
+                            { name: '裸麦粉', isFlour: true, waterContent: 0 },
+                            { name: '黑麦粉', isFlour: true, waterContent: 0 },
+                            { name: 'T45', isFlour: true, waterContent: 0 },
+                            { name: 'T55', isFlour: true, waterContent: 0 },
+                            { name: 'T65', isFlour: true, waterContent: 0 },
+                            { name: 'T80', isFlour: true, waterContent: 0 },
+                            { name: 'T110', isFlour: true, waterContent: 0 },
+                            { name: 'T150', isFlour: true, waterContent: 0 },
+                            { name: 'T170', isFlour: true, waterContent: 0 },
+                            { name: '水', isFlour: false, waterContent: 1 },
+                            { name: '牛奶', isFlour: false, waterContent: 0.87 },
+                            { name: '淡奶油', isFlour: false, waterContent: 0.6 },
+                            { name: '蜂蜜', isFlour: false, waterContent: 0.17 },
+                            { name: '炼乳', isFlour: false, waterContent: 0.27 },
+                            { name: '鸡蛋', isFlour: false, waterContent: 0.75 },
+                            { name: '全蛋', isFlour: false, waterContent: 0.75 },
+                            { name: '蛋黄', isFlour: false, waterContent: 0.5 },
+                            { name: '蛋清', isFlour: false, waterContent: 0.88 },
+                            { name: '蛋白', isFlour: false, waterContent: 0.88 },
+                            { name: '白砂糖', isFlour: false, waterContent: 0 },
+                            { name: '盐', isFlour: false, waterContent: 0 },
+                            { name: '即发干酵母', isFlour: false, waterContent: 0 },
+                            { name: '鲜酵母', isFlour: false, waterContent: 0 },
+                            { name: '黄油', isFlour: false, waterContent: 0 },
+                            { name: '奶粉', isFlour: false, waterContent: 0 },
+                            { name: '麦芽精', isFlour: false, waterContent: 0 },
+                        ];
+                        defaults.forEach(ing => {
+                            globalIngredientLibrary.value.set(ing.name, ing);
+                        });
+                    };
+                    initIngredientLibrary();
+
+                    // 动态计算标签Wrapper的样式
+                    const getWrapperClass = (ing) => {
+                        let count = 0;
+                        if (ing.isFlour) count++;
+                        if (isSelfMade(ing.name)) count++;
+                        if (count === 1) return 'input-has-1-tag';
+                        if (count === 2) return 'input-has-2-tags';
+                        return '';
+                    };
+
                     const isFamilyDirty = (family) => {
                         if (!family) return false;
                         const savedSnapshot = savedRecipeSnapshots.value.get(family.id);
@@ -1380,7 +1385,7 @@
                         return recipes.value.some((family) => isFamilyDirty(family));
                     });
 
-                    // 拆分 tabs 滚动状态
+                    // [G-Code-Note] 拆分 tabs 滚动状态
                     const tabScrollState = ref({
                         version: { showLeft: false, showRight: false },
                         product: { showLeft: false, showRight: false },
@@ -1401,56 +1406,10 @@
                             .map(([value, text]) => ({ value, text })),
                     );
 
-                    const predefinedIngredients = ref([
-                        { name: '面包粉', isFlour: true, waterContent: 0 },
-                        { name: '高筋粉', isFlour: true, waterContent: 0 },
-                        { name: '中筋粉', isFlour: true, waterContent: 0 },
-                        { name: '全麦粉', isFlour: true, waterContent: 0 },
-                        { name: '裸麦粉', isFlour: true, waterContent: 0 },
-                        { name: '黑麦粉', isFlour: true, waterContent: 0 },
-                        { name: 'T45', isFlour: true, waterContent: 0 },
-                        { name: 'T55', isFlour: true, waterContent: 0 },
-                        { name: 'T65', isFlour: true, waterContent: 0 },
-                        { name: 'T80', isFlour: true, waterContent: 0 },
-                        { name: 'T110', isFlour: true, waterContent: 0 },
-                        { name: 'T150', isFlour: true, waterContent: 0 },
-                        { name: 'T170', isFlour: true, waterContent: 0 },
-                        { name: '水', isFlour: false, waterContent: 1 },
-                        { name: '牛奶', isFlour: false, waterContent: 0.87 },
-                        { name: '淡奶油', isFlour: false, waterContent: 0.6 },
-                        { name: '蜂蜜', isFlour: false, waterContent: 0.17 },
-                        { name: '炼乳', isFlour: false, waterContent: 0.27 },
-                        { name: '鸡蛋', isFlour: false, waterContent: 0.75 },
-                        { name: '全蛋', isFlour: false, waterContent: 0.75 },
-                        { name: '蛋黄', isFlour: false, waterContent: 0.5 },
-                        { name: '蛋清', isFlour: false, waterContent: 0.88 },
-                        { name: '蛋白', isFlour: false, waterContent: 0.88 },
-                        { name: '白砂糖', isFlour: false, waterContent: 0 },
-                        { name: '盐', isFlour: false, waterContent: 0 },
-                        { name: '即发干酵母', isFlour: false, waterContent: 0 },
-                        { name: '鲜酵母', isFlour: false, waterContent: 0 },
-                        { name: '黄油', isFlour: false, waterContent: 0 },
-                        { name: '奶粉', isFlour: false, waterContent: 0 },
-                        { name: '麦芽精', isFlour: false, waterContent: 0 },
-                    ]);
-
-                    const allAvailableIngredients = computed(() => {
-                        const ingredientsMap = new Map();
-                        predefinedIngredients.value.forEach((ing) => {
-                            ingredientsMap.set(ing.name, { ...ing, selfMade: false });
-                        });
-                        recipes.value
-                            .filter((r) => r.type !== 'MAIN' && r.name)
-                            .forEach((recipe) => {
-                                ingredientsMap.set(recipe.name, {
-                                    name: recipe.name,
-                                    isFlour: false,
-                                    waterContent: 0,
-                                    selfMade: true,
-                                });
-                            });
-                        return Array.from(ingredientsMap.values());
-                    });
+                    const selfMadeRecipeNames = computed(
+                        () => new Set(recipes.value.filter((r) => r.type !== 'MAIN').map((r) => r.name)),
+                    );
+                    const isSelfMade = (name) => selfMadeRecipeNames.value.has(name);
 
                     const suggestionState = ref({
                         visible: false,
@@ -1478,7 +1437,7 @@
                         },
                     );
 
-                    // --- 核心状态重构 ---
+                    // --- [G-Code-Note] 核心状态重构 ---
                     const currentFamilyIndex = computed(() =>
                         recipes.value.findIndex((r) => r.id === currentFamilyId.value),
                     );
@@ -1492,7 +1451,7 @@
                     );
                     // ------------------------------------
 
-                    // 新增: 是否显示面粉复选框的逻辑
+                    // [G-Code-Note] 新增: 是否显示面粉复选框的逻辑
                     const showFlourCheckbox = computed(() => {
                         if (!currentFamily.value) return false;
                         // 面种
@@ -1517,13 +1476,13 @@
                         ) {
                             return [];
                         }
-                        // 迭代 currentVersion.value.doughs (源数据)
+                        // [G-Code-Note] 迭代 currentVersion.value.doughs (源数据)
                         const preDoughs = currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
 
                         return preDoughs.map((dough) => {
-                            // dough 是原始 dough 对象的引用
+                            // [G-Code-Note] dough 是原始 dough 对象的引用
                             const totalFlourRatioInPreDough = dough.ingredients
-                                .filter((ing) => ing.isFlour) // 依赖于 ing.isFlour
+                                .filter((ing) => ing.isFlour) // [G-Code-Note] 依赖于 ing.isFlour
                                 .reduce((sum, ing) => sum + (ing.ratio || 0), 0);
 
                             if (totalFlourRatioInPreDough === 0) {
@@ -1536,7 +1495,7 @@
                                 };
                             }
 
-                            // dough.flourRatioInMainDough 是 v-model 绑定的值
+                            // [G-Code-Note] dough.flourRatioInMainDough 是 v-model 绑定的值
                             const flourRatioInMainDough = dough.flourRatioInMainDough || 0;
 
                             const calculatedIngredients = dough.ingredients.map((ing) => {
@@ -1556,12 +1515,12 @@
                         });
                     });
 
-                    // 新增: 用于响应式更新面种百分比的方法
+                    // [G-Code-Note] 新增: 用于响应式更新面种百分比的方法
                     const updatePreDoughRatio = (doughId, rawValue) => {
                         const originalDough = currentVersion.value.doughs.find((d) => d.id === doughId);
                         if (originalDough) {
                             const parsedValue = parseFloat(rawValue);
-                            // 同步 v-model.number 的行为, 空或无效输入 -> null
+                            // [G-Code-Note] 同步 v-model.number 的行为, 空或无效输入 -> null
                             originalDough.flourRatioInMainDough = isNaN(parsedValue) ? null : parsedValue;
                         }
                     };
@@ -1578,16 +1537,16 @@
                         extra: recipes.value.filter((r) => r.type === 'EXTRA'),
                     }));
 
-                    // 重命名为 filteredFamilies
+                    // [G-Code-Note] 重命名为 filteredFamilies
                     const filteredFamilies = computed(() => {
                         return recipes.value.filter((r) => r.type === activeCategory.value);
                     });
 
-                    // 新增: 通用原料排序函数
+                    // [G-Code-Note] 新增: 通用原料排序函数
                     function sortIngredients(ingredients, recipeType, recipeCategory) {
                         const isBreadLogic = (recipeType === 'PRE_DOUGH') || (recipeType === 'MAIN' && recipeCategory === 'BREAD');
 
-                        // 确保 ratio 为 null 或 undefined 时, 排序到最后
+                        // [G-Code-Note] 确保 ratio 为 null 或 undefined 时, 排序到最后
                         const getRatio = (ing) => ing.ratio ?? -Infinity;
 
                         return [...ingredients].sort((a, b) => {
@@ -1605,7 +1564,7 @@
                         });
                     }
 
-                    // 新增: 用于显示的已排序主面团原料
+                    // [G-Code-Note] 新增: 用于显示的已排序主面团原料
                     const sortedMainDoughIngredients = computed(() => {
                         if (!mainDough.value) return [];
                         return sortIngredients(
@@ -1615,7 +1574,7 @@
                         );
                     });
 
-                    // 新增: 用于显示的已排序 "其他" (面种/馅料) 原料
+                    // [G-Code-Note] 新增: 用于显示的已排序 "其他" (面种/馅料) 原料
                     const sortedOtherIngredients = computed(() => {
                         if (!currentVersion.value || currentFamily.value.type === 'MAIN') return [];
                         return sortIngredients(
@@ -1625,14 +1584,14 @@
                         );
                     });
 
-                    // 新增: 用于显示的产品, 包含已排序的 MixIns, Fillings, Toppings
+                    // [G-Code-Note] 新增: 用于显示的产品, 包含已排序的 MixIns, Fillings, Toppings
                     const productsWithSortedMixIns = computed(() => {
                         if (!currentVersion.value || !currentVersion.value.products) return [];
                         return currentVersion.value.products.map(product => ({
                             ...product,
-                            // MixIns (辅料) 始终使用 "其他" 逻辑 (按比例排序)
+                            // [G-Code-Note] MixIns (辅料) 始终使用 "其他" 逻辑 (按比例排序)
                             sortedMixIns: sortIngredients(product.mixIns, 'EXTRA', 'OTHER'),
-                            // 馅料和装饰按 weightInGrams 降序排序
+                            // [G-Code-Note] 馅料和装饰按 weightInGrams 降序排序
                             sortedFillings: [...product.fillings].sort((a,b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity)),
                             sortedToppings: [...product.toppings].sort((a,b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity)),
                         }));
@@ -1647,11 +1606,6 @@
                     );
                     const recipeTypeDisplay = (type) =>
                         ({ MAIN: '产品配方', PRE_DOUGH: '面种', EXTRA: '馅料/其他' })[type];
-
-                    const selfMadeRecipeNames = computed(
-                        () => new Set(recipes.value.filter((r) => r.type !== 'MAIN').map((r) => r.name)),
-                    );
-                    const isSelfMade = (name) => selfMadeRecipeNames.value.has(name);
 
                     const availablePreDoughs = computed(() => recipes.value.filter((r) => r.type === 'PRE_DOUGH'));
 
@@ -1668,7 +1622,7 @@
                         return availablePreDoughs.value.filter((d) => !existingDoughNames.has(d.name));
                     });
 
-                    // 监听 'currentVersion.products'
+                    // [G-Code-Note] 监听 'currentVersion.products'
                     watch(
                         () => currentVersion.value?.products,
                         () => {
@@ -1679,7 +1633,7 @@
                         { deep: true },
                     );
 
-                    // 监听 'currentFamily' (用于版本) 和 'currentVersionIndex'
+                    // [G-Code-Note] 监听 'currentFamily' (用于版本) 和 'currentVersionIndex'
                     watch([currentFamily, currentVersionIndex], () => {
                         if (currentFamily.value) {
                             nextTick(() => {
@@ -1692,7 +1646,7 @@
                         }
                     });
 
-                    // 更新版本 Tab 滚动按钮
+                    // [G-Code-Note] 更新版本 Tab 滚动按钮
                     const updateVersionTabScrollButtons = () => {
                         const el = versionTabsRef.value;
                         if (!el) {
@@ -1704,12 +1658,12 @@
                         tabScrollState.value.version.showRight =
                             hasOverflow && el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
                     };
-                    // 滚动版本 Tab
+                    // [G-Code-Note] 滚动版本 Tab
                     const scrollVersionTabs = (amount) => {
                         versionTabsRef.value?.scrollBy({ left: amount, behavior: 'smooth' });
                     };
 
-                    // 更新产品 Tab 滚动按钮
+                    // [G-Code-Note] 更新产品 Tab 滚动按钮
                     const updateProductTabScrollButtons = () => {
                         const el = productTabsRef.value;
                         if (!el) {
@@ -1721,18 +1675,18 @@
                         tabScrollState.value.product.showRight =
                             hasOverflow && el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
                     };
-                    // 滚动产品 Tab
+                    // [G-Code-Note] 滚动产品 Tab
                     const scrollProductTabs = (amount) => {
                         productTabsRef.value?.scrollBy({ left: amount, behavior: 'smooth' });
                     };
 
-                    // 重构：getNewVersion (创建新版本的模板)
+                    // [G-Code-Note] 重构：getNewVersion (创建新版本的模板)
                     function getNewVersion(type, category = 'BREAD') {
                         const commonIngredient = {
                             id: nextIngredientId++,
                             name: '',
                             ratio: null,
-                            isFlour: false, // 默认 false
+                            isFlour: false, // [G-Code-Note] 默认 false
                             waterContent: 0,
                         };
 
@@ -1774,7 +1728,7 @@
                         };
                     }
 
-                    // 重构：getNewFamily (创建新配方族的模板)
+                    // [G-Code-Note] 重构：getNewFamily (创建新配方族的模板)
                     function getNewFamily(type) {
                         const id = nextRecipeId++;
                         const category = type === 'MAIN' ? 'BREAD' : 'OTHER';
@@ -1790,21 +1744,21 @@
                         };
                     }
 
-                    // 重构：addFamily (替换 addRecipe)
+                    // [G-Code-Note] 重构：addFamily (替换 addRecipe)
                     const addFamily = () => {
                         const newFamily = getNewFamily(activeCategory.value);
                         recipes.value.push(newFamily);
-                        selectFamily(newFamily.id); // 调用 selectFamily
+                        selectFamily(newFamily.id); // [G-Code-Note] 调用 selectFamily
                     };
 
-                    // 重构：selectFamily (替换 selectRecipe)
+                    // [G-Code-Note] 重构：selectFamily (替换 selectRecipe)
                     const selectFamily = (id) => {
                         suggestionState.value.visible = false;
                         currentFamilyId.value = id;
                         currentVersionIndex.value = 0; // 默认选中第一个版本
                     };
 
-                    // 重构：deleteFamily (替换 deleteRecipe)
+                    // [G-Code-Note] 重构：deleteFamily (替换 deleteRecipe)
                     const deleteFamily = (id) => {
                         const index = recipes.value.findIndex((r) => r.id === id);
                         if (index === -1) return;
@@ -1818,7 +1772,7 @@
                         recipes.value.splice(index, 1);
                     };
 
-                    // 新增：addVersion
+                    // [G-Code-Note] 新增：addVersion
                     const addVersion = () => {
                         if (!currentFamily.value) return;
                         // 复制当前版本作为模板
@@ -1834,7 +1788,7 @@
                         });
                     };
 
-                    // 新增：deleteVersion
+                    // [G-Code-Note] 新增：deleteVersion
                     const deleteVersion = (index) => {
                         if (!currentFamily.value || currentFamily.value.versions.length <= 1) {
                             alert('必须至少保留一个版本。');
@@ -1853,8 +1807,8 @@
                         isAddPreDoughModalVisible.value = true;
                     };
                     const addPreDoughReference = (dough) => {
-                        // 绑定到 currentVersion
-                        // 引用面种的最新版本
+                        // [G-Code-Note] 绑定到 currentVersion
+                        // [G-Code-Note] 引用面种的最新版本
                         const latestVersion = dough.versions[dough.versions.length - 1];
                         currentVersion.value.doughs.push({
                             ...JSON.parse(JSON.stringify(latestVersion)),
@@ -1866,7 +1820,7 @@
                         isAddPreDoughModalVisible.value = false;
                     };
                     const removePreDough = (index) => {
-                        // 绑定到 currentVersion
+                        // [G-Code-Note] 绑定到 currentVersion
                         const preDoughs = currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
                         const doughToRemove = preDoughs[index];
                         const originalIndex = currentVersion.value.doughs.findIndex((d) => d === doughToRemove);
@@ -1886,32 +1840,80 @@
                             return;
                         }
 
-                        const filtered = allAvailableIngredients.value.filter((p) =>
-                            p.name.toLowerCase().includes(query.toLowerCase()),
-                        );
+                        const suggestions = [];
+                        const lowerQuery = query.toLowerCase();
 
-                        suggestionState.value.suggestions = filtered;
-                        suggestionState.value.visible = filtered.length > 0;
+                        // 1. 搜索库中存在的原料
+                        for (const [name, data] of globalIngredientLibrary.value) {
+                            if (name.toLowerCase().includes(lowerQuery)) {
+                                suggestions.push({
+                                    type: 'EXISTING',
+                                    key: 'EXIST_' + name,
+                                    name: name,
+                                    isFlour: data.isFlour,
+                                    waterContent: data.waterContent,
+                                    selfMade: false
+                                });
+                            }
+                        }
+
+                        // 2. 搜索自制配方
+                        for (const name of selfMadeRecipeNames.value) {
+                             if (name.toLowerCase().includes(lowerQuery)) {
+                                // 自制配方优先展示，且去重（如果库里也有同名的，优先展示自制标记）
+                                const existingIdx = suggestions.findIndex(s => s.name === name);
+                                if(existingIdx > -1) {
+                                    suggestions[existingIdx].selfMade = true;
+                                } else {
+                                    suggestions.push({
+                                        type: 'EXISTING',
+                                        key: 'SELF_' + name,
+                                        name: name,
+                                        isFlour: false,
+                                        waterContent: 0,
+                                        selfMade: true
+                                    });
+                                }
+                             }
+                        }
+
+                        // 3. 如果完全匹配库中/自制的名字，则只显示匹配项。
+                        //    如果没有完全匹配项，则添加“新建”选项
+                        const exactMatch = suggestions.find(s => s.name === query);
+                        if (!exactMatch) {
+                             suggestions.push({
+                                 type: 'NEW_NORMAL',
+                                 key: 'NEW_N_' + query,
+                                 name: query
+                             });
+                             suggestions.push({
+                                 type: 'NEW_FLOUR',
+                                 key: 'NEW_F_' + query,
+                                 name: query
+                             });
+                        }
+
+                        suggestionState.value.suggestions = suggestions;
+                        suggestionState.value.visible = suggestions.length > 0;
                     };
 
                     const handleIngredientBlur = (ingredient) => {
-                        // 延迟执行，以便 selectSuggestion 能先触发
+                        // [G-Code-Note] 延迟执行，以便 selectSuggestion 能先触发
                         setTimeout(() => {
                             if (suggestionState.value.visible) {
                                 suggestionState.value.visible = false;
                             }
 
-                            // 检查是否由 selectSuggestion 处理过
+                            // [G-Code-Note] 检查是否由 selectSuggestion 处理过
                             if (suggestionState.value.ingRef === ingredient) {
                                 // 意味着 blur 发生在 select 之前，或者没有 select
                                 if (ingredient.name) {
-                                    const perfectMatch = allAvailableIngredients.value.find(
-                                        (p) => p.name === ingredient.name,
-                                    );
-                                    if (perfectMatch) {
-                                        ingredient.isFlour = perfectMatch.isFlour;
-                                        ingredient.waterContent = perfectMatch.waterContent;
+                                    // Blur时，如果库里有这个名字，就同步属性
+                                    if (globalIngredientLibrary.value.has(ingredient.name)) {
+                                        const libData = globalIngredientLibrary.value.get(ingredient.name);
+                                        ingredient.isFlour = libData.isFlour;
                                     }
+                                    // 如果库里没有，保持原样（默认非面粉），等待用户下次选择“新建”来修正
                                 }
                                 suggestionState.value.ingRef = null;
                             }
@@ -1920,14 +1922,32 @@
 
                     const selectSuggestion = (suggestion) => {
                         if (suggestionState.value.ingRef) {
-                            suggestionState.value.ingRef.name = suggestion.name;
-                            suggestionState.value.ingRef.isFlour = suggestion.isFlour;
-                            suggestionState.value.ingRef.waterContent = suggestion.waterContent;
+                            const targetIng = suggestionState.value.ingRef;
+                            targetIng.name = suggestion.name;
+
+                            if (suggestion.type === 'EXISTING') {
+                                targetIng.isFlour = suggestion.isFlour;
+                                targetIng.waterContent = suggestion.waterContent;
+                            } else if (suggestion.type === 'NEW_NORMAL') {
+                                targetIng.isFlour = false;
+                                targetIng.waterContent = 0;
+                                // 添加到库
+                                globalIngredientLibrary.value.set(suggestion.name, {
+                                    name: suggestion.name, isFlour: false, waterContent: 0
+                                });
+                            } else if (suggestion.type === 'NEW_FLOUR') {
+                                targetIng.isFlour = true;
+                                targetIng.waterContent = 0; // 面粉默认水份先设为0，需后续调整
+                                // 添加到库
+                                globalIngredientLibrary.value.set(suggestion.name, {
+                                    name: suggestion.name, isFlour: true, waterContent: 0
+                                });
+                            }
                         }
                         suggestionState.value.visible = false;
                         suggestionState.value.suggestions = [];
                         suggestionState.value.target = null;
-                        suggestionState.value.ingRef = null; // 标记为已处理
+                        suggestionState.value.ingRef = null; // [G-Code-Note] 标记为已处理
                     };
 
                     const addMainDoughIngredient = () =>
@@ -1938,7 +1958,7 @@
                             isFlour: false,
                             waterContent: 0,
                         });
-                    // 排序: 修改为按 ID 删除
+                    // [G-Code-Note] 排序: 修改为按 ID 删除
                     const removeMainDoughIngredient = (id) => {
                         const index = mainDough.value.ingredients.findIndex(i => i.id === id);
                         if (index > -1) mainDough.value.ingredients.splice(index, 1);
@@ -1954,7 +1974,7 @@
                             isFlour: false,
                             waterContent: 0,
                         });
-                    // 排序: 修改为按 ID 删除
+                    // [G-Code-Note] 排序: 修改为按 ID 删除
                     const removeOtherIngredient = (id) => {
                         const index = currentVersion.value.ingredients.findIndex(i => i.id === id);
                         if (index > -1) currentVersion.value.ingredients.splice(index, 1);
@@ -1988,9 +2008,9 @@
                         }
                     };
 
-                    // 排序: 修改 addSubIngredient 以使用 prodIndex
+                    // [G-Code-Note] 排序: 修改 addSubIngredient 以使用 prodIndex
                     const addSubIngredient = (prodIndex, type) =>
-                        // 排序: 修正: addSubIngredient 应该总是添加到原始数组中
+                        // [G-Code-Note] 排序: 修正: addSubIngredient 应该总是添加到原始数组中
                         currentVersion.value.products[prodIndex][type].push({
                             id: nextIngredientId++,
                             name: '',
@@ -1999,7 +2019,7 @@
                             isFlour: false,
                             waterContent: 0,
                         });
-                    // 排序: 修改为按 product ID 和 ingredient ID 删除
+                    // [G-Code-Note] 排序: 修改为按 product ID 和 ingredient ID 删除
                     const removeSubIngredient = (productId, type, ingredientId) => {
                         const product = currentVersion.value.products.find(p => p.id === productId);
                         if (product) {
@@ -2028,7 +2048,7 @@
                         }
                     };
 
-                    // 重构：loadRecipesFromJson (支持 Family 结构)
+                    // [G-Code-Note] 重构：loadRecipesFromJson (支持 Family 结构)
                     const loadRecipesFromJson = (jsonString) => {
                         try {
                             const importedData = JSON.parse(jsonString);
@@ -2038,7 +2058,7 @@
                             importedData
                                 .filter((r) => r.type !== 'MAIN')
                                 .forEach((family) => {
-                                    // 修正: 始终引用最后一个版本, 与手动添加保持一致
+                                    // [G-Code-Note] 修正: 始终引用最后一个版本, 与手动添加保持一致
                                     if (family.versions && family.versions.length > 0) {
                                         preDoughMap.set(family.name, family.versions[family.versions.length - 1]);
                                     }
@@ -2083,13 +2103,13 @@
 
                             recipes.value = normalizedFamilies;
                             
-                            // 修正 "dirty" 标记: 在赋值后立即创建快照, 而不是 nextTick
+                            // [G-Code-Note] 修正 "dirty" 标记: 在赋值后立即创建快照, 而不是 nextTick
                             savedRecipeSnapshots.value.clear();
                             for (const family of normalizedFamilies) {
                                 savedRecipeSnapshots.value.set(family.id, JSON.stringify(family));
                             }
 
-                            // 修改: 默认选中 "产品配方" 标签, 并选中第一个产品配方
+                            // [G-Code-Note] 修改: 默认选中 "产品配方" 标签, 并选中第一个产品配方
                             if (recipes.value.length > 0) {
                                 nextTick(() => {
                                     activeCategory.value = 'MAIN';
@@ -2107,7 +2127,7 @@
                                 currentFamilyId.value = null;
                             }
                             alert(`成功加载 ${normalizedFamilies.length} 个配方族！`);
-                            // 修正 "dirty" 标记: 移除 nextTick(updateSnapshot)
+                            // [G-Code-Note] 修正 "dirty" 标记: 移除 nextTick(updateSnapshot)
                             // nextTick(updateSnapshot);
                         } catch (err) {
                             console.error('Load Error:', err);
@@ -2129,7 +2149,7 @@
                         reader.readAsText(file);
                     };
 
-                    // 重构：normalizeVersion (替换 normalizeRecipe)
+                    // [G-Code-Note] 重构：normalizeVersion (替换 normalizeRecipe)
                     // (versionData 是来自 JSON 的 *单个* 版本)
                     function normalizeVersion(versionData, familyType, familyCategory, preDoughMap) {
                         const baseVersion = {
@@ -2144,16 +2164,25 @@
                         };
 
                         const processImportedIngredient = (ing) => {
-                            // 修正: 此时 allAvailableIngredients.value 是旧的, 无法用于查找自制
-                            // 但 predefinedIngredients 是全局的, 可以安全使用
-                            const predefinedMatch = predefinedIngredients.value.find((p) => p.name === ing.name);
+                            // 导入时同步更新原料库
+                            if (!globalIngredientLibrary.value.has(ing.name)) {
+                                globalIngredientLibrary.value.set(ing.name, {
+                                    name: ing.name,
+                                    isFlour: !!ing.isFlour,
+                                    waterContent: ing.waterContent || 0
+                                });
+                            }
+                            
+                            // 强制使用库中的属性
+                            const libData = globalIngredientLibrary.value.get(ing.name);
+
                             return {
                                 id: nextIngredientId++,
                                 name: ing.name,
                                 ratio: toPercentage(ing.ratio),
-                                // 优先使用 predefinedMatch 的 isFlour, 其次是 ing.isFlour, 默认 false
-                                isFlour: predefinedMatch ? predefinedMatch.isFlour : !!ing.isFlour,
-                                waterContent: predefinedMatch ? predefinedMatch.waterContent : ing.waterContent || 0,
+                                // [G-Code-Note] 优先使用库中的 isFlour
+                                isFlour: libData.isFlour, 
+                                waterContent: libData.waterContent,
                             };
                         };
 
@@ -2273,14 +2302,14 @@
                         return baseVersion;
                     }
 
-                    // 排序: 签名增加 familyCategory
+                    // [G-Code-Note] 排序: 签名增加 familyCategory
                     function exportVersion(version, familyType, familyCategory) {
                         const formatIngredient = (ing) => {
                             const result = {
                                 name: ing.name,
                                 ratio: toDecimal(ing.ratio),
                             };
-                            // 显式保存 isFlour
+                            // [G-Code-Note] 显式保存 isFlour
                             if (ing.isFlour) {
                                 result.isFlour = true;
                             }
@@ -2292,7 +2321,7 @@
 
                         if (familyType === 'MAIN') {
                             const md = version.doughs.find((d) => d.type === 'MAIN_DOUGH');
-                            // 排序: 排序主面团原料
+                            // [G-Code-Note] 排序: 排序主面团原料
                             const sortedMainIngredients = sortIngredients(md.ingredients, familyType, familyCategory);
 
                             const finalIngredients = [
@@ -2302,7 +2331,7 @@
                                         name: pd.name,
                                         flourRatio: toDecimal(pd.flourRatioInMainDough),
                                     })),
-                                // 排序: 使用 sortedMainIngredients
+                                // [G-Code-Note] 排序: 使用 sortedMainIngredients
                                 ...sortedMainIngredients
                                     .filter((ing) => ing.name.trim() && ing.ratio !== null)
                                     .map(formatIngredient),
@@ -2315,7 +2344,7 @@
                                 procedure: md.procedure.filter((p) => p.trim()),
                                 ingredients: finalIngredients,
                                 products: version.products.map((p) => {
-                                    // 排序: 排序辅料/馅料/装饰
+                                    // [G-Code-Note] 排序: 排序辅料/馅料/装饰
                                     const sortedMixIns = sortIngredients(p.mixIns, 'EXTRA', 'OTHER'); // 按比例
                                     const sortedFillings = [...p.fillings].sort((a,b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity));
                                     const sortedToppings = [...p.toppings].sort((a,b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity));
@@ -2324,13 +2353,13 @@
                                         name: p.name,
                                         weight: p.baseDoughWeight,
                                         procedure: p.procedure.filter((step) => step.trim()),
-                                        mixIn: sortedMixIns // 排序: 使用 sortedMixIns
+                                        mixIn: sortedMixIns // [G-Code-Note] 排序: 使用 sortedMixIns
                                             .filter((i) => i.name.trim() && i.ratio !== null)
                                             .map((i) => ({ name: i.name, ratio: toDecimal(i.ratio) })),
-                                        fillings: sortedFillings // 排序: 使用 sortedFillings
+                                        fillings: sortedFillings // [G-Code-Note] 排序: 使用 sortedFillings
                                             .filter((i) => i.name.trim() && i.weightInGrams !== null)
                                             .map((i) => ({ name: i.name, weightInGrams: i.weightInGrams })),
-                                        toppings: sortedToppings // 排序: 使用 sortedToppings
+                                        toppings: sortedToppings // [G-Code-Note] 排序: 使用 sortedToppings
                                             .filter((i) => i.name.trim() && i.weightInGrams !== null)
                                             .map((i) => ({ name: i.name, weightInGrams: i.weightInGrams })),
                                     }
@@ -2338,12 +2367,12 @@
                             };
                         } else {
                             // PRE_DOUGH 或 EXTRA
-                            // 排序: 排序原料
+                            // [G-Code-Note] 排序: 排序原料
                             const sortedIngredients = sortIngredients(version.ingredients, familyType, familyCategory);
                             return {
                                 notes: version.notes,
                                 lossRatio: toDecimal(version.lossRatio),
-                                // 排序: 使用 sortedIngredients
+                                // [G-Code-Note] 排序: 使用 sortedIngredients
                                 ingredients: sortedIngredients
                                     .filter((ing) => ing.name.trim() && ing.ratio !== null)
                                     .map(formatIngredient),
@@ -2353,14 +2382,14 @@
                         }
                     }
 
-                    // 重构：getRecipesAsJsonString (支持 Family 结构)
+                    // [G-Code-Note] 重构：getRecipesAsJsonString (支持 Family 结构)
                     const getRecipesAsJsonString = () => {
                         if (recipes.value.length === 0) {
                             alert('请先添加至少一个配方');
                             return null;
                         }
 
-                        // 修正: 100% 面粉验证
+                        // [G-Code-Note] 修正: 100% 面粉验证
                         for (const family of recipes.value) {
                             // 仅检查面包类的主配方和面种配方
                             const isCheckable = family.type === 'PRE_DOUGH' || (family.type === 'MAIN' && family.category === 'BREAD');
@@ -2368,13 +2397,13 @@
                             if (isCheckable) {
                                 for (const version of family.versions) {
                                     
-                                    let totalFlourRatio = 0; // 修改: 声明总面粉比例
+                                    let totalFlourRatio = 0; // [G-Code-Note] 修改: 声明总面粉比例
                                     let context = ''; // 用于错误提示
 
                                     if (family.type === 'MAIN') {
                                         context = `配方 "${family.name || '未命名'}" (版本: ${version.notes || 'V?'})`;
                                         
-                                        // 1. 累加主面团中的面粉
+                                        // [G-Code-Note] 1. 累加主面团中的面粉
                                         const mainDough = version.doughs.find((d) => d.type === 'MAIN_DOUGH');
                                         if (mainDough) {
                                             totalFlourRatio += mainDough.ingredients.reduce((sum, ing) => {
@@ -2382,7 +2411,7 @@
                                             }, 0);
                                         }
 
-                                        // 2. 累加所有面种引用的面粉比例
+                                        // [G-Code-Note] 2. 累加所有面种引用的面粉比例
                                         const preDoughs = version.doughs.filter((d) => d.type === 'PRE_DOUGH');
                                         totalFlourRatio += preDoughs.reduce((sum, dough) => {
                                             return sum + (dough.flourRatioInMainDough || 0);
@@ -2397,7 +2426,7 @@
                                         }
                                     }
 
-                                    // 修改: 统一执行验证
+                                    // [G-Code-Note] 修改: 统一执行验证
                                     // 只有在有面粉的情况下才校验100%
                                     if (totalFlourRatio > 0 && Math.abs(totalFlourRatio - 100) > 1e-9) {
                                         alert(
@@ -2408,19 +2437,19 @@
                                 }
                             }
                         }
-                        // 验证结束
+                        // [G-Code-Note] 验证结束
 
                         try {
-                            // 新增: 按依赖关系排序 (面种/馅料在前, 产品在后)
+                            // [G-Code-Note] 新增: 按依赖关系排序 (面种/馅料在前, 产品在后)
                             const typeOrder = { 'PRE_DOUGH': 1, 'EXTRA': 2, 'MAIN': 3 };
                             const sortedFamilies = [...recipes.value].sort((a, b) => {
                                 const orderA = typeOrder[a.type] || 99;
                                 const orderB = typeOrder[b.type] || 99;
                                 return orderA - orderB;
                             });
-                            // 结束
+                            // [G-Code-Note] 结束
 
-                            const processedFamilies = sortedFamilies.map((family) => { // 修改: 使用 sortedFamilies
+                            const processedFamilies = sortedFamilies.map((family) => { // [G-Code-Note] 修改: 使用 sortedFamilies
                                 if (!family.name || !family.name.trim())
                                     throw new Error(`列表中有未命名的配方族，请检查后再导出。`);
 
@@ -2428,7 +2457,7 @@
                                     name: family.name,
                                     type: family.type,
                                     category: family.category,
-                                    // 排序: 传递 family.category
+                                    // [G-Code-Note] 排序: 传递 family.category
                                     versions: family.versions.map((v) => exportVersion(v, family.type, family.category)),
                                 };
                             });
@@ -2570,12 +2599,13 @@
                         exportAllJson,
                         openFile,
                         saveFile,
-                        updatePreDoughRatio, // 暴露新方法
-                        // 排序: 暴露 computed 属性
+                        updatePreDoughRatio, // [G-Code-Note] 暴露新方法
+                        // [G-Code-Note] 排序: 暴露 computed 属性
                         sortedMainDoughIngredients,
                         sortedOtherIngredients,
                         productsWithSortedMixIns,
-                        showFlourCheckbox, // 暴露面粉列显隐逻辑
+                        showFlourCheckbox, // [G-Code-Note] 暴露面粉列显隐逻辑
+                        getWrapperClass, // [G-Code-Note] 暴露Wrapper类方法
                     };
                 },
             }).mount('#app');
