@@ -37,6 +37,27 @@
                 font-size: 16px;
             }
 
+            /* --- 自定义滚动条样式 (匹配主题) --- */
+            ::-webkit-scrollbar {
+                width: 8px;  /* 纵向滚动条宽度 */
+                height: 8px; /* 横向滚动条高度 */
+            }
+            
+            ::-webkit-scrollbar-track {
+                background: transparent; /* 轨道背景透明，显得更干净 */
+            }
+            
+            ::-webkit-scrollbar-thumb {
+                background-color: #e0d3c9; /* 默认滑块颜色：浅咖色，比背景稍深 */
+                border-radius: 4px; /* 圆角 */
+                border: 2px solid transparent; /* 透明边框 */
+                background-clip: content-box; /* 让背景只在内容区显示，配合border实现“悬浮”感 */
+            }
+            
+            ::-webkit-scrollbar-thumb:hover {
+                background-color: var(--accent-color); /* 鼠标悬停时变深，使用主题的点缀色 */
+            }
+
             #app {
                 display: flex;
                 height: 100vh;
@@ -257,7 +278,7 @@
             }
             .suggestion-item { padding: 8px 12px; font-size: 14px; cursor: pointer; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
             .suggestion-item:hover { background-color: var(--sidebar-bg); }
-            .suggestion-tag { font-size: 10px; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 500; margin-left: 8px; }
+            .suggestion-tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 500; margin-left: 8px; }
             .suggestion-action { color: var(--primary-color); font-weight: 600; }
         </style>
     </head>
