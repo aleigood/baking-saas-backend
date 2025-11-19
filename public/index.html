@@ -6,6 +6,7 @@
         <title>配方编辑器</title> <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
         <style>
             :root {
+                /* 保持原始文件的颜色变量，不做修改 */
                 --primary-color: #8c5a3b;
                 --accent-color: #d4a373;
                 --bg-color: #fdf8f2;
@@ -15,8 +16,15 @@
                 --danger-color: #e74c3c;
                 --border-color: #f3e9e3;
                 --sidebar-bg: #f7f4ef;
-                --tag-flour-bg: #e6a23c;
-                --tag-self-bg: #67c23a;
+                
+                /* 标签颜色 */
+                --tag-flour-bg: #f0e6de; 
+                --tag-flour-text: #8c5a3b;
+                --tag-self-bg: #faedcd;
+                --tag-self-text: #8c5a3b;
+                /* 新增：水总量标签颜色 (参考截图的蓝色) */
+                --tag-water-bg: #ecf5ff;
+                --tag-water-text: #409eff;
             }
 
             body {
@@ -40,602 +48,228 @@
 
             /* --- Modal --- */
             .modal-overlay {
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
                 background-color: rgba(0, 0, 0, 0.5);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                z-index: 1000;
+                display: flex; justify-content: center; align-items: center; z-index: 1000;
             }
             .modal-content {
-                background-color: white;
-                border-radius: 20px;
-                padding: 25px;
+                background-color: white; border-radius: 20px; padding: 25px;
                 box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-                width: 90%;
-                max-width: 400px;
-                max-height: 80vh;
-                display: flex;
-                flex-direction: column;
+                width: 90%; max-width: 400px; max-height: 80vh;
+                display: flex; flex-direction: column;
             }
             .modal-header {
-                font-size: 18px;
-                font-weight: 600;
-                color: var(--text-primary);
-                margin-bottom: 20px;
-                text-align: center;
+                font-size: 18px; font-weight: 600; color: var(--text-primary);
+                margin-bottom: 20px; text-align: center;
             }
-            .modal-body {
-                overflow-y: auto;
-                flex-grow: 1;
-            }
+            .modal-body { overflow-y: auto; flex-grow: 1; }
             .modal-body .selection-item {
-                padding: 12px;
-                border-radius: 10px;
-                margin-bottom: 8px;
-                cursor: pointer;
-                transition: background-color 0.2s;
-                text-align: center;
-                font-weight: 500;
+                padding: 12px; border-radius: 10px; margin-bottom: 8px; cursor: pointer;
+                transition: background-color 0.2s; text-align: center; font-weight: 500;
                 border: 1px solid var(--border-color);
             }
-            .modal-body .selection-item:hover {
-                background-color: var(--sidebar-bg);
-                border-color: var(--accent-color);
-            }
-
-            .modal-footer {
-                margin-top: 20px;
-                display: flex;
-                justify-content: flex-end;
-                gap: 10px;
-            }
+            .modal-body .selection-item:hover { background-color: var(--sidebar-bg); border-color: var(--accent-color); }
+            .modal-footer { margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px; }
 
             /* --- 左侧栏 --- */
             .sidebar {
-                width: 300px;
-                flex-shrink: 0;
-                background-color: var(--sidebar-bg);
-                display: flex;
-                flex-direction: column;
-                border-right: 1px solid var(--border-color);
+                width: 300px; flex-shrink: 0; background-color: var(--sidebar-bg);
+                display: flex; flex-direction: column; border-right: 1px solid var(--border-color);
             }
+            .sidebar-header { padding: 20px; text-align: center; border-bottom: 1px solid var(--border-color); }
+            .sidebar-header h1 { font-size: 24px; color: var(--primary-color); margin: 0; }
+            .sidebar-header p { font-size: 13px; color: var(--text-secondary); margin-top: 5px; }
 
-            .sidebar-header {
-                padding: 20px;
-                text-align: center;
-                border-bottom: 1px solid var(--border-color);
-            }
-
-            .sidebar-header h1 {
-                font-size: 24px;
-                color: var(--primary-color);
-                margin: 0;
-            }
-
-            .sidebar-header p {
-                font-size: 13px;
-                color: var(--text-secondary);
-                margin-top: 5px;
-            }
-
-            .sidebar-tabs {
-                display: flex;
-                padding: 10px;
-                gap: 5px;
-                border-bottom: 1px solid var(--border-color);
-            }
+            .sidebar-tabs { display: flex; padding: 10px; gap: 5px; border-bottom: 1px solid var(--border-color); }
             .sidebar-tab {
-                flex: 1;
-                padding: 8px 5px;
-                text-align: center;
-                font-size: 14px;
-                color: var(--text-secondary);
-                border-radius: 10px;
-                cursor: pointer;
-                transition: background-color 0.2s, color 0.2s;
-                position: relative;
+                flex: 1; padding: 8px 5px; text-align: center; font-size: 14px;
+                color: var(--text-secondary); border-radius: 10px; cursor: pointer;
+                transition: background-color 0.2s, color 0.2s; position: relative;
             }
-            .sidebar-tab.active {
-                background-color: var(--primary-color);
-                color: white;
-                font-weight: 600;
-            }
+            .sidebar-tab.active { background-color: var(--primary-color); color: white; font-weight: 600; }
             .sidebar-tab .count-badge {
-                position: absolute;
-                top: -5px;
-                right: -5px;
-                background-color: var(--accent-color);
-                color: white;
-                font-size: 10px;
-                border-radius: 50%;
-                width: 18px;
-                height: 18px;
-                line-height: 18px;
-                text-align: center;
+                position: absolute; top: -5px; right: -5px; background-color: var(--accent-color);
+                color: white; font-size: 10px; border-radius: 50%; width: 18px; height: 18px;
+                line-height: 18px; text-align: center;
             }
 
-            .recipe-list-container {
-                flex-grow: 1;
-                overflow-y: auto;
-                padding: 10px;
-            }
-
+            .recipe-list-container { flex-grow: 1; overflow-y: auto; padding: 10px; }
             .recipe-list-item {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 12px;
-                border-radius: 10px;
-                margin-bottom: 8px;
-                cursor: pointer;
+                display: flex; justify-content: space-between; align-items: center; padding: 12px;
+                border-radius: 10px; margin-bottom: 8px; cursor: pointer;
                 transition: background-color 0.2s, box-shadow 0.2s;
             }
-            .recipe-list-item:hover {
-                background-color: var(--border-color);
-            }
+            .recipe-list-item:hover { background-color: var(--border-color); }
             .recipe-list-item.active {
-                /* [G-Code-Note] 修改: 使用较浅的颜色替代原先的 --primary-color (#8c5a3b) */
-                background-color: var(--text-secondary); /* #a98467 */
-                color: white;
+                background-color: var(--primary-color); color: white;
                 box-shadow: 0 4px 12px rgba(140, 90, 59, 0.2);
             }
-            .recipe-list-item.active .recipe-info span {
-                color: white !important;
-            }
-            /* 品类标签 (在配方名旁边) */
+            .recipe-list-item.active .recipe-info span { color: white !important; }
             .recipe-list-item.active .recipe-info .recipe-category-tag {
-                background-color: white;
-                /* [G-Code-Note] 修改: 文字颜色跟随选中背景色 */
-                color: var(--text-secondary) !important;
+                background-color: white; color: var(--text-secondary) !important;
             }
-
-            .recipe-info {
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            }
-            .recipe-item-controls {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                flex-shrink: 0;
-            }
-            .recipe-info strong {
-                font-size: 15px;
-                font-weight: 600;
-            }
-            
+            .recipe-info { display: flex; flex-direction: column; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .recipe-item-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+            .recipe-info strong { font-size: 15px; font-weight: 600; }
             .recipe-category-tag {
-                font-size: 10px;
-                font-weight: 500;
-                background-color: var(--border-color);
-                color: var(--text-secondary);
-                padding: 2px 6px;
-                border-radius: 5px;
-                margin-left: 6px;
-                vertical-align: middle;
+                font-size: 10px; font-weight: 500; background-color: var(--border-color);
+                color: var(--text-secondary); padding: 2px 6px; border-radius: 5px;
+                margin-left: 6px; vertical-align: middle;
             }
 
             .btn-delete-recipe {
-                background: none;
-                color: var(--text-secondary);
-                border-radius: 50%;
-                width: 24px;
-                height: 24px;
-                border: none;
-                cursor: pointer;
-                flex-shrink: 0;
-                transition: all 0.2s;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 5px;
-                visibility: hidden;
-                opacity: 0;
+                background: none; color: var(--text-secondary); border-radius: 50%;
+                width: 24px; height: 24px; border: none; cursor: pointer; flex-shrink: 0;
+                transition: all 0.2s; display: flex; align-items: center; justify-content: center;
+                padding: 5px; visibility: hidden; opacity: 0;
             }
-            .recipe-list-item:hover .btn-delete-recipe,
-            .recipe-list-item.active .btn-delete-recipe {
-                visibility: visible;
-                opacity: 1;
-            }
-            .btn-delete-recipe:hover {
-                background: var(--danger-color);
-                color: white;
-            }
-            .btn-delete-recipe svg, .btn-delete-dough svg, .btn-remove svg {
-                width: 100%;
-                height: 100%;
-            }
-            .tab-delete-btn svg {
-                width: 10px;
-                height: 10px;
-            }
+            .recipe-list-item:hover .btn-delete-recipe, .recipe-list-item.active .btn-delete-recipe { visibility: visible; opacity: 1; }
+            .btn-delete-recipe:hover { background: var(--danger-color); color: white; }
+            .btn-delete-recipe svg, .btn-delete-dough svg, .btn-remove svg { width: 100%; height: 100%; }
+            .tab-delete-btn svg { width: 10px; height: 10px; }
 
-            .sidebar-footer {
-                padding: 15px;
-                border-top: 1px solid var(--border-color);
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 10px;
-            }
+            .sidebar-footer { padding: 15px; border-top: 1px solid var(--border-color); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
             .card {
-                background: var(--card-bg);
-                padding: 20px;
-                border-radius: 20px;
-                margin-bottom: 20px;
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-                position: relative;
+                background: var(--card-bg); padding: 20px; border-radius: 20px;
+                margin-bottom: 20px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05); position: relative;
             }
-            .card-title-wrapper {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 0 5px;
-                margin-bottom: 20px;
-            }
-            .card-title {
-                font-size: 18px;
-                font-weight: 600;
-                color: var(--text-primary);
-            }
-            .form-item {
-                margin-bottom: 20px;
-            }
-            .form-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 15px;
-            }
-            .form-item-label {
-                display: block;
-                margin-bottom: 8px;
-                font-size: 14px;
-                color: #606266;
-            }
-            .input-field, .picker {
-                width: 100%;
-                height: 44px;
-                line-height: 44px;
-                padding: 0 12px;
-                border: 1px solid var(--border-color);
-                border-radius: 10px;
-                font-size: 14px;
-                background-color: #f8f9fa;
-                box-sizing: border-box;
-                color: var(--text-primary);
-                transition: border-color 0.2s, box-shadow 0.2s;
-            }
+            .card-title-wrapper { display: flex; justify-content: space-between; align-items: center; padding: 0 5px; margin-bottom: 20px; }
+            .card-title { font-size: 18px; font-weight: 600; color: var(--text-primary); }
+            .form-item { margin-bottom: 20px; }
+            .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+            .form-item-label { display: block; margin-bottom: 8px; font-size: 14px; color: #606266; }
             
-            .input-field.ratio-input {
-                width: 100px;
-                text-align: center;
-                flex-shrink: 0;
-                flex-grow: 0;
-                flex-basis: 100px;
+            .input-field, .picker {
+                width: 100%; height: 44px; line-height: 44px; padding: 0 12px;
+                border: 1px solid var(--border-color); border-radius: 10px;
+                font-size: 14px; background-color: #f8f9fa; box-sizing: border-box;
+                color: var(--text-primary); transition: border-color 0.2s, box-shadow 0.2s;
             }
-
-            .input-field:focus, .picker:focus {
-                outline: none;
-                border-color: var(--primary-color);
-                box-shadow: 0 0 0 3px rgba(140, 90, 59, 0.15);
-            }
+            .input-field.ratio-input { width: 100px; text-align: center; flex-shrink: 0; flex-grow: 0; flex-basis: 100px; }
+            .input-field:focus, .picker:focus { outline: none; border-color: var(--primary-color); box-shadow: 0 0 0 3px rgba(140, 90, 59, 0.15); }
 
             .btn {
-                display: inline-flex;
-                justify-content: center;
-                align-items: center;
-                padding: 10px 15px;
-                min-height: 44px;
-                box-sizing: border-box;
-                border-radius: 15px;
-                font-size: 16px;
-                font-weight: 500;
-                text-align: center;
-                cursor: pointer;
-                transition: transform 0.2s, box-shadow 0.28s;
-                border: none;
+                display: inline-flex; justify-content: center; align-items: center;
+                padding: 10px 15px; min-height: 44px; box-sizing: border-box;
+                border-radius: 15px; font-size: 16px; font-weight: 500; text-align: center;
+                cursor: pointer; transition: transform 0.2s, box-shadow 0.28s; border: none;
             }
             .btn:active { transform: scale(0.97); }
             .btn:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; transform: none; }
-            .btn-primary {
-                background-image: linear-gradient(135deg, var(--accent-color) 0%, var(--primary-color) 100%);
-                color: white;
-                box-shadow: 0 4px 15px rgba(140, 90, 59, 0.2);
-            }
+            .btn-primary { background-image: linear-gradient(135deg, var(--accent-color) 0%, var(--primary-color) 100%); color: white; box-shadow: 0 4px 15px rgba(140, 90, 59, 0.2); }
             .btn-secondary { background-color: #f3e9e3; color: var(--text-secondary); }
             .btn-full-width { width: 100%; }
-            .btn-dashed {
-                border: 1px dashed var(--primary-color);
-                color: var(--primary-color);
-                background: transparent;
-                min-height: 46px;
-            }
+            .btn-dashed { border: 1px dashed var(--primary-color); color: var(--primary-color); background: transparent; min-height: 46px; }
             .btn-remove {
-                width: 40px;
-                height: 40px;
-                border: 1px dashed var(--border-color);
-                border-radius: 10px;
-                color: var(--danger-color);
-                background: transparent;
-                padding: 10px;
-                min-height: auto;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                flex-shrink: 0;
+                width: 40px; height: 40px; border: 1px dashed var(--border-color);
+                border-radius: 10px; color: var(--danger-color); background: transparent;
+                padding: 10px; min-height: auto; display: flex; align-items: center;
+                justify-content: center; flex-shrink: 0;
             }
 
-            /* 列表头样式 (移除了面粉列) */
-            .ingredient-header {
-                display: flex;
-                align-items: center;
-                color: var(--text-secondary);
-                font-size: 13px;
-                margin-top: 15px;
-                margin-bottom: 8px;
-                gap: 10px;
-            }
+            .ingredient-header { display: flex; align-items: center; color: var(--text-secondary); font-size: 13px; margin-top: 15px; margin-bottom: 8px; gap: 10px; }
             .col-name { flex: 1; }
             .col-ratio { width: 100px; text-align: center; }
             .col-action { width: 40px; text-align: right; }
-            
-            .ingredient-row {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                margin-bottom: 10px;
-            }
-            .ingredient-row > .input-with-tag-wrapper {
-                flex: 1;
-            }
+            .ingredient-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+            .ingredient-row > .input-with-tag-wrapper { flex: 1; }
 
-            /* 智能标签容器 */
+            /* --- 智能标签容器样式 --- */
             .input-with-tag-wrapper {
-                position: relative;
+                position: relative; 
                 display: flex;
                 align-items: center;
+                width: 100%; 
             }
-            .input-with-tag-wrapper .input-field {
-                padding-right: 10px; /* 基础 padding */
-                flex: 1;
-                width: 100%;
-            }
-            /* 标签容器 (放输入框内部右侧) */
+            
             .tags-container {
                 position: absolute;
-                right: 12px;
+                right: 8px; 
                 top: 50%;
-                transform: translateY(-50%);
+                transform: translateY(-50%); 
                 display: flex;
                 gap: 4px;
-                pointer-events: none; /* 避免挡住输入 */
+                pointer-events: none; 
+                z-index: 2; 
+                height: auto;
             }
+            
+            /* 标签样式 */
             .ing-tag {
-                font-size: 10px;
-                color: white;
-                padding: 2px 6px;
-                border-radius: 4px;
-                font-weight: 500;
+                font-size: 12px;
+                padding: 4px 8px;
+                border-radius: 6px; 
+                font-weight: 600;
+                line-height: 1;
             }
-            .tag-flour { background-color: var(--tag-flour-bg); }
-            .tag-self { background-color: var(--tag-self-bg); }
+            .tag-flour { background-color: var(--tag-flour-bg); color: var(--tag-flour-text); }
+            .tag-self { background-color: var(--tag-self-bg); color: var(--tag-self-text); }
+            .tag-water { background-color: var(--tag-water-bg); color: var(--tag-water-text); } /* 新增水标签样式 */
 
-            /* 动态 padding，给标签留位置 */
-            .input-has-1-tag { padding-right: 50px !important; }
-            .input-has-2-tags { padding-right: 90px !important; }
+            /* 动态 padding：给输入框留出位置显示标签 */
+            .input-with-tag-wrapper.input-has-1-tag .input-field { padding-right: 55px !important; }
+            .input-with-tag-wrapper.input-has-2-tags .input-field { padding-right: 100px !important; }
 
-            .procedure-item {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                margin-bottom: 10px;
-            }
-            .procedure-notes .notes-title {
-                display: block;
-                margin-bottom: 8px;
-                font-size: 14px;
-                color: #606266;
-            }
-            .sub-group {
-                margin-top: 20px;
-                border-top: 1px solid var(--border-color);
-                padding-top: 20px;
-            }
-            .sub-group-title {
-                font-size: 14px;
-                font-weight: 500;
-                color: var(--text-primary);
-                margin-bottom: 15px;
-            }
+            .procedure-item { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+            .procedure-notes .notes-title { display: block; margin-bottom: 8px; font-size: 14px; color: #606266; }
+            .sub-group { margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px; }
+            .sub-group-title { font-size: 14px; font-weight: 500; color: var(--text-primary); margin-bottom: 15px; }
 
             /* Tabs Styles */
-            .tabs-wrapper {
-                position: relative;
-                display: flex;
-                align-items: center;
-                margin-bottom: 20px;
-            }
-            .tabs {
-                display: flex;
-                gap: 10px;
-                border-bottom: 1px solid var(--border-color);
-                flex-wrap: nowrap;
-                overflow-x: auto;
-                scrollbar-width: none;
-            }
+            .tabs-wrapper { position: relative; display: flex; align-items: center; margin-bottom: 20px; }
+            .tabs { display: flex; gap: 10px; border-bottom: 1px solid var(--border-color); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
             .tabs::-webkit-scrollbar { display: none; }
             .tab-item {
-                padding: 10px 15px;
-                cursor: pointer;
-                color: var(--text-secondary);
-                border-bottom: 3px solid transparent;
-                transition: color 0.3s, border-color 0.3s;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                white-space: nowrap;
+                padding: 10px 15px; cursor: pointer; color: var(--text-secondary); border-bottom: 3px solid transparent;
+                transition: color 0.3s, border-color 0.3s; display: flex; align-items: center; gap: 8px; white-space: nowrap;
             }
-            .tab-item.active {
-                color: var(--primary-color);
-                border-bottom-color: var(--primary-color);
-                font-weight: 600;
-            }
+            .tab-item.active { color: var(--primary-color); border-bottom-color: var(--primary-color); font-weight: 600; }
             .add-tab { font-weight: bold; color: var(--primary-color); }
             .tab-delete-btn {
-                background-color: var(--border-color);
-                border-radius: 50%;
-                border: none;
-                padding: 0;
-                margin: 0;
-                width: 18px;
-                height: 18px;
-                color: var(--text-secondary);
-                cursor: pointer;
-                transition: all 0.2s;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                flex-shrink: 0;
-                visibility: hidden;
-                opacity: 0;
+                background-color: var(--border-color); border-radius: 50%; border: none; padding: 0; margin: 0;
+                width: 18px; height: 18px; color: var(--text-secondary); cursor: pointer; transition: all 0.2s;
+                display: flex; align-items: center; justify-content: center; flex-shrink: 0; visibility: hidden; opacity: 0;
             }
-            .tab-item:hover .tab-delete-btn,
-            .tab-item.active .tab-delete-btn {
-                visibility: visible;
-                opacity: 1;
-            }
+            .tab-item:hover .tab-delete-btn, .tab-item.active .tab-delete-btn { visibility: visible; opacity: 1; }
             .tab-delete-btn:hover { background-color: var(--danger-color); color: white; }
             .tab-scroll-btn {
-                position: absolute;
-                top: 50%;
-                transform: translateY(-50%);
-                background-color: rgba(255, 255, 255, 0.8);
-                border: 1px solid var(--border-color);
-                border-radius: 50%;
-                width: 28px;
-                height: 28px;
-                z-index: 10;
-                cursor: pointer;
-                color: var(--text-secondary);
-                font-size: 16px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+                position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255, 255, 255, 0.8);
+                border: 1px solid var(--border-color); border-radius: 50%; width: 28px; height: 28px; z-index: 10;
+                cursor: pointer; color: var(--text-secondary); font-size: 16px; display: flex; align-items: center;
+                justify-content: center; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
             }
-            .tab-scroll-btn.left { left: -14px; }
-            .tab-scroll-btn.right { right: -14px; }
+            .tab-scroll-btn.left { left: -14px; } .tab-scroll-btn.right { right: -14px; }
             .tab-scroll-btn:hover { color: var(--primary-color); }
 
-            .main-content {
-                flex-grow: 1;
-                overflow-y: auto;
-                padding: 20px;
-                position: relative;
-            }
-            .editor-placeholder {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100%;
-                text-align: center;
-                color: var(--text-secondary);
-                font-size: 18px;
-            }
+            .main-content { flex-grow: 1; overflow-y: auto; padding: 20px; position: relative; }
+            .editor-placeholder { display: flex; justify-content: center; align-items: center; height: 100%; text-align: center; color: var(--text-secondary); font-size: 18px; }
             .btn-delete-dough {
-                position: absolute;
-                top: 20px;
-                right: 20px;
-                background: none;
-                border: none;
-                color: var(--primary-color);
-                cursor: pointer;
-                width: 24px;
-                height: 24px;
-                opacity: 0.8;
-                transition: opacity 0.2s;
+                position: absolute; top: 20px; right: 20px; background: none; border: none;
+                color: var(--primary-color); cursor: pointer; width: 24px; height: 24px; opacity: 0.8; transition: opacity 0.2s;
             }
             .btn-delete-dough:hover { opacity: 1; }
 
             .suggestion-box {
-                position: absolute;
-                background-color: var(--card-bg);
-                border: 1px solid var(--border-color);
-                border-radius: 10px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-                z-index: 100;
-                max-height: 200px;
-                overflow-y: auto;
-                list-style: none;
-                margin: 0;
-                padding: 5px;
-                box-sizing: border-box;
+                position: absolute; background-color: var(--card-bg); border: 1px solid var(--border-color);
+                border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); z-index: 100;
+                max-height: 200px; overflow-y: auto; list-style: none; margin: 0; padding: 5px; box-sizing: border-box;
             }
-            .suggestion-item {
-                padding: 8px 12px;
-                font-size: 14px;
-                cursor: pointer;
-                border-radius: 8px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
+            .suggestion-item { padding: 8px 12px; font-size: 14px; cursor: pointer; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
             .suggestion-item:hover { background-color: var(--sidebar-bg); }
-            .suggestion-tag {
-                font-size: 10px;
-                color: white;
-                padding: 2px 6px;
-                border-radius: 4px;
-                font-weight: 500;
-                margin-left: 8px;
-            }
-            /* 建议框里的特殊选项 */
-            .suggestion-action {
-                color: var(--primary-color);
-                font-weight: 600;
-            }
+            .suggestion-tag { font-size: 10px; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 500; margin-left: 8px; }
+            .suggestion-action { color: var(--primary-color); font-weight: 600; }
         </style>
     </head>
 
     <body>
         <svg style="display: none">
             <symbol id="icon-trash" viewBox="0 0 72 72">
-                <path
-                    style="fill: currentColor"
-                    d="M31.4,5.9c-1.3,0-2.6,0.5-3.6,1.4c-0.9,0.9-1.4,2.3-1.4,3.6v2.5H11.5v5H14v39.8c0,4.1,3.4,7.5,7.5,7.5h29.8 c4.1,0,7.5-3.4,7.5-7.5V18.3h2.5v-5H46.3v-2.5c0-1.3-0.5-2.6-1.4-3.6s-2.3-1.4-3.6-1.4H31.4z M31.4,10.9h9.9v2.5h-9.9V10.9z M18.9,18.3h34.8v39.8c0,1.4-1.1,2.5-2.5,2.5H21.4c-1.4,0-2.5-1.1-2.5-2.5V18.3z M23.9,25.8v27.3h5V25.8H23.9z M33.9,25.8v27.3h5 V25.8H33.9z M43.8,25.8v27.3h5V25.8H43.8z"
-                />
+                <path style="fill: currentColor" d="M31.4,5.9c-1.3,0-2.6,0.5-3.6,1.4c-0.9,0.9-1.4,2.3-1.4,3.6v2.5H11.5v5H14v39.8c0,4.1,3.4,7.5,7.5,7.5h29.8 c4.1,0,7.5-3.4,7.5-7.5V18.3h2.5v-5H46.3v-2.5c0-1.3-0.5-2.6-1.4-3.6s-2.3-1.4-3.6-1.4H31.4z M31.4,10.9h9.9v2.5h-9.9V10.9z M18.9,18.3h34.8v39.8c0,1.4-1.1,2.5-2.5,2.5H21.4c-1.4,0-2.5-1.1-2.5-2.5V18.3z M23.9,25.8v27.3h5V25.8H23.9z M33.9,25.8v27.3h5 V25.8H33.9z M43.8,25.8v27.3h5V25.8H43.8z" />
             </symbol>
             <symbol id="icon-close" viewBox="0 0 16 16">
-                <line
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    x1="14"
-                    y1="2"
-                    x2="2"
-                    y2="14"
-                />
-                <line
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    x1="2"
-                    y1="2"
-                    x2="14"
-                    y2="14"
-                />
+                <line fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" x1="14" y1="2" x2="2" y2="14" />
+                <line fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" x1="2" y1="2" x2="14" y2="14" />
             </symbol>
         </svg>
 
@@ -647,57 +281,27 @@
                 </header>
 
                 <div class="sidebar-tabs">
-                    <div
-                        class="sidebar-tab"
-                        :class="{active: activeCategory === 'MAIN'}"
-                        @click="activeCategory = 'MAIN'"
-                    >
+                    <div class="sidebar-tab" :class="{active: activeCategory === 'MAIN'}" @click="activeCategory = 'MAIN'">
                         产品配方
-                        <span v-if="recipeCategories.main.length > 0" class="count-badge"
-                            >{{ recipeCategories.main.length }}</span
-                        >
+                        <span v-if="recipeCategories.main.length > 0" class="count-badge">{{ recipeCategories.main.length }}</span>
                     </div>
-                    <div
-                        class="sidebar-tab"
-                        :class="{active: activeCategory === 'PRE_DOUGH'}"
-                        @click="activeCategory = 'PRE_DOUGH'"
-                    >
+                    <div class="sidebar-tab" :class="{active: activeCategory === 'PRE_DOUGH'}" @click="activeCategory = 'PRE_DOUGH'">
                         面种
-                        <span v-if="recipeCategories.preDough.length > 0" class="count-badge"
-                            >{{ recipeCategories.preDough.length }}</span
-                        >
+                        <span v-if="recipeCategories.preDough.length > 0" class="count-badge">{{ recipeCategories.preDough.length }}</span>
                     </div>
-                    <div
-                        class="sidebar-tab"
-                        :class="{active: activeCategory === 'EXTRA'}"
-                        @click="activeCategory = 'EXTRA'"
-                    >
+                    <div class="sidebar-tab" :class="{active: activeCategory === 'EXTRA'}" @click="activeCategory = 'EXTRA'">
                         馅料
-                        <span v-if="recipeCategories.extra.length > 0" class="count-badge"
-                            >{{ recipeCategories.extra.length }}</span
-                        >
+                        <span v-if="recipeCategories.extra.length > 0" class="count-badge">{{ recipeCategories.extra.length }}</span>
                     </div>
                 </div>
 
                 <div class="recipe-list-container">
-                    <div
-                        v-for="family in filteredFamilies"
-                        :key="family.id"
-                        class="recipe-list-item"
-                        :class="{ active: currentFamily && currentFamily.id === family.id }"
-                        @click="selectFamily(family.id)"
-                    >
+                    <div v-for="family in filteredFamilies" :key="family.id" class="recipe-list-item" :class="{ active: currentFamily && currentFamily.id === family.id }" @click="selectFamily(family.id)">
                         <div class="recipe-info">
                             <strong>
                                 {{ family.name || `未命名配方` }}
-                                <span v-if="family.type === 'MAIN'" class="recipe-category-tag">
-                                    {{ categoryDisplay(family.category) }}
-                                </span>
-                                <span
-                                    v-if="isFamilyDirty(family)"
-                                    style="color: var(--danger-color); margin-left: 4px"
-                                    >*</span
-                                >
+                                <span v-if="family.type === 'MAIN'" class="recipe-category-tag">{{ categoryDisplay(family.category) }}</span>
+                                <span v-if="isFamilyDirty(family)" style="color: var(--danger-color); margin-left: 4px">*</span>
                             </strong>
                         </div>
                         <div class="recipe-item-controls">
@@ -710,40 +314,15 @@
 
                 <footer class="sidebar-footer">
                     <button class="btn btn-dashed btn-full-width" @click="addFamily()">+ 新增配方</button>
-                    <button class="btn btn-secondary btn-full-width" @click="openFile" v-if="isFSApiSupported">
-                        打开文件
-                    </button>
-                    <button
-                        class="btn btn-primary btn-full-width"
-                        @click="saveFile"
-                        v-if="isFSApiSupported"
-                        :disabled="!fileHandle"
-                        style="grid-column: 1 / -1"
-                    >
-                        保存文件
-                    </button>
-
+                    <button class="btn btn-secondary btn-full-width" @click="openFile" v-if="isFSApiSupported">打开文件</button>
+                    <button class="btn btn-primary btn-full-width" @click="saveFile" v-if="isFSApiSupported" :disabled="!fileHandle" style="grid-column: 1 / -1">保存文件</button>
                     <template v-if="!isFSApiSupported">
                         <button class="btn btn-secondary btn-full-width" @click="triggerImport">导入JSON</button>
-                        <button
-                            class="btn btn-primary btn-full-width"
-                            @click="exportAllJson"
-                            :disabled="recipes.length === 0"
-                            style="grid-column: 1 / -1"
-                        >
-                            导出JSON
-                        </button>
+                        <button class="btn btn-primary btn-full-width" @click="exportAllJson" :disabled="recipes.length === 0" style="grid-column: 1 / -1">导出JSON</button>
                     </template>
-                    <input
-                        type="file"
-                        ref="fileInput"
-                        @change="handleFileImport"
-                        accept=".json"
-                        style="display: none"
-                    />
+                    <input type="file" ref="fileInput" @change="handleFileImport" accept=".json" style="display: none" />
                 </footer>
             </aside>
-
             <main class="main-content" ref="mainContentRef">
                 <div v-if="currentFamily && currentVersion" class="editor-content">
                     <div class="card">
@@ -921,7 +500,10 @@
                                     />
                                     <div class="tags-container">
                                         <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
-                                        </div>
+                                        <span v-if="ing.name === '水' && currentFamily.category === 'BREAD'" class="ing-tag tag-water">
+                                            总量: {{ totalWaterRatio }}%
+                                        </span>
+                                    </div>
                                 </div>
                                 <input
                                     class="input-field ratio-input"
@@ -1257,10 +839,10 @@
                             <span v-if="sugg.selfMade" class="suggestion-tag tag-self">自制</span>
                         </template>
                         <template v-else-if="sugg.type === 'NEW_NORMAL'">
-                            <span class="suggestion-action">✨ 新建原料: {{ sugg.name }}</span>
+                            <span class="suggestion-action">+ 新建原料: {{ sugg.name }}</span>
                         </template>
                         <template v-else-if="sugg.type === 'NEW_FLOUR'">
-                            <span class="suggestion-action">🌾 新建面粉: {{ sugg.name }}</span>
+                            <span class="suggestion-action">+ 新建面粉: {{ sugg.name }}</span>
                         </template>
                     </li>
                 </ul>
@@ -1299,24 +881,24 @@
                 setup() {
                     let nextRecipeId = 1;
                     let nextIngredientId = 1000;
-                    let nextVersionId = 10000; // [G-Code-Note] 新增
+                    let nextVersionId = 10000; 
 
-                    const recipes = ref([]); // [G-Code-Note] 现在是 '配方族' (Families) 数组
-                    const currentFamilyId = ref(null); // [G-Code-Note] 替换 currentRecipeId
-                    const currentVersionIndex = ref(0); // [G-Code-Note] 新增，跟踪当前激活的版本
+                    const recipes = ref([]); 
+                    const currentFamilyId = ref(null); 
+                    const currentVersionIndex = ref(0); 
                     const activeProductTab = ref(0);
                     const fileInput = ref(null);
                     const isAddPreDoughModalVisible = ref(false);
                     const activeCategory = ref('MAIN');
                     const mainContentRef = ref(null);
                     const productTabsRef = ref(null);
-                    const versionTabsRef = ref(null); // [G-Code-Note] 新增
+                    const versionTabsRef = ref(null); 
                     const fileHandle = ref(null);
 
                     const savedRecipeSnapshots = ref(new Map());
                     const isFSApiSupported = computed(() => 'showOpenFilePicker' in window);
 
-                    // [G-Code-Note] 全局原料库: Map<name, {isFlour, waterContent, ...}>
+                    // 全局原料库
                     const globalIngredientLibrary = ref(new Map());
 
                     // 初始化原料库
@@ -1359,11 +941,20 @@
                     };
                     initIngredientLibrary();
 
-                    // 动态计算标签Wrapper的样式
+                    // 动态计算标签Wrapper的样式 (用于第一部分CSS的padding控制)
+                    // 修改：增加对水标签的判断，赋予更宽的padding
                     const getWrapperClass = (ing) => {
                         let count = 0;
                         if (ing.isFlour) count++;
                         if (isSelfMade(ing.name)) count++;
+                        
+                        const hasWaterTag = ing.name === '水' && currentFamily.value?.category === 'BREAD';
+                        
+                        if (hasWaterTag) {
+                            // 水标签比较宽 ("总量: 84%"), 直接给予2个标签宽度的空间
+                            return 'input-has-2-tags';
+                        }
+
                         if (count === 1) return 'input-has-1-tag';
                         if (count === 2) return 'input-has-2-tags';
                         return '';
@@ -1385,7 +976,6 @@
                         return recipes.value.some((family) => isFamilyDirty(family));
                     });
 
-                    // [G-Code-Note] 拆分 tabs 滚动状态
                     const tabScrollState = ref({
                         version: { showLeft: false, showRight: false },
                         product: { showLeft: false, showRight: false },
@@ -1437,7 +1027,6 @@
                         },
                     );
 
-                    // --- [G-Code-Note] 核心状态重构 ---
                     const currentFamilyIndex = computed(() =>
                         recipes.value.findIndex((r) => r.id === currentFamilyId.value),
                     );
@@ -1449,16 +1038,11 @@
                             ? currentFamily.value.versions[currentVersionIndex.value]
                             : null,
                     );
-                    // ------------------------------------
 
-                    // [G-Code-Note] 新增: 是否显示面粉复选框的逻辑
                     const showFlourCheckbox = computed(() => {
                         if (!currentFamily.value) return false;
-                        // 面种
                         if (currentFamily.value.type === 'PRE_DOUGH') return true;
-                        // 面包类
                         if (currentFamily.value.type === 'MAIN' && currentFamily.value.category === 'BREAD') return true;
-                        // 其他 (西点, 甜品, 馅料等)
                         return false;
                     });
 
@@ -1476,13 +1060,11 @@
                         ) {
                             return [];
                         }
-                        // [G-Code-Note] 迭代 currentVersion.value.doughs (源数据)
                         const preDoughs = currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
 
                         return preDoughs.map((dough) => {
-                            // [G-Code-Note] dough 是原始 dough 对象的引用
                             const totalFlourRatioInPreDough = dough.ingredients
-                                .filter((ing) => ing.isFlour) // [G-Code-Note] 依赖于 ing.isFlour
+                                .filter((ing) => ing.isFlour) 
                                 .reduce((sum, ing) => sum + (ing.ratio || 0), 0);
 
                             if (totalFlourRatioInPreDough === 0) {
@@ -1490,12 +1072,11 @@
                                     ...dough,
                                     calculatedIngredients: dough.ingredients.map((ing) => ({
                                         ...ing,
-                                        calculatedRatio: ing.ratio, // 或 0
+                                        calculatedRatio: ing.ratio, 
                                     })),
                                 };
                             }
 
-                            // [G-Code-Note] dough.flourRatioInMainDough 是 v-model 绑定的值
                             const flourRatioInMainDough = dough.flourRatioInMainDough || 0;
 
                             const calculatedIngredients = dough.ingredients.map((ing) => {
@@ -1515,12 +1096,38 @@
                         });
                     });
 
-                    // [G-Code-Note] 新增: 用于响应式更新面种百分比的方法
+                    // 新增：计算总水量（主面团含水原料 + 面种含水原料）
+                    const totalWaterRatio = computed(() => {
+                        if (!currentFamily.value || currentFamily.value.type !== 'MAIN' || !currentVersion.value) return 0;
+                        
+                        let totalWater = 0;
+
+                        // 1. 计算主面团中含水原料的水量
+                        if (mainDough.value) {
+                            mainDough.value.ingredients.forEach(ing => {
+                                const content = ing.waterContent || 0;
+                                const ratio = parseFloat(ing.ratio) || 0;
+                                totalWater += ratio * content;
+                            });
+                        }
+
+                        // 2. 计算所有引用面种中的水量
+                        // 使用 processedPreDoughs，因为里面的 calculatedIngredients 已经是折算到主面团体系下的比例了
+                        processedPreDoughs.value.forEach(pd => {
+                            pd.calculatedIngredients.forEach(ing => {
+                                const content = ing.waterContent || 0;
+                                const ratio = parseFloat(ing.calculatedRatio) || 0;
+                                totalWater += ratio * content;
+                            });
+                        });
+
+                        return parseFloat(totalWater.toFixed(1));
+                    });
+
                     const updatePreDoughRatio = (doughId, rawValue) => {
                         const originalDough = currentVersion.value.doughs.find((d) => d.id === doughId);
                         if (originalDough) {
                             const parsedValue = parseFloat(rawValue);
-                            // [G-Code-Note] 同步 v-model.number 的行为, 空或无效输入 -> null
                             originalDough.flourRatioInMainDough = isNaN(parsedValue) ? null : parsedValue;
                         }
                     };
@@ -1537,34 +1144,25 @@
                         extra: recipes.value.filter((r) => r.type === 'EXTRA'),
                     }));
 
-                    // [G-Code-Note] 重命名为 filteredFamilies
                     const filteredFamilies = computed(() => {
                         return recipes.value.filter((r) => r.type === activeCategory.value);
                     });
 
-                    // [G-Code-Note] 新增: 通用原料排序函数
                     function sortIngredients(ingredients, recipeType, recipeCategory) {
                         const isBreadLogic = (recipeType === 'PRE_DOUGH') || (recipeType === 'MAIN' && recipeCategory === 'BREAD');
-
-                        // [G-Code-Note] 确保 ratio 为 null 或 undefined 时, 排序到最后
                         const getRatio = (ing) => ing.ratio ?? -Infinity;
 
                         return [...ingredients].sort((a, b) => {
                             if (isBreadLogic) {
-                                // 逻辑1: 面包/面种 (面粉优先, 然后按比例)
                                 if (a.isFlour && !b.isFlour) return -1;
                                 if (!a.isFlour && b.isFlour) return 1;
-                                
-                                // 同组内 (都是面粉或都不是面粉), 按比例降序
                                 return getRatio(b) - getRatio(a);
                             } else {
-                                // 逻辑2: 其他 (馅料, 西点等), 按比例降序
                                 return getRatio(b) - getRatio(a);
                             }
                         });
                     }
 
-                    // [G-Code-Note] 新增: 用于显示的已排序主面团原料
                     const sortedMainDoughIngredients = computed(() => {
                         if (!mainDough.value) return [];
                         return sortIngredients(
@@ -1574,7 +1172,6 @@
                         );
                     });
 
-                    // [G-Code-Note] 新增: 用于显示的已排序 "其他" (面种/馅料) 原料
                     const sortedOtherIngredients = computed(() => {
                         if (!currentVersion.value || currentFamily.value.type === 'MAIN') return [];
                         return sortIngredients(
@@ -1584,14 +1181,11 @@
                         );
                     });
 
-                    // [G-Code-Note] 新增: 用于显示的产品, 包含已排序的 MixIns, Fillings, Toppings
                     const productsWithSortedMixIns = computed(() => {
                         if (!currentVersion.value || !currentVersion.value.products) return [];
                         return currentVersion.value.products.map(product => ({
                             ...product,
-                            // [G-Code-Note] MixIns (辅料) 始终使用 "其他" 逻辑 (按比例排序)
                             sortedMixIns: sortIngredients(product.mixIns, 'EXTRA', 'OTHER'),
-                            // [G-Code-Note] 馅料和装饰按 weightInGrams 降序排序
                             sortedFillings: [...product.fillings].sort((a,b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity)),
                             sortedToppings: [...product.toppings].sort((a,b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity)),
                         }));
@@ -1622,7 +1216,6 @@
                         return availablePreDoughs.value.filter((d) => !existingDoughNames.has(d.name));
                     });
 
-                    // [G-Code-Note] 监听 'currentVersion.products'
                     watch(
                         () => currentVersion.value?.products,
                         () => {
@@ -1633,7 +1226,6 @@
                         { deep: true },
                     );
 
-                    // [G-Code-Note] 监听 'currentFamily' (用于版本) 和 'currentVersionIndex'
                     watch([currentFamily, currentVersionIndex], () => {
                         if (currentFamily.value) {
                             nextTick(() => {
@@ -1646,7 +1238,6 @@
                         }
                     });
 
-                    // [G-Code-Note] 更新版本 Tab 滚动按钮
                     const updateVersionTabScrollButtons = () => {
                         const el = versionTabsRef.value;
                         if (!el) {
@@ -1658,12 +1249,10 @@
                         tabScrollState.value.version.showRight =
                             hasOverflow && el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
                     };
-                    // [G-Code-Note] 滚动版本 Tab
                     const scrollVersionTabs = (amount) => {
                         versionTabsRef.value?.scrollBy({ left: amount, behavior: 'smooth' });
                     };
 
-                    // [G-Code-Note] 更新产品 Tab 滚动按钮
                     const updateProductTabScrollButtons = () => {
                         const el = productTabsRef.value;
                         if (!el) {
@@ -1675,25 +1264,23 @@
                         tabScrollState.value.product.showRight =
                             hasOverflow && el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
                     };
-                    // [G-Code-Note] 滚动产品 Tab
                     const scrollProductTabs = (amount) => {
                         productTabsRef.value?.scrollBy({ left: amount, behavior: 'smooth' });
                     };
 
-                    // [G-Code-Note] 重构：getNewVersion (创建新版本的模板)
                     function getNewVersion(type, category = 'BREAD') {
                         const commonIngredient = {
                             id: nextIngredientId++,
                             name: '',
                             ratio: null,
-                            isFlour: false, // [G-Code-Note] 默认 false
+                            isFlour: false, 
                             waterContent: 0,
                         };
 
                         if (type === 'MAIN') {
                             return {
                                 id: nextVersionId++,
-                                notes: `V${nextVersionId}`, // 初始备注
+                                notes: `V${nextVersionId}`, 
                                 targetTemp: null,
                                 doughs: [
                                     {
@@ -1721,19 +1308,18 @@
                         }
                         return {
                             id: nextVersionId++,
-                            notes: `V${nextVersionId}`, // 初始备注
+                            notes: `V${nextVersionId}`, 
                             lossRatio: null,
                             ingredients: [JSON.parse(JSON.stringify(commonIngredient))],
                             procedure: [''],
                         };
                     }
 
-                    // [G-Code-Note] 重构：getNewFamily (创建新配方族的模板)
                     function getNewFamily(type) {
                         const id = nextRecipeId++;
                         const category = type === 'MAIN' ? 'BREAD' : 'OTHER';
                         const firstVersion = getNewVersion(type, category);
-                        firstVersion.notes = 'V1 - 初始版本'; // 第一个版本备注
+                        firstVersion.notes = 'V1 - 初始版本'; 
 
                         return {
                             id,
@@ -1744,21 +1330,18 @@
                         };
                     }
 
-                    // [G-Code-Note] 重构：addFamily (替换 addRecipe)
                     const addFamily = () => {
                         const newFamily = getNewFamily(activeCategory.value);
                         recipes.value.push(newFamily);
-                        selectFamily(newFamily.id); // [G-Code-Note] 调用 selectFamily
+                        selectFamily(newFamily.id); 
                     };
 
-                    // [G-Code-Note] 重构：selectFamily (替换 selectRecipe)
                     const selectFamily = (id) => {
                         suggestionState.value.visible = false;
                         currentFamilyId.value = id;
-                        currentVersionIndex.value = 0; // 默认选中第一个版本
+                        currentVersionIndex.value = 0; 
                     };
 
-                    // [G-Code-Note] 重构：deleteFamily (替换 deleteRecipe)
                     const deleteFamily = (id) => {
                         const index = recipes.value.findIndex((r) => r.id === id);
                         if (index === -1) return;
@@ -1768,27 +1351,21 @@
                             currentVersionIndex.value = 0;
                         }
 
-                        savedRecipeSnapshots.value.delete(id); // 从快照中也删除
+                        savedRecipeSnapshots.value.delete(id); 
                         recipes.value.splice(index, 1);
                     };
 
-                    // [G-Code-Note] 新增：addVersion
                     const addVersion = () => {
                         if (!currentFamily.value) return;
-                        // 复制当前版本作为模板
                         const newVersion = JSON.parse(JSON.stringify(currentVersion.value));
-                        // 分配新 ID
                         newVersion.id = nextVersionId++;
                         newVersion.notes = `${currentVersion.value.notes} (副本)`;
-                        // TODO: 深度复制时需要为所有子项分配新 ID
-                        // (为了简化，这个工具目前依赖浅层复制ID，但对于纯JSON是安全的)
                         currentFamily.value.versions.push(newVersion);
                         nextTick(() => {
                             currentVersionIndex.value = currentFamily.value.versions.length - 1;
                         });
                     };
 
-                    // [G-Code-Note] 新增：deleteVersion
                     const deleteVersion = (index) => {
                         if (!currentFamily.value || currentFamily.value.versions.length <= 1) {
                             alert('必须至少保留一个版本。');
@@ -1807,20 +1384,17 @@
                         isAddPreDoughModalVisible.value = true;
                     };
                     const addPreDoughReference = (dough) => {
-                        // [G-Code-Note] 绑定到 currentVersion
-                        // [G-Code-Note] 引用面种的最新版本
                         const latestVersion = dough.versions[dough.versions.length - 1];
                         currentVersion.value.doughs.push({
                             ...JSON.parse(JSON.stringify(latestVersion)),
                             id: nextRecipeId++,
-                            name: dough.name, // Family name
+                            name: dough.name, 
                             type: 'PRE_DOUGH',
                             flourRatioInMainDough: 20,
                         });
                         isAddPreDoughModalVisible.value = false;
                     };
                     const removePreDough = (index) => {
-                        // [G-Code-Note] 绑定到 currentVersion
                         const preDoughs = currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
                         const doughToRemove = preDoughs[index];
                         const originalIndex = currentVersion.value.doughs.findIndex((d) => d === doughToRemove);
@@ -1843,7 +1417,6 @@
                         const suggestions = [];
                         const lowerQuery = query.toLowerCase();
 
-                        // 1. 搜索库中存在的原料
                         for (const [name, data] of globalIngredientLibrary.value) {
                             if (name.toLowerCase().includes(lowerQuery)) {
                                 suggestions.push({
@@ -1857,10 +1430,8 @@
                             }
                         }
 
-                        // 2. 搜索自制配方
                         for (const name of selfMadeRecipeNames.value) {
                              if (name.toLowerCase().includes(lowerQuery)) {
-                                // 自制配方优先展示，且去重（如果库里也有同名的，优先展示自制标记）
                                 const existingIdx = suggestions.findIndex(s => s.name === name);
                                 if(existingIdx > -1) {
                                     suggestions[existingIdx].selfMade = true;
@@ -1877,8 +1448,6 @@
                              }
                         }
 
-                        // 3. 如果完全匹配库中/自制的名字，则只显示匹配项。
-                        //    如果没有完全匹配项，则添加“新建”选项
                         const exactMatch = suggestions.find(s => s.name === query);
                         if (!exactMatch) {
                              suggestions.push({
@@ -1898,22 +1467,21 @@
                     };
 
                     const handleIngredientBlur = (ingredient) => {
-                        // [G-Code-Note] 延迟执行，以便 selectSuggestion 能先触发
                         setTimeout(() => {
-                            if (suggestionState.value.visible) {
-                                suggestionState.value.visible = false;
-                            }
-
-                            // [G-Code-Note] 检查是否由 selectSuggestion 处理过
+                            // 【修改点】在这里加一个判断：
+                            // 只有当 "当前记录的焦点原料(ingRef)" 仍然是 "触发Blur的这个原料(ingredient)" 时，才执行关闭。
+                            // 如果你已经点到了下一个输入框，Focus事件早就把 ingRef 更新成新的原料了，
+                            // 此时 ingRef !== ingredient，这里的关闭逻辑就会被跳过，提示框就不会闪退啦。
+                            
                             if (suggestionState.value.ingRef === ingredient) {
-                                // 意味着 blur 发生在 select 之前，或者没有 select
+                                suggestionState.value.visible = false;
+
+                                // 下面是原有的检查逻辑，保持在 if 里面即可
                                 if (ingredient.name) {
-                                    // Blur时，如果库里有这个名字，就同步属性
                                     if (globalIngredientLibrary.value.has(ingredient.name)) {
                                         const libData = globalIngredientLibrary.value.get(ingredient.name);
                                         ingredient.isFlour = libData.isFlour;
                                     }
-                                    // 如果库里没有，保持原样（默认非面粉），等待用户下次选择“新建”来修正
                                 }
                                 suggestionState.value.ingRef = null;
                             }
@@ -1931,14 +1499,12 @@
                             } else if (suggestion.type === 'NEW_NORMAL') {
                                 targetIng.isFlour = false;
                                 targetIng.waterContent = 0;
-                                // 添加到库
                                 globalIngredientLibrary.value.set(suggestion.name, {
                                     name: suggestion.name, isFlour: false, waterContent: 0
                                 });
                             } else if (suggestion.type === 'NEW_FLOUR') {
                                 targetIng.isFlour = true;
-                                targetIng.waterContent = 0; // 面粉默认水份先设为0，需后续调整
-                                // 添加到库
+                                targetIng.waterContent = 0; 
                                 globalIngredientLibrary.value.set(suggestion.name, {
                                     name: suggestion.name, isFlour: true, waterContent: 0
                                 });
@@ -1947,7 +1513,7 @@
                         suggestionState.value.visible = false;
                         suggestionState.value.suggestions = [];
                         suggestionState.value.target = null;
-                        suggestionState.value.ingRef = null; // [G-Code-Note] 标记为已处理
+                        suggestionState.value.ingRef = null; 
                     };
 
                     const addMainDoughIngredient = () =>
@@ -1958,7 +1524,6 @@
                             isFlour: false,
                             waterContent: 0,
                         });
-                    // [G-Code-Note] 排序: 修改为按 ID 删除
                     const removeMainDoughIngredient = (id) => {
                         const index = mainDough.value.ingredients.findIndex(i => i.id === id);
                         if (index > -1) mainDough.value.ingredients.splice(index, 1);
@@ -1974,7 +1539,6 @@
                             isFlour: false,
                             waterContent: 0,
                         });
-                    // [G-Code-Note] 排序: 修改为按 ID 删除
                     const removeOtherIngredient = (id) => {
                         const index = currentVersion.value.ingredients.findIndex(i => i.id === id);
                         if (index > -1) currentVersion.value.ingredients.splice(index, 1);
@@ -2008,9 +1572,7 @@
                         }
                     };
 
-                    // [G-Code-Note] 排序: 修改 addSubIngredient 以使用 prodIndex
                     const addSubIngredient = (prodIndex, type) =>
-                        // [G-Code-Note] 排序: 修正: addSubIngredient 应该总是添加到原始数组中
                         currentVersion.value.products[prodIndex][type].push({
                             id: nextIngredientId++,
                             name: '',
@@ -2019,7 +1581,6 @@
                             isFlour: false,
                             waterContent: 0,
                         });
-                    // [G-Code-Note] 排序: 修改为按 product ID 和 ingredient ID 删除
                     const removeSubIngredient = (productId, type, ingredientId) => {
                         const product = currentVersion.value.products.find(p => p.id === productId);
                         if (product) {
@@ -2048,7 +1609,6 @@
                         }
                     };
 
-                    // [G-Code-Note] 重构：loadRecipesFromJson (支持 Family 结构)
                     const loadRecipesFromJson = (jsonString) => {
                         try {
                             const importedData = JSON.parse(jsonString);
@@ -2058,7 +1618,6 @@
                             importedData
                                 .filter((r) => r.type !== 'MAIN')
                                 .forEach((family) => {
-                                    // [G-Code-Note] 修正: 始终引用最后一个版本, 与手动添加保持一致
                                     if (family.versions && family.versions.length > 0) {
                                         preDoughMap.set(family.name, family.versions[family.versions.length - 1]);
                                     }
@@ -2074,13 +1633,11 @@
                                 };
 
                                 if (!family.versions || family.versions.length === 0) {
-                                    // 如果导入的文件是旧格式（没有 versions 数组）
-                                    // 则将其作为 V1 版本处理
                                     console.warn(
                                         `配方 "${family.name}" 是旧格式，将自动转换为 V1 版本。`,
                                     );
                                     const v1 = normalizeVersion(
-                                        family, // 旧格式 recipe
+                                        family, 
                                         family.type,
                                         family.category,
                                         preDoughMap,
@@ -2088,7 +1645,6 @@
                                     v1.notes = 'V1 - (从旧格式导入)';
                                     newFamily.versions = [v1];
                                 } else {
-                                    // 新格式，遍历版本
                                     newFamily.versions = family.versions.map((version) => {
                                         return normalizeVersion(
                                             version,
@@ -2103,13 +1659,11 @@
 
                             recipes.value = normalizedFamilies;
                             
-                            // [G-Code-Note] 修正 "dirty" 标记: 在赋值后立即创建快照, 而不是 nextTick
                             savedRecipeSnapshots.value.clear();
                             for (const family of normalizedFamilies) {
                                 savedRecipeSnapshots.value.set(family.id, JSON.stringify(family));
                             }
 
-                            // [G-Code-Note] 修改: 默认选中 "产品配方" 标签, 并选中第一个产品配方
                             if (recipes.value.length > 0) {
                                 nextTick(() => {
                                     activeCategory.value = 'MAIN';
@@ -2118,7 +1672,6 @@
                                     if (firstMainRecipe) {
                                         selectFamily(firstMainRecipe.id);
                                     } else {
-                                        // 如果没有产品配方, 则回退到选中第一个配方
                                         selectFamily(recipes.value[0].id);
                                         activeCategory.value = recipes.value[0].type;
                                     }
@@ -2127,8 +1680,6 @@
                                 currentFamilyId.value = null;
                             }
                             alert(`成功加载 ${normalizedFamilies.length} 个配方族！`);
-                            // [G-Code-Note] 修正 "dirty" 标记: 移除 nextTick(updateSnapshot)
-                            // nextTick(updateSnapshot);
                         } catch (err) {
                             console.error('Load Error:', err);
                             alert(`加载失败：${err.message}`);
@@ -2149,8 +1700,6 @@
                         reader.readAsText(file);
                     };
 
-                    // [G-Code-Note] 重构：normalizeVersion (替换 normalizeRecipe)
-                    // (versionData 是来自 JSON 的 *单个* 版本)
                     function normalizeVersion(versionData, familyType, familyCategory, preDoughMap) {
                         const baseVersion = {
                             id: nextVersionId++,
@@ -2164,7 +1713,6 @@
                         };
 
                         const processImportedIngredient = (ing) => {
-                            // 导入时同步更新原料库
                             if (!globalIngredientLibrary.value.has(ing.name)) {
                                 globalIngredientLibrary.value.set(ing.name, {
                                     name: ing.name,
@@ -2173,14 +1721,12 @@
                                 });
                             }
                             
-                            // 强制使用库中的属性
                             const libData = globalIngredientLibrary.value.get(ing.name);
 
                             return {
                                 id: nextIngredientId++,
                                 name: ing.name,
                                 ratio: toPercentage(ing.ratio),
-                                // [G-Code-Note] 优先使用库中的 isFlour
                                 isFlour: libData.isFlour, 
                                 waterContent: libData.waterContent,
                             };
@@ -2302,14 +1848,12 @@
                         return baseVersion;
                     }
 
-                    // [G-Code-Note] 排序: 签名增加 familyCategory
                     function exportVersion(version, familyType, familyCategory) {
                         const formatIngredient = (ing) => {
                             const result = {
                                 name: ing.name,
                                 ratio: toDecimal(ing.ratio),
                             };
-                            // [G-Code-Note] 显式保存 isFlour
                             if (ing.isFlour) {
                                 result.isFlour = true;
                             }
@@ -2321,7 +1865,6 @@
 
                         if (familyType === 'MAIN') {
                             const md = version.doughs.find((d) => d.type === 'MAIN_DOUGH');
-                            // [G-Code-Note] 排序: 排序主面团原料
                             const sortedMainIngredients = sortIngredients(md.ingredients, familyType, familyCategory);
 
                             const finalIngredients = [
@@ -2331,7 +1874,6 @@
                                         name: pd.name,
                                         flourRatio: toDecimal(pd.flourRatioInMainDough),
                                     })),
-                                // [G-Code-Note] 排序: 使用 sortedMainIngredients
                                 ...sortedMainIngredients
                                     .filter((ing) => ing.name.trim() && ing.ratio !== null)
                                     .map(formatIngredient),
@@ -2344,8 +1886,7 @@
                                 procedure: md.procedure.filter((p) => p.trim()),
                                 ingredients: finalIngredients,
                                 products: version.products.map((p) => {
-                                    // [G-Code-Note] 排序: 排序辅料/馅料/装饰
-                                    const sortedMixIns = sortIngredients(p.mixIns, 'EXTRA', 'OTHER'); // 按比例
+                                    const sortedMixIns = sortIngredients(p.mixIns, 'EXTRA', 'OTHER'); 
                                     const sortedFillings = [...p.fillings].sort((a,b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity));
                                     const sortedToppings = [...p.toppings].sort((a,b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity));
                                     
@@ -2353,26 +1894,23 @@
                                         name: p.name,
                                         weight: p.baseDoughWeight,
                                         procedure: p.procedure.filter((step) => step.trim()),
-                                        mixIn: sortedMixIns // [G-Code-Note] 排序: 使用 sortedMixIns
+                                        mixIn: sortedMixIns 
                                             .filter((i) => i.name.trim() && i.ratio !== null)
                                             .map((i) => ({ name: i.name, ratio: toDecimal(i.ratio) })),
-                                        fillings: sortedFillings // [G-Code-Note] 排序: 使用 sortedFillings
+                                        fillings: sortedFillings 
                                             .filter((i) => i.name.trim() && i.weightInGrams !== null)
                                             .map((i) => ({ name: i.name, weightInGrams: i.weightInGrams })),
-                                        toppings: sortedToppings // [G-Code-Note] 排序: 使用 sortedToppings
+                                        toppings: sortedToppings 
                                             .filter((i) => i.name.trim() && i.weightInGrams !== null)
                                             .map((i) => ({ name: i.name, weightInGrams: i.weightInGrams })),
                                     }
                                 }),
                             };
                         } else {
-                            // PRE_DOUGH 或 EXTRA
-                            // [G-Code-Note] 排序: 排序原料
                             const sortedIngredients = sortIngredients(version.ingredients, familyType, familyCategory);
                             return {
                                 notes: version.notes,
                                 lossRatio: toDecimal(version.lossRatio),
-                                // [G-Code-Note] 排序: 使用 sortedIngredients
                                 ingredients: sortedIngredients
                                     .filter((ing) => ing.name.trim() && ing.ratio !== null)
                                     .map(formatIngredient),
@@ -2382,28 +1920,24 @@
                         }
                     }
 
-                    // [G-Code-Note] 重构：getRecipesAsJsonString (支持 Family 结构)
                     const getRecipesAsJsonString = () => {
                         if (recipes.value.length === 0) {
                             alert('请先添加至少一个配方');
                             return null;
                         }
 
-                        // [G-Code-Note] 修正: 100% 面粉验证
                         for (const family of recipes.value) {
-                            // 仅检查面包类的主配方和面种配方
                             const isCheckable = family.type === 'PRE_DOUGH' || (family.type === 'MAIN' && family.category === 'BREAD');
 
                             if (isCheckable) {
                                 for (const version of family.versions) {
                                     
-                                    let totalFlourRatio = 0; // [G-Code-Note] 修改: 声明总面粉比例
-                                    let context = ''; // 用于错误提示
+                                    let totalFlourRatio = 0; 
+                                    let context = ''; 
 
                                     if (family.type === 'MAIN') {
                                         context = `配方 "${family.name || '未命名'}" (版本: ${version.notes || 'V?'})`;
                                         
-                                        // [G-Code-Note] 1. 累加主面团中的面粉
                                         const mainDough = version.doughs.find((d) => d.type === 'MAIN_DOUGH');
                                         if (mainDough) {
                                             totalFlourRatio += mainDough.ingredients.reduce((sum, ing) => {
@@ -2411,13 +1945,12 @@
                                             }, 0);
                                         }
 
-                                        // [G-Code-Note] 2. 累加所有面种引用的面粉比例
                                         const preDoughs = version.doughs.filter((d) => d.type === 'PRE_DOUGH');
                                         totalFlourRatio += preDoughs.reduce((sum, dough) => {
                                             return sum + (dough.flourRatioInMainDough || 0);
                                         }, 0);
 
-                                    } else { // PRE_DOUGH
+                                    } else { 
                                         context = `面种 "${family.name || '未命名'}" (版本: ${version.notes || 'V?'})`;
                                         if (version.ingredients.length > 0) {
                                             totalFlourRatio = version.ingredients.reduce((sum, ing) => {
@@ -2426,30 +1959,25 @@
                                         }
                                     }
 
-                                    // [G-Code-Note] 修改: 统一执行验证
-                                    // 只有在有面粉的情况下才校验100%
                                     if (totalFlourRatio > 0 && Math.abs(totalFlourRatio - 100) > 1e-9) {
                                         alert(
                                             `保存失败：\n\n${context}\n中所有面粉类原料（主面团面粉 + 面种引用面粉）的比例总和不等于 100%。\n\n当前总和: ${totalFlourRatio.toFixed(2)}%\n\n请检查并修正后再保存。`,
                                         );
-                                        return null; // 中断保存
+                                        return null; 
                                     }
                                 }
                             }
                         }
-                        // [G-Code-Note] 验证结束
 
                         try {
-                            // [G-Code-Note] 新增: 按依赖关系排序 (面种/馅料在前, 产品在后)
                             const typeOrder = { 'PRE_DOUGH': 1, 'EXTRA': 2, 'MAIN': 3 };
                             const sortedFamilies = [...recipes.value].sort((a, b) => {
                                 const orderA = typeOrder[a.type] || 99;
                                 const orderB = typeOrder[b.type] || 99;
                                 return orderA - orderB;
                             });
-                            // [G-Code-Note] 结束
 
-                            const processedFamilies = sortedFamilies.map((family) => { // [G-Code-Note] 修改: 使用 sortedFamilies
+                            const processedFamilies = sortedFamilies.map((family) => { 
                                 if (!family.name || !family.name.trim())
                                     throw new Error(`列表中有未命名的配方族，请检查后再导出。`);
 
@@ -2457,7 +1985,6 @@
                                     name: family.name,
                                     type: family.type,
                                     category: family.category,
-                                    // [G-Code-Note] 排序: 传递 family.category
                                     versions: family.versions.map((v) => exportVersion(v, family.type, family.category)),
                                 };
                             });
@@ -2599,13 +2126,13 @@
                         exportAllJson,
                         openFile,
                         saveFile,
-                        updatePreDoughRatio, // [G-Code-Note] 暴露新方法
-                        // [G-Code-Note] 排序: 暴露 computed 属性
+                        updatePreDoughRatio, 
                         sortedMainDoughIngredients,
                         sortedOtherIngredients,
                         productsWithSortedMixIns,
-                        showFlourCheckbox, // [G-Code-Note] 暴露面粉列显隐逻辑
-                        getWrapperClass, // [G-Code-Note] 暴露Wrapper类方法
+                        showFlourCheckbox, 
+                        getWrapperClass, 
+                        totalWaterRatio // 新增的计算属性
                     };
                 },
             }).mount('#app');
