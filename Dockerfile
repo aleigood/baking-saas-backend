@@ -3,6 +3,9 @@
 # 使用一个包含完整构建工具的镜像
 FROM node:20-slim
 
+# 替换 Debian 软件源为阿里云镜像，解决 apt-get update 卡顿问题
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+
 # [可选优化] 明确安装 openssl 以消除 Prisma 警告
 RUN apt-get update && apt-get install -y openssl
 
