@@ -644,6 +644,7 @@ export class CostingService {
     private _parseProcedureForNotes(
         procedure: string[] | undefined | null,
         baseWeightForPercentage: Prisma.Decimal,
+        shouldConvertPercentages: boolean = true, // 新增参数，控制是否进行百分比换算
     ): {
         cleanedProcedure: string[];
         ingredientNotes: Map<string, string>;
@@ -657,12 +658,17 @@ export class CostingService {
 
         const cleanedProcedure = procedure
             .map((step) => {
-                // 第一步：替换百分比
-                const processedStep = step.replace(percentageRegex, (match: string, p1: string) => {
-                    const percentage = new Prisma.Decimal(p1);
-                    const calculatedWeight = baseWeightForPercentage.mul(percentage.div(100));
-                    return `${calculatedWeight.toDP(1).toNumber()}克`; // 保留此处的 toDP(1) 以便在UI上显示
-                });
+                let processedStep = step;
+
+                // 仅当开关开启时，才执行百分比替换逻辑
+                // 在配方详情页，我们希望保留原始的百分比显示
+                if (shouldConvertPercentages) {
+                    processedStep = step.replace(percentageRegex, (match: string, p1: string) => {
+                        const percentage = new Prisma.Decimal(p1);
+                        const calculatedWeight = baseWeightForPercentage.mul(percentage.div(100));
+                        return `${calculatedWeight.toDP(1).toNumber()}克`;
+                    });
+                }
 
                 // 第二步：提取注释
                 const stepMatches = [...processedStep.matchAll(noteRegex)];
@@ -791,9 +797,11 @@ export class CostingService {
                 }
             }
 
+            // 在这里调用解析步骤时，传入 false 禁用百分比转换
             const { cleanedProcedure, ingredientNotes } = this._parseProcedureForNotes(
                 component.procedure,
                 currentFlourWeight, // 百分比替换仍然使用面粉基准
+                false, // 禁用百分比转换，保留原始 [10%] 显示
             );
             group.procedure = cleanedProcedure;
 
