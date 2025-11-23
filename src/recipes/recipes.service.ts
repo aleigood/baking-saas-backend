@@ -32,6 +32,21 @@ import {
     BatchProductDto,
 } from './dto/batch-import-recipe.dto';
 
+// [新增] 单一递归类型定义
+type WaterCalcFamily = {
+    versions: {
+        isActive: boolean;
+        components: {
+            ingredients: {
+                ratio?: Prisma.Decimal | number | null;
+                ingredient?: { waterContent: Prisma.Decimal | number } | null;
+                linkedPreDough?: WaterCalcFamily | null;
+                linkedExtra?: WaterCalcFamily | null;
+            }[];
+        }[];
+    }[];
+};
+
 const componentIngredientWithLinksInclude = {
     ingredient: true,
     linkedPreDough: true, // 关联 preDoughId
@@ -312,6 +327,59 @@ export class RecipesService {
                 })),
             })),
         };
+    }
+
+    // [新增] 核心辅助方法：递归计算含水量
+    // 这个逻辑是从前端移植过来的，放在这里运行速度更快
+    private _calculateWaterContent(family: WaterCalcFamily | null | undefined, depth = 0): number {
+        // 防止无限递归
+        if (!family || depth > 4) return 0;
+
+        // 1. 找到激活的版本
+        const versions = family.versions || [];
+        if (versions.length === 0) return 0;
+        // 优先取 isActive=true，否则取第一个
+        const activeVersion = versions.find((v) => v.isActive) || versions[0];
+
+        // 2. 找到主组件 (ingredients 都在这里)
+        const component = activeVersion.components?.[0];
+        if (!component || !component.ingredients) return 0;
+
+        let totalWaterUnits = 0;
+        let totalUnits = 0;
+
+        for (const ing of component.ingredients) {
+            // Prisma 的 Decimal 需要转为 Number
+            const ratio = ing.ratio ? (typeof ing.ratio === 'object' ? ing.ratio.toNumber() : Number(ing.ratio)) : 0;
+
+            if (ratio <= 0) continue;
+
+            let waterContent = 0;
+
+            if (ing.ingredient) {
+                // A. 标准原料 (如: 水, 面粉)
+                const rawWaterContent = ing.ingredient?.waterContent;
+
+                waterContent = rawWaterContent
+                    ? typeof rawWaterContent === 'object'
+                        ? rawWaterContent.toNumber()
+                        : Number(rawWaterContent)
+                    : 0;
+            } else if (ing.linkedPreDough) {
+                // B. 引用面种 (递归计算)
+                waterContent = this._calculateWaterContent(ing.linkedPreDough, depth + 1);
+            } else if (ing.linkedExtra) {
+                // C. 引用馅料 (递归计算)
+                waterContent = this._calculateWaterContent(ing.linkedExtra, depth + 1);
+            }
+
+            totalWaterUnits += ratio * waterContent;
+            totalUnits += ratio;
+        }
+
+        if (totalUnits === 0) return 0;
+        // 返回加权平均值 (0 ~ 1)
+        return totalWaterUnits / totalUnits;
     }
 
     async batchImportRecipes(
@@ -1263,44 +1331,75 @@ export class RecipesService {
     }
 
     async findAll(tenantId: string) {
-        const recipeFamilies = await this.prisma.recipeFamily.findMany({
-            where: {
-                tenantId,
-                deletedAt: null, // 只查找未弃用的配方
-            },
-            include: {
-                versions: {
-                    where: { isActive: true },
-                    include: {
-                        products: {
-                            where: { deletedAt: null }, // 只包括未软删除的产品
-                        },
-                        components: {
-                            include: {
-                                _count: {
-                                    select: { ingredients: true },
+        // 1. 数据库查询：必须查出 ingredients 及其嵌套关系，否则无法计算
+        // 注意：为了支持递归，这里嵌套了多层 include
+        const queryInclude = {
+            versions: {
+                where: { isActive: true },
+                take: 1, // 只查最新激活版本，优化性能
+                include: {
+                    products: { where: { deletedAt: null } },
+                    components: {
+                        include: {
+                            ingredients: {
+                                include: {
+                                    ingredient: true, // 查标准原料
+                                    // 查引用的面种 (嵌套一层以便计算)
+                                    linkedPreDough: {
+                                        include: {
+                                            versions: {
+                                                where: { isActive: true },
+                                                take: 1,
+                                                include: {
+                                                    components: {
+                                                        include: { ingredients: { include: { ingredient: true } } },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                    // 查引用的馅料 (嵌套一层以便计算)
+                                    linkedExtra: {
+                                        include: {
+                                            versions: {
+                                                where: { isActive: true },
+                                                take: 1,
+                                                include: {
+                                                    components: {
+                                                        include: { ingredients: { include: { ingredient: true } } },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
                                 },
                             },
                         },
                     },
                 },
-                _count: {
-                    select: {
-                        usedInComponentsAsPreDough: true,
-                        usedInComponentsAsExtra: true,
-                        usedInProducts: true,
-                    },
+            },
+            _count: {
+                select: {
+                    usedInComponentsAsPreDough: true,
+                    usedInComponentsAsExtra: true,
+                    usedInProducts: true,
                 },
             },
+        };
+
+        const rawFamilies = await this.prisma.recipeFamily.findMany({
+            where: { tenantId, deletedAt: null },
+            include: queryInclude,
         });
 
         const familiesWithCounts = await Promise.all(
-            recipeFamilies.map(async (family) => {
-                const activeVersion = family.versions.find((v) => v.isActive);
+            rawFamilies.map(async (family) => {
+                // [修改] 计算逻辑移植自原代码
+                const activeVersion = family.versions.find((v) => v.isActive) || family.versions[0];
                 const productCount = activeVersion?.products?.length || 0;
                 const ingredientCount =
                     activeVersion?.components.reduce(
-                        (sum, component) => sum + (component._count?.ingredients || 0),
+                        (sum, component) => sum + (component.ingredients?.length || 0),
                         0,
                     ) || 0;
 
@@ -1310,7 +1409,7 @@ export class RecipesService {
                     (family._count?.usedInProducts || 0);
 
                 if (family.type !== 'MAIN') {
-                    return { ...family, ingredientCount, usageCount, productionTaskCount: 0 };
+                    return { ...family, ingredientCount, usageCount, productionTaskCount: 0, productCount };
                 }
 
                 if (!activeVersion || activeVersion.products.length === 0) {
@@ -1340,36 +1439,35 @@ export class RecipesService {
             }),
         );
 
-        // 在此进行局部的、专门的数据转换，而不是调用通用的 _sanitizeFamily
+        // 2. 数据转换与“瘦身”
+        // 在这里计算含水量，并丢弃不需要返回给前端的 heavy data
         const sanitizedFamilies = familiesWithCounts.map((family) => {
+            // A. 计算含水量
+            const calculatedWater = this._calculateWaterContent(family as unknown as WaterCalcFamily);
+
             return {
-                ...family,
-                versions: family.versions.map((v) => ({
-                    ...v,
-                    products: v.products.map((p) => ({
-                        ...p,
-                        baseDoughWeight: p.baseDoughWeight.toNumber(),
-                    })),
-                })),
+                id: family.id,
+                name: family.name,
+                type: family.type,
+                category: family.category,
+                updatedAt: family.updatedAt,
+                waterContent: calculatedWater,
+                // 保留之前计算好的统计字段
+                productCount: family.productCount,
+                ingredientCount: family.ingredientCount,
+                productionTaskCount: family.productionTaskCount,
+                usageCount: family.usageCount,
             };
         });
 
-        const mainRecipes = sanitizedFamilies
-            .filter((family) => family.type === 'MAIN')
-            .sort((a, b) => (b.productionTaskCount || 0) - (a.productionTaskCount || 0));
-
-        const preDoughs = sanitizedFamilies
-            .filter((family) => family.type === 'PRE_DOUGH')
-            .sort((a, b) => a.name.localeCompare(b.name));
-
-        const extras = sanitizedFamilies
-            .filter((family) => family.type === 'EXTRA')
-            .sort((a, b) => a.name.localeCompare(b.name));
-
         return {
-            mainRecipes,
-            preDoughs,
-            extras,
+            mainRecipes: sanitizedFamilies
+                .filter((f) => f.type === 'MAIN')
+                .sort((a, b) => (b.productionTaskCount || 0) - (a.productionTaskCount || 0)),
+            preDoughs: sanitizedFamilies
+                .filter((f) => f.type === 'PRE_DOUGH')
+                .sort((a, b) => a.name.localeCompare(b.name)),
+            extras: sanitizedFamilies.filter((f) => f.type === 'EXTRA').sort((a, b) => a.name.localeCompare(b.name)),
         };
     }
 
