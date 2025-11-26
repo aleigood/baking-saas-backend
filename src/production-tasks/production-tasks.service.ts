@@ -3401,18 +3401,8 @@ export class ProductionTasksService {
 
     // [新增] PDF 生成核心逻辑
     async generatePdf(tenantId: string, taskId: string): Promise<NodeJS.ReadableStream> {
-        // 1. 复用 findOne 获取计算好的详情数据
         const taskDetail = await this.findOne(tenantId, taskId, {});
 
-        // [核心新增] 单独获取任务日期信息 (因为 findOne 的返回类型可能不包含日期)
-        const taskMetadata = await this.prisma.productionTask.findUnique({
-            where: { id: taskId },
-            select: { startDate: true },
-        });
-        // 简单的日期格式化 YYYY-MM-DD
-        const dateStr = taskMetadata ? taskMetadata.startDate.toISOString().split('T')[0] : '';
-
-        // 2. 定义字体路径
         const fontPath = path.join(process.cwd(), 'dist/assets/fonts');
         const fonts = {
             Roboto: {
@@ -3423,18 +3413,14 @@ export class ProductionTasksService {
             },
         };
 
-        // [核心修复] 实例化时禁用 unsafe 检查
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
         const printer = new PdfPrinter(fonts);
 
-        // [核心修复] 定义格式化函数
         const formatWeight = (grams: number | null | undefined): string => {
             if (grams === null || grams === undefined) return '-';
             const num = Number(grams);
             if (isNaN(num)) return '-';
             if (Math.abs(num) === 0) return '0g';
-
-            // 小于 10kg 显示 g，否则显示 kg
             if (Math.abs(num) < 10000) {
                 return `${parseFloat(num.toFixed(2))}g`;
             } else {
@@ -3447,7 +3433,13 @@ export class ProductionTasksService {
         // --- 头部信息 ---
         content.push({ text: '生产任务单', style: 'header', alignment: 'center' });
 
-        // [核心新增] 显示执行日期
+        // 单独获取任务日期信息
+        const taskMetadata = await this.prisma.productionTask.findUnique({
+            where: { id: taskId },
+            select: { startDate: true },
+        });
+        const dateStr = taskMetadata ? taskMetadata.startDate.toISOString().split('T')[0] : '';
+
         if (dateStr) {
             content.push({
                 text: `执行日期: ${dateStr}`,
@@ -3467,7 +3459,6 @@ export class ProductionTasksService {
         content.push(infoTable);
         content.push({ text: '\n' });
 
-        // --- 库存预警 ---
         if (taskDetail.stockWarning) {
             content.push({
                 text: `[警] ${taskDetail.stockWarning}`,
@@ -3478,13 +3469,15 @@ export class ProductionTasksService {
 
         // --- 循环配方组 ---
         taskDetail.componentGroups.forEach((group, index) => {
-            // 组标题
+            // [核心修改] 移除强制分页，改用较大的顶部间距来区分
+            // 第一个组顶部间距 10，后续组顶部间距 40 (留白)
+            const topMargin = index > 0 ? 40 : 10;
+
             content.push({
                 text: `${group.familyName} ${group.note ? `(${group.note})` : ''}`,
                 style: 'groupTitle',
-                margin: [0, 10, 0, 5],
-                // [修复] 索引为0时不分页
-                pageBreak: index > 0 ? 'before' : undefined,
+                margin: [0, topMargin, 0, 5],
+                // pageBreak 已移除
             });
 
             content.push({ text: group.productsDescription, style: 'desc', margin: [0, 0, 0, 10] });
@@ -3511,7 +3504,6 @@ export class ProductionTasksService {
                 table: {
                     headerRows: 1,
                     keepWithHeaderRows: 1,
-                    // 主配方表保持独立宽度
                     widths: ['10%', '40%', '30%', '20%'],
                     body: body,
                     dontBreakRows: true,
@@ -3529,7 +3521,7 @@ export class ProductionTasksService {
                 content.push({ stack: steps, margin: [0, 0, 0, 15] });
             }
 
-            // [核心优化] 定义全局统一列宽
+            // 统一列宽
             const unifiedWidths = ['30%', '30%', '20%', '20%'];
 
             // 3. 产品详情
@@ -3582,7 +3574,7 @@ export class ProductionTasksService {
                     mixInsBody.push([
                         { text: '辅料', style: 'tableHeader' },
                         { text: '品牌', style: 'tableHeader' },
-                        { text: '', style: 'tableHeader' }, // 占位
+                        { text: '', style: 'tableHeader' },
                         { text: '总用量', style: 'tableHeader', alignment: 'right' },
                     ]);
                     for (const ing of product.mixIns) {
@@ -3724,6 +3716,7 @@ export class ProductionTasksService {
 
         return doc as NodeJS.ReadableStream;
     }
+
     // [新增] 生成前置任务 PDF
     async generatePrepTaskPdf(tenantId: string, date: string): Promise<NodeJS.ReadableStream> {
         // 1. 获取数据
@@ -3826,12 +3819,7 @@ export class ProductionTasksService {
         const renderTaskItems = (items: RenderTaskItem[], title: string) => {
             if (items.length === 0) return;
 
-            content.push({
-                text: getSectionTitle(title),
-                style: 'sectionHeader',
-                margin: [0, 10, 0, 5],
-                pageBreak: 'before',
-            });
+            content.push({ text: getSectionTitle(title), style: 'sectionHeader', margin: [0, 30, 0, 5] });
 
             items.forEach((item, index) => {
                 content.push({
@@ -3904,7 +3892,7 @@ export class ProductionTasksService {
                     name: ing.name,
                     isRecipe: ing.isRecipe,
                     brand: ing.brand,
-                    // [关键修复] 使用交叉类型断言 (as typeof ing & { extraInfo?: string })
+                    // [修复] 使用交叉类型断言，彻底解决 ESLint 报错
                     // 这样 ing 既保留了原有类型，又被告知可能含有 extraInfo，从而消除 any
                     extraInfo: (ing as typeof ing & { extraInfo?: string }).extraInfo || null,
                     weightInGrams: ing.weightInGrams,
@@ -3920,14 +3908,12 @@ export class ProductionTasksService {
 
             // 渲染面种部分
             if (preDoughs.length > 0) {
-                const title = '面种制作';
-                renderTaskItems(preDoughs, title);
+                renderTaskItems(preDoughs, '面种制作');
             }
 
             // 渲染馅料部分
             if (extras.length > 0) {
-                const title = '馅料/辅料制作';
-                renderTaskItems(extras, title);
+                renderTaskItems(extras, '馅料/辅料制作');
             }
         }
 
@@ -3948,6 +3934,7 @@ export class ProductionTasksService {
                 header: { fontSize: 20, bold: true, margin: [0, 0, 0, 5] },
                 subHeader: { fontSize: 12, color: '#555555' },
                 sectionHeader: { fontSize: 14, bold: true, color: '#333333', margin: [0, 5, 0, 5] },
+                // [修改] 颜色改为黑色
                 groupTitle: { fontSize: 13, bold: true, color: '#333333' },
                 desc: { fontSize: 10, italics: true, color: '#666666' },
                 tableHeader: { fontSize: 10, bold: true, color: 'black', fillColor: '#eeeeee' },
