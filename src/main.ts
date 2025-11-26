@@ -35,11 +35,13 @@ async function bootstrap() {
     );
 
     // Enable CORS
-    app.enableCors();
+    // [核心修复] 修改 CORS 配置以暴露 Content-Disposition
+    app.enableCors({
+        origin: true, // 允许所有来源跨域，或者你可以指定具体的域名
+        credentials: true,
+        exposedHeaders: ['Content-Disposition'], // 关键：允许前端读取这个响应头
+    });
 
     await app.listen(9527);
 }
-// --- 修复点 2: 解决“悬空Promise”警告 ---
-// 使用 void 明确告诉ESLint，我们知道这是一个Promise，
-// 但我们不需要等待它完成，这是应用启动时的标准做法。
 void bootstrap();

@@ -23,6 +23,11 @@ import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
 import { ComponentGroup, ProductDetails, TaskDetailResponseDto, TaskIngredientDetail } from './dto/task-detail.dto';
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 import { BillOfMaterialsResponseDto, BillOfMaterialsItem, PrepTask } from './dto/preparation.dto';
+import * as path from 'path';
+
+// [核心修复] 禁用 require 和 unsafe-assignment 检查
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment
+const PdfPrinter = require('pdfmake');
 
 const spoilageStages = [
     { key: 'kneading', label: '打面失败' },
@@ -440,6 +445,21 @@ type FlattenedIngredient = {
     weightInGrams?: Prisma.Decimal;
     waterContent?: Prisma.Decimal;
 };
+
+// [新增] 为 PDF 生成辅助函数定义的接口
+interface RenderTaskItem {
+    name: string;
+    totalWeight: number;
+    targetWeight?: number;
+    ingredients: {
+        name: string;
+        isRecipe: boolean;
+        brand?: string | null;
+        extraInfo?: string | null;
+        weightInGrams: number;
+    }[];
+    procedure?: string[];
+}
 
 type SortableTaskIngredient = TaskIngredientDetail & { isFlour?: boolean };
 type CalculatedRecipeIngredient = Omit<TaskIngredientDetail, 'id'> & { ingredientId: string };
@@ -3377,5 +3397,575 @@ export class ProductionTasksService {
 
             return this.findOne(tenantId, id, {});
         });
+    }
+
+    // [新增] PDF 生成核心逻辑
+    async generatePdf(tenantId: string, taskId: string): Promise<NodeJS.ReadableStream> {
+        // 1. 复用 findOne 获取计算好的详情数据
+        const taskDetail = await this.findOne(tenantId, taskId, {});
+
+        // [核心新增] 单独获取任务日期信息 (因为 findOne 的返回类型可能不包含日期)
+        const taskMetadata = await this.prisma.productionTask.findUnique({
+            where: { id: taskId },
+            select: { startDate: true },
+        });
+        // 简单的日期格式化 YYYY-MM-DD
+        const dateStr = taskMetadata ? taskMetadata.startDate.toISOString().split('T')[0] : '';
+
+        // 2. 定义字体路径
+        const fontPath = path.join(process.cwd(), 'dist/assets/fonts');
+        const fonts = {
+            Roboto: {
+                normal: path.join(fontPath, 'NotoSansSC-Regular.ttf'),
+                bold: path.join(fontPath, 'NotoSansSC-Bold.ttf'),
+                italics: path.join(fontPath, 'NotoSansSC-Regular.ttf'),
+                bolditalics: path.join(fontPath, 'NotoSansSC-Bold.ttf'),
+            },
+        };
+
+        // [核心修复] 实例化时禁用 unsafe 检查
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
+        const printer = new PdfPrinter(fonts);
+
+        // [核心修复] 定义格式化函数
+        const formatWeight = (grams: number | null | undefined): string => {
+            if (grams === null || grams === undefined) return '-';
+            const num = Number(grams);
+            if (isNaN(num)) return '-';
+            if (Math.abs(num) === 0) return '0g';
+
+            // 小于 10kg 显示 g，否则显示 kg
+            if (Math.abs(num) < 10000) {
+                return `${parseFloat(num.toFixed(2))}g`;
+            } else {
+                return `${parseFloat((num / 1000).toFixed(2))}kg`;
+            }
+        };
+
+        const content: any[] = [];
+
+        // --- 头部信息 ---
+        content.push({ text: '生产任务单', style: 'header', alignment: 'center' });
+
+        // [核心新增] 显示执行日期
+        if (dateStr) {
+            content.push({
+                text: `执行日期: ${dateStr}`,
+                style: 'subHeader',
+                alignment: 'center',
+                margin: [0, 0, 0, 5],
+            });
+        }
+
+        const infoTable = {
+            width: '100%',
+            columns: [
+                { text: `任务ID: #${taskDetail.id.substring(0, 8)}`, style: 'subHeader' },
+                { text: `状态: ${taskDetail.status}`, style: 'subHeader', alignment: 'right' },
+            ],
+        };
+        content.push(infoTable);
+        content.push({ text: '\n' });
+
+        // --- 库存预警 ---
+        if (taskDetail.stockWarning) {
+            content.push({
+                text: `[警] ${taskDetail.stockWarning}`,
+                style: 'warningBox',
+                margin: [0, 0, 0, 10],
+            });
+        }
+
+        // --- 循环配方组 ---
+        taskDetail.componentGroups.forEach((group, index) => {
+            // 组标题
+            content.push({
+                text: `${group.familyName} ${group.note ? `(${group.note})` : ''}`,
+                style: 'groupTitle',
+                margin: [0, 10, 0, 5],
+                // [修复] 索引为0时不分页
+                pageBreak: index > 0 ? 'before' : undefined,
+            });
+
+            content.push({ text: group.productsDescription, style: 'desc', margin: [0, 0, 0, 10] });
+
+            // 1. 配方总表 (面团/主料)
+            const body: any[] = [];
+            body.push([
+                { text: '完成', style: 'tableHeader' },
+                { text: '原料名称', style: 'tableHeader' },
+                { text: '品牌/备注', style: 'tableHeader' },
+                { text: '用量', style: 'tableHeader', alignment: 'right' },
+            ]);
+
+            for (const ing of group.baseComponentIngredients) {
+                body.push([
+                    { text: '□', style: 'checkbox' },
+                    { text: ing.name, style: ing.isRecipe ? 'recipeName' : 'text' },
+                    { text: `${ing.brand || '-'}\n${ing.extraInfo || ''}`, style: 'smallText' },
+                    { text: formatWeight(ing.weightInGrams), style: 'weightNumber', alignment: 'right' },
+                ]);
+            }
+
+            content.push({
+                table: {
+                    headerRows: 1,
+                    keepWithHeaderRows: 1,
+                    // 主配方表保持独立宽度
+                    widths: ['10%', '40%', '30%', '20%'],
+                    body: body,
+                    dontBreakRows: true,
+                },
+                layout: 'lightHorizontalLines',
+                margin: [0, 0, 0, 15],
+            });
+
+            // 2. 制作步骤
+            if (group.baseComponentProcedure && group.baseComponentProcedure.length > 0) {
+                content.push({ text: '制作步骤:', style: 'sectionHeader' });
+                const steps = group.baseComponentProcedure.map((step, idx) => {
+                    return { text: `${idx + 1}. ${step}`, margin: [0, 2, 0, 2], fontSize: 11 };
+                });
+                content.push({ stack: steps, margin: [0, 0, 0, 15] });
+            }
+
+            // [核心优化] 定义全局统一列宽
+            const unifiedWidths = ['30%', '30%', '20%', '20%'];
+
+            // 3. 产品详情
+            for (const product of group.productDetails) {
+                content.push({
+                    text: `产品: ${product.name}`,
+                    style: 'productTitle',
+                    margin: [0, 10, 0, 5],
+                });
+
+                // A. 基础原料表格
+                const baseInfoBody: any[] = [];
+                baseInfoBody.push([
+                    { text: '基础原料', style: 'tableHeader' },
+                    { text: '总重', style: 'tableHeader', alignment: 'right' },
+                    { text: '产品数量', style: 'tableHeader', alignment: 'center' },
+                    { text: '分割重量', style: 'tableHeader', alignment: 'right' },
+                ]);
+
+                baseInfoBody.push([
+                    { text: product.baseComponent.name, style: 'text' },
+                    {
+                        text: formatWeight(product.baseComponent.totalBaseComponentWeight),
+                        style: 'weightNumber',
+                        alignment: 'right',
+                    },
+                    { text: product.baseComponent.quantity.toString(), style: 'text', alignment: 'center' },
+                    {
+                        text: formatWeight(product.baseComponent.divisionWeight),
+                        style: 'weightNumber',
+                        alignment: 'right',
+                    },
+                ]);
+
+                content.push({
+                    table: {
+                        headerRows: 1,
+                        keepWithHeaderRows: 1,
+                        widths: unifiedWidths,
+                        body: baseInfoBody,
+                        dontBreakRows: true,
+                    },
+                    layout: 'lightHorizontalLines',
+                    margin: [0, 0, 0, 10],
+                });
+
+                // B. 辅料表格
+                if (product.mixIns.length > 0) {
+                    const mixInsBody: any[] = [];
+                    mixInsBody.push([
+                        { text: '辅料', style: 'tableHeader' },
+                        { text: '品牌', style: 'tableHeader' },
+                        { text: '', style: 'tableHeader' }, // 占位
+                        { text: '总用量', style: 'tableHeader', alignment: 'right' },
+                    ]);
+                    for (const ing of product.mixIns) {
+                        mixInsBody.push([
+                            { text: ing.name },
+                            { text: ing.brand || '-', style: 'smallText' },
+                            { text: '-', alignment: 'center', style: 'smallText' },
+                            { text: formatWeight(ing.weightInGrams), style: 'weightNumber', alignment: 'right' },
+                        ]);
+                    }
+                    content.push({
+                        table: {
+                            headerRows: 1,
+                            keepWithHeaderRows: 1,
+                            widths: unifiedWidths,
+                            body: mixInsBody,
+                            dontBreakRows: true,
+                        },
+                        layout: 'lightHorizontalLines',
+                        margin: [0, 0, 0, 10],
+                    });
+                }
+
+                // C. 馅料表格
+                if (product.fillings.length > 0) {
+                    const fillingsBody: any[] = [];
+                    fillingsBody.push([
+                        { text: '馅料', style: 'tableHeader' },
+                        { text: '品牌', style: 'tableHeader' },
+                        { text: '单个用量', style: 'tableHeader', alignment: 'right' },
+                        { text: '总用量', style: 'tableHeader', alignment: 'right' },
+                    ]);
+                    for (const ing of product.fillings) {
+                        const item = ing as typeof ing & { weightPerUnit?: number };
+                        fillingsBody.push([
+                            { text: ing.name },
+                            { text: ing.brand || '-', style: 'smallText' },
+                            { text: formatWeight(item.weightPerUnit), alignment: 'right', style: 'weightNumber' },
+                            { text: formatWeight(ing.weightInGrams), style: 'weightNumber', alignment: 'right' },
+                        ]);
+                    }
+                    content.push({
+                        table: {
+                            headerRows: 1,
+                            keepWithHeaderRows: 1,
+                            widths: unifiedWidths,
+                            body: fillingsBody,
+                            dontBreakRows: true,
+                        },
+                        layout: 'lightHorizontalLines',
+                        margin: [0, 0, 0, 10],
+                    });
+                }
+
+                // D. 装饰表格
+                if (product.toppings && product.toppings.length > 0) {
+                    const toppingsBody: any[] = [];
+                    toppingsBody.push([
+                        { text: '表面装饰', style: 'tableHeader' },
+                        { text: '品牌', style: 'tableHeader' },
+                        { text: '单个用量', style: 'tableHeader', alignment: 'right' },
+                        { text: '总用量', style: 'tableHeader', alignment: 'right' },
+                    ]);
+                    for (const ing of product.toppings) {
+                        const item = ing as typeof ing & { weightPerUnit?: number };
+                        toppingsBody.push([
+                            { text: ing.name },
+                            { text: ing.brand || '-', style: 'smallText' },
+                            { text: formatWeight(item.weightPerUnit), alignment: 'right', style: 'weightNumber' },
+                            { text: formatWeight(ing.weightInGrams), style: 'weightNumber', alignment: 'right' },
+                        ]);
+                    }
+                    content.push({
+                        table: {
+                            headerRows: 1,
+                            keepWithHeaderRows: 1,
+                            widths: unifiedWidths,
+                            body: toppingsBody,
+                            dontBreakRows: true,
+                        },
+                        layout: 'lightHorizontalLines',
+                        margin: [0, 0, 0, 10],
+                    });
+                }
+
+                // E. 产品制作步骤
+                if (product.procedure && product.procedure.length > 0) {
+                    const procSteps = product.procedure.map((step, idx) => {
+                        return { text: `${idx + 1}. ${step}`, margin: [0, 2, 0, 2], fontSize: 11 };
+                    });
+                    content.push({ stack: procSteps, margin: [10, 0, 0, 15] });
+                }
+            }
+        });
+
+        // --- 底部记录区 ---
+        content.push({ canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 1 }] });
+        content.push({ text: '\n生产记录 (手写)', style: 'sectionHeader' });
+        content.push({
+            table: {
+                widths: ['50%', '50%'],
+                heights: [60],
+                body: [
+                    [
+                        { text: '实际产出数量:\n\n', color: '#aaaaaa' },
+                        { text: '损耗/异常记录:\n\n', color: '#aaaaaa' },
+                    ],
+                ],
+            },
+        });
+
+        const docDefinition: any = {
+            content: content,
+            styles: {
+                header: { fontSize: 22, bold: true, margin: [0, 0, 0, 10] },
+                subHeader: { fontSize: 10, color: '#555555' },
+                groupTitle: { fontSize: 16, bold: true, color: '#333333' },
+                productTitle: { fontSize: 12, bold: true, color: '#666666', decoration: 'underline' },
+                desc: { fontSize: 10, italics: true, color: '#666666' },
+                tableHeader: { fontSize: 10, bold: true, color: 'black', fillColor: '#eeeeee' },
+                checkbox: { fontSize: 14, alignment: 'center' },
+                weightNumber: { fontSize: 12, bold: true },
+                text: { fontSize: 11 },
+                smallText: { fontSize: 9, color: '#666666' },
+                recipeName: { fontSize: 11, bold: true, color: '#2c3e50' },
+                sectionHeader: { fontSize: 12, bold: true, margin: [0, 5, 0, 5] },
+                warningBox: { fontSize: 12, bold: true, color: 'red', background: '#ffe6e6' },
+            },
+            defaultStyle: {
+                font: 'Roboto',
+            },
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+        const doc = printer.createPdfKitDocument(docDefinition);
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+        doc.end();
+
+        return doc as NodeJS.ReadableStream;
+    }
+    // [新增] 生成前置任务 PDF
+    async generatePrepTaskPdf(tenantId: string, date: string): Promise<NodeJS.ReadableStream> {
+        // 1. 获取数据
+        const prepTask = await this.getPrepTaskDetails(tenantId, date);
+        if (!prepTask) {
+            throw new NotFoundException('未找到该日期的前置任务');
+        }
+
+        // 2. 定义字体
+        const fontPath = path.join(process.cwd(), 'dist/assets/fonts');
+        const fonts = {
+            Roboto: {
+                normal: path.join(fontPath, 'NotoSansSC-Regular.ttf'),
+                bold: path.join(fontPath, 'NotoSansSC-Bold.ttf'),
+                italics: path.join(fontPath, 'NotoSansSC-Regular.ttf'),
+                bolditalics: path.join(fontPath, 'NotoSansSC-Bold.ttf'),
+            },
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
+        const printer = new PdfPrinter(fonts);
+
+        // 格式化工具
+        const formatWeight = (grams: number | null | undefined): string => {
+            if (grams === null || grams === undefined) return '-';
+            const num = Number(grams);
+            if (isNaN(num)) return '-';
+            if (Math.abs(num) === 0) return '0g';
+            if (Math.abs(num) < 10000) {
+                return `${parseFloat(num.toFixed(2))}g`;
+            } else {
+                return `${parseFloat((num / 1000).toFixed(2))}kg`;
+            }
+        };
+
+        const content: any[] = [];
+
+        // --- 头部 ---
+        content.push({ text: '前置备料单', style: 'header', alignment: 'center' });
+        content.push({ text: `执行日期: ${date}`, style: 'subHeader', alignment: 'center', margin: [0, 0, 0, 20] });
+
+        let sectionCounter = 1;
+        const getSectionTitle = (title: string) => {
+            const chineseNumbers = ['一', '二', '三', '四', '五'];
+            const prefix = chineseNumbers[sectionCounter - 1] || sectionCounter.toString();
+            sectionCounter++;
+            return `${prefix}、${title}`;
+        };
+
+        // --- 第一部分：备料清单 (汇总) ---
+        if (prepTask.billOfMaterials) {
+            const { standardItems, nonInventoriedItems } = prepTask.billOfMaterials;
+
+            if (standardItems.length > 0 || nonInventoriedItems.length > 0) {
+                content.push({ text: getSectionTitle('原料领用汇总'), style: 'sectionHeader', margin: [0, 10, 0, 5] });
+
+                const bomBody: any[] = [];
+                bomBody.push([
+                    { text: '原料名称', style: 'tableHeader' },
+                    { text: '品牌', style: 'tableHeader' },
+                    { text: '库存', style: 'tableHeader', alignment: 'right' },
+                    { text: '总需求量', style: 'tableHeader', alignment: 'right' },
+                ]);
+
+                // 标准原料
+                standardItems.forEach((item) => {
+                    bomBody.push([
+                        { text: item.ingredientName, style: 'text' },
+                        { text: item.brand || '-', style: 'smallText' },
+                        { text: formatWeight(item.currentStock), style: 'smallText', alignment: 'right' },
+                        { text: formatWeight(item.totalRequired), style: 'weightNumber', alignment: 'right' },
+                    ]);
+                });
+
+                // 即时采购原料
+                nonInventoriedItems.forEach((item) => {
+                    bomBody.push([
+                        { text: item.ingredientName, style: 'text' },
+                        { text: item.brand || '-', style: 'smallText' },
+                        { text: '即时采购', style: 'smallText', alignment: 'right', color: '#d4a373' },
+                        { text: formatWeight(item.totalRequired), style: 'weightNumber', alignment: 'right' },
+                    ]);
+                });
+
+                content.push({
+                    table: {
+                        headerRows: 1,
+                        keepWithHeaderRows: 1,
+                        widths: ['35%', '25%', '20%', '20%'],
+                        body: bomBody,
+                        dontBreakRows: true,
+                    },
+                    layout: 'lightHorizontalLines',
+                    margin: [0, 0, 0, 15],
+                });
+            }
+        }
+
+        // --- 辅助函数：渲染制作任务卡片 ---
+        const renderTaskItems = (items: RenderTaskItem[], title: string) => {
+            if (items.length === 0) return;
+
+            content.push({
+                text: getSectionTitle(title),
+                style: 'sectionHeader',
+                margin: [0, 10, 0, 5],
+                pageBreak: 'before',
+            });
+
+            items.forEach((item, index) => {
+                content.push({
+                    text: `${index + 1}. ${item.name}`,
+                    style: 'groupTitle',
+                    margin: [0, 15, 0, 5],
+                });
+
+                content.push({
+                    text: `目标总重: ${formatWeight(item.totalWeight)}${item.targetWeight ? ` (需求: ${formatWeight(item.targetWeight)})` : ''}`,
+                    style: 'desc',
+                    margin: [0, 0, 0, 5],
+                });
+
+                // 配方表
+                const body: any[] = [];
+                body.push([
+                    { text: '完成', style: 'tableHeader' },
+                    { text: '原料', style: 'tableHeader' },
+                    { text: '品牌/备注', style: 'tableHeader' },
+                    { text: '用量', style: 'tableHeader', alignment: 'right' },
+                ]);
+
+                item.ingredients.forEach((ing) => {
+                    const extraInfo = ing.extraInfo || '';
+
+                    body.push([
+                        { text: '□', style: 'checkbox' },
+                        { text: ing.name, style: 'text' },
+                        { text: `${ing.isRecipe ? '自制' : ing.brand || '-'}\n${extraInfo}`, style: 'smallText' },
+                        { text: formatWeight(ing.weightInGrams), style: 'weightNumber', alignment: 'right' },
+                    ]);
+                });
+
+                content.push({
+                    table: {
+                        headerRows: 1,
+                        keepWithHeaderRows: 1,
+                        widths: ['10%', '40%', '30%', '20%'],
+                        body: body,
+                        dontBreakRows: true,
+                    },
+                    layout: 'lightHorizontalLines',
+                    margin: [0, 0, 0, 10],
+                });
+
+                // 制作步骤
+                if (item.procedure && item.procedure.length > 0) {
+                    const steps = item.procedure.map((step, idx) => ({
+                        text: `${idx + 1}. ${step}`,
+                        style: 'text',
+                        margin: [0, 2, 0, 2],
+                    }));
+                    content.push({
+                        stack: steps,
+                        margin: [10, 0, 0, 15],
+                        color: '#555555',
+                    });
+                }
+            });
+        };
+
+        // [核心修复] 映射数据逻辑
+        if (prepTask.items && prepTask.items.length > 0) {
+            const mapToRenderItem = (item: CalculatedRecipeDetails): RenderTaskItem => ({
+                name: item.name,
+                totalWeight: item.totalWeight,
+                targetWeight: item.targetWeight,
+                ingredients: item.ingredients.map((ing) => ({
+                    name: ing.name,
+                    isRecipe: ing.isRecipe,
+                    brand: ing.brand,
+                    // [关键修复] 使用交叉类型断言 (as typeof ing & { extraInfo?: string })
+                    // 这样 ing 既保留了原有类型，又被告知可能含有 extraInfo，从而消除 any
+                    extraInfo: (ing as typeof ing & { extraInfo?: string }).extraInfo || null,
+                    weightInGrams: ing.weightInGrams,
+                })),
+                procedure: item.procedure,
+            });
+
+            // 筛选并转换面种
+            const preDoughs = prepTask.items.filter((item) => item.type === 'PRE_DOUGH').map(mapToRenderItem);
+
+            // 筛选并转换馅料/辅料
+            const extras = prepTask.items.filter((item) => item.type === 'EXTRA').map(mapToRenderItem);
+
+            // 渲染面种部分
+            if (preDoughs.length > 0) {
+                const title = '面种制作';
+                renderTaskItems(preDoughs, title);
+            }
+
+            // 渲染馅料部分
+            if (extras.length > 0) {
+                const title = '馅料/辅料制作';
+                renderTaskItems(extras, title);
+            }
+        }
+
+        // 底部备注
+        content.push({ text: '\n' });
+        content.push({ canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 1 }] });
+        content.push({
+            text: '备注 / 异常记录:',
+            style: 'smallText',
+            margin: [0, 5, 0, 0],
+            color: '#aaaaaa',
+        });
+
+        // 样式定义
+        const docDefinition: any = {
+            content: content,
+            styles: {
+                header: { fontSize: 20, bold: true, margin: [0, 0, 0, 5] },
+                subHeader: { fontSize: 12, color: '#555555' },
+                sectionHeader: { fontSize: 14, bold: true, color: '#333333', margin: [0, 5, 0, 5] },
+                groupTitle: { fontSize: 13, bold: true, color: '#333333' },
+                desc: { fontSize: 10, italics: true, color: '#666666' },
+                tableHeader: { fontSize: 10, bold: true, color: 'black', fillColor: '#eeeeee' },
+                checkbox: { fontSize: 14, alignment: 'center' },
+                weightNumber: { fontSize: 11, bold: true },
+                text: { fontSize: 10 },
+                smallText: { fontSize: 9, color: '#666666' },
+            },
+            defaultStyle: {
+                font: 'Roboto',
+            },
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+        const doc = printer.createPdfKitDocument(docDefinition);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+        doc.end();
+
+        return doc as NodeJS.ReadableStream;
     }
 }

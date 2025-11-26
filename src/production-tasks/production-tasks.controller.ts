@@ -11,7 +11,10 @@ import {
     Query,
     ValidationPipe,
     Put,
+    Res,
+    BadRequestException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ProductionTasksService } from './production-tasks.service';
 import { CreateProductionTaskDto } from './dto/create-production-task.dto';
 import { UpdateProductionTaskDto } from './dto/update-production-task.dto';
@@ -44,6 +47,22 @@ export class ProductionTasksController {
         return this.productionTasksService.getPrepTaskDetails(user.tenantId, date);
     }
 
+    // [核心修正] 必须放在 :id 之前！防止路由冲突导致 404
+    @Get('prep-task-pdf')
+    async downloadPrepTaskPdf(@GetUser() user: UserPayload, @Query('date') date: string, @Res() res: Response) {
+        if (!date) {
+            throw new BadRequestException('日期不能为空');
+        }
+        const stream = await this.productionTasksService.generatePrepTaskPdf(user.tenantId, date);
+
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="prep-task-${date}.pdf"`,
+        });
+
+        stream.pipe(res);
+    }
+
     @Get('task-dates')
     getTaskDates(@GetUser() user: UserPayload) {
         return this.productionTasksService.getTaskDates(user.tenantId);
@@ -63,6 +82,7 @@ export class ProductionTasksController {
         return this.productionTasksService.findHistory(user.tenantId, queryDto);
     }
 
+    // [注意] 动态参数路由 :id 必须放在具体的静态路由之后
     @Get(':id')
     findOne(
         @GetUser() user: UserPayload,
@@ -103,5 +123,17 @@ export class ProductionTasksController {
         @Body() completeProductionTaskDto: CompleteProductionTaskDto,
     ) {
         return this.productionTasksService.complete(user.tenantId, user.sub, id, completeProductionTaskDto);
+    }
+
+    @Get(':id/pdf')
+    async downloadPdf(@GetUser() user: UserPayload, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response) {
+        const stream = await this.productionTasksService.generatePdf(user.tenantId, id);
+
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="task-${id.substring(0, 8)}.pdf"`,
+        });
+
+        stream.pipe(res);
     }
 }

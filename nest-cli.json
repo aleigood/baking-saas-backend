@@ -6,6 +6,6 @@
         "deleteOutDir": true,
         "webpack": true,
         "watchAssets": true,
-        "assets": ["public"]
+        "assets": ["public", "assets/**/*"]
     }
 }
