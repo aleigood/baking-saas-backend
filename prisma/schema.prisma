@@ -16,7 +16,7 @@ datasource db {
 }
 
 // ================================================================= //
-//                            ENUMS                                //
+//                            ENUMS                              
 // ================================================================= //
 
 enum RecipeCategory {
@@ -96,8 +96,10 @@ enum SkuStatus {
 model User {
   id                 String                      @id @default(uuid())
   phone              String                      @unique
-  name               String? // [新增] 用户姓名 (New: User's name)
-  avatarUrl          String? // [核心新增] 用户头像URL
+  name               String?
+  // [新增] 用户姓名 (New: User's name)
+  avatarUrl          String?
+  // [核心新增] 用户头像URL
   password           String
   role               Role                        @default(MEMBER) // Global role, SUPER_ADMIN is highest
   status             UserStatus                  @default(ACTIVE)
@@ -159,24 +161,23 @@ model Invitation {
 // 配方族：用于管理一个配方的所有版本
 // 例如，“甜面团”是一个Family，它可能有V1, V2等多个Version
 model RecipeFamily {
-  id               String                 @id @default(uuid())
-  name             String // 配方名称，如“甜面团”、“烫种”
-  tenantId         String
-  type             RecipeType // 配方类型 (主配方, 预制面团, 或附加项)
-  category         RecipeCategory         @default(BREAD) // [核心新增] 配方品类
-  createdAt        DateTime               @default(now())
-  updatedAt        DateTime               @updatedAt
-  deletedAt        DateTime?
-  tenant           Tenant                 @relation(fields: [tenantId], references: [id])
-  versions         RecipeVersion[] // 一个配方族包含多个版本
-  
+  id                         String                @id @default(uuid())
+  name                       String // 配方名称，如“甜面团”、“烫种”
+  tenantId                   String
+  type                       RecipeType // 配方类型 (主配方, 预制面团, 或附加项)
+  category                   RecipeCategory        @default(BREAD) // [核心新增] 配方品类
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+  deletedAt                  DateTime?
+  tenant                     Tenant                @relation(fields: [tenantId], references: [id])
+  versions                   RecipeVersion[] // 一个配方族包含多个版本
   // [核心修改] 当此配方作为预制面团在其他配方中使用时
   usedInComponentsAsPreDough ComponentIngredient[] @relation("PreDoughLink")
   // [核心修改] 当此配方作为附加项(馅料/装饰)在其他配方中使用时
   usedInComponentsAsExtra    ComponentIngredient[] @relation("ExtraLink_Component") // [G-Code-Note] 新增的 relation name
-  
+
   // [G-Code-Note] 这个关系是用于 ProductIngredient 的，保持不变
-  usedInProducts             ProductIngredient[]   @relation("ExtraLink")
+  usedInProducts ProductIngredient[] @relation("ExtraLink")
 
   @@unique([tenantId, name, deletedAt])
   @@index([tenantId])
@@ -187,7 +188,8 @@ model RecipeVersion {
   id         String            @id @default(uuid())
   familyId   String // 所属配方族ID
   version    Int // 版本号
-  notes      String? // 版本备注，如“夏季版，减少水量”
+  notes      String?
+  // 版本备注，如“夏季版，减少水量”
   isActive   Boolean           @default(true) // 是否为当前激活版本
   createdAt  DateTime          @default(now())
   updatedAt  DateTime          @updatedAt
@@ -201,41 +203,44 @@ model RecipeVersion {
 
 // [核心重命名] Dough -> RecipeComponent，使其成为一个更通用的配方组件模型
 model RecipeComponent {
-  id              String                @id @default(uuid())
-  recipeVersionId String // 所属配方版本ID
-  name            String // 组件名称，如“主面团”、“烫种”、“卡仕达酱”
-  targetTemp      Decimal? // [核心修改] 出缸温度
-  lossRatio       Decimal               @default(0) // [核心修改] 损耗率
-  divisionLoss    Decimal               @default(0) // [核心新增] 分割定额损耗(克)
-  procedure       String[] // 制作流程要点
-  recipeVersion   RecipeVersion         @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
-  ingredients     ComponentIngredient[] // 组件包含的原料
+  id                 String                @id @default(uuid())
+  recipeVersionId    String // 所属配方版本ID
+  name               String // 组件名称，如“主面团”、“烫种”、“卡仕达酱”
+  targetTemp         Decimal?
+  // [核心修改] 出缸温度
+  lossRatio          Decimal               @default(0) // [核心修改] 损耗率
+  divisionLoss       Decimal               @default(0) // [核心新增] 分割定额损耗(克)
+  customWaterContent Decimal? // [核心新增] 自定义含水量(0-100)，如果设置则覆盖计算值
+  procedure          String[] // 制作流程要点
+  recipeVersion      RecipeVersion         @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
+  ingredients        ComponentIngredient[] // 组件包含的原料
 
   @@index([recipeVersionId])
 }
 
 // [核心重命名] DoughIngredient -> ComponentIngredient
 model ComponentIngredient {
-  id               String          @id @default(uuid())
-  componentId      String // [核心重命名] doughId -> componentId
-  ratio            Decimal?
-  flourRatio       Decimal?
-  
+  id          String   @id @default(uuid())
+  componentId String // [核心重命名] doughId -> componentId
+  ratio       Decimal?
+  flourRatio  Decimal?
+
   // G-Code-Note: 这是一个原料（如“面粉”）
-  ingredientId     String? // [核心修改] 用于关联Ingredient模型
-  ingredient       Ingredient?     @relation(fields: [ingredientId], references: [id], onUpdate: Cascade, onDelete: SetNull)
-  
+  ingredientId String?
+  // [核心修改] 用于关联Ingredient模型
+  ingredient   Ingredient? @relation(fields: [ingredientId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+
   // [G-Code-Note] [核心修改] 字段重命名并拆分
-  
+
   // G-Code-Note: 这是一个面种配方 (如 "烫种")
-  preDoughId       String?
-  linkedPreDough   RecipeFamily?   @relation("PreDoughLink", fields: [preDoughId], references: [id])
-  
+  preDoughId     String?
+  linkedPreDough RecipeFamily? @relation("PreDoughLink", fields: [preDoughId], references: [id])
+
   // G-Code-Note: 这是一个馅料配方 (如 "卡仕达酱")
-  extraId          String?
-  linkedExtra      RecipeFamily?   @relation("ExtraLink_Component", fields: [extraId], references: [id])
-  
-  component        RecipeComponent @relation(fields: [componentId], references: [id], onDelete: Cascade) // [核心重命名] dough -> component
+  extraId     String?
+  linkedExtra RecipeFamily? @relation("ExtraLink_Component", fields: [extraId], references: [id])
+
+  component RecipeComponent @relation(fields: [componentId], references: [id], onDelete: Cascade) // [核心重命名] dough -> component
 
   @@index([componentId]) // [核心重命名] doughId -> componentId
   @@index([preDoughId]) // [G-Code-Note] 原来的 linkedPreDoughId
@@ -250,7 +255,8 @@ model Product {
   name               String // 产品名称，如“熊掌卡仕达”
   baseDoughWeight    Decimal // [核心修改] 基础面团克重
   procedure          String[] // 制作流程要点 (如烘烤参数)
-  deletedAt          DateTime? // [核心新增] 用于支持软删除
+  deletedAt          DateTime?
+  // [核心新增] 用于支持软删除
   recipeVersion      RecipeVersion                     @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
   ingredients        ProductIngredient[] // 产品的附加原料 (搅拌、馅料、装饰)
   productionTasks    ProductionTaskItem[]
@@ -266,7 +272,8 @@ model ProductIngredient {
   id            String                @id @default(uuid())
   productId     String // 所属产品ID
   type          ProductIngredientType // 原料类型 (搅拌/馅料/装饰)
-  ingredientId  String? // [核心修改] 用于关联Ingredient模型
+  ingredientId  String?
+  // [核心修改] 用于关联Ingredient模型
   ingredient    Ingredient?           @relation(fields: [ingredientId], references: [id], onUpdate: Cascade, onDelete: SetNull)
   ratio         Decimal?
   weightInGrams Decimal? // [核心修改] 馅料/装饰类原料，单位克
@@ -344,7 +351,8 @@ model IngredientStockAdjustment {
   ingredientId  String
   userId        String // 操作人ID
   changeInGrams Decimal // [核心修改] 变化量
-  reason        String? // 调整原因, 如 "月度盘点", "过期损耗", "报溢" 等
+  reason        String?
+  // 调整原因, 如 "月度盘点", "过期损耗", "报溢" 等
   createdAt     DateTime   @default(now())
   ingredient    Ingredient @relation(fields: [ingredientId], references: [id])
   user          User       @relation(fields: [userId], references: [id])
@@ -365,7 +373,8 @@ model ProductionTask {
   startDate      DateTime
   endDate        DateTime?
   notes          String?
-  recipeSnapshot Json? // [核心修改] 配方快照，在任务变为IN_PROGRESS时创建
+  recipeSnapshot Json?
+  // [核心修改] 配方快照，在任务变为IN_PROGRESS时创建
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   deletedAt      DateTime?
@@ -393,7 +402,8 @@ model ProductionTaskItem {
 }
 
 // ================================================================= //
-//             PRODUCTION LOGS & CONSUMPTION                //
+//   
+//           PRODUCTION LOGS & CONSUMPTION                //
 // ================================================================= //
 
 // 生产日志模型
@@ -432,7 +442,8 @@ model ProductionTaskSpoilageLog {
 model ProductionTaskOverproductionLog {
   id              String        @id @default(uuid())
   productionLogId String
-  productId       String? // [核心修改] 改为可选
+  productId       String?
+  // [核心修改] 改为可选
   productName     String // [核心新增] 冗余存储产品名称
   quantity        Int // 超产数量
   createdAt       DateTime      @default(now())

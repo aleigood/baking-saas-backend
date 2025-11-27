@@ -1,6 +1,5 @@
 /**
  * 文件路径: src/recipes/dto/recipe-form-template.dto.ts
- * 文件描述: [核心修改] 更新 DTO 以支持所有配方类型
  */
 
 import { RecipeCategory, RecipeType } from '@prisma/client';
@@ -24,7 +23,6 @@ export interface ProductTemplate {
     procedure: string[];
 }
 
-// [核心重命名] DoughIngredientTemplate -> ComponentIngredientTemplate
 export interface ComponentIngredientTemplate {
     id: string | null;
     name: string;
@@ -34,28 +32,27 @@ export interface ComponentIngredientTemplate {
     waterContent?: number;
 }
 
-// [核心重命名] DoughTemplate -> ComponentTemplate
 export interface ComponentTemplate {
     id: string;
     name: string;
-    type: 'MAIN_DOUGH' | 'PRE_DOUGH' | 'BASE_COMPONENT'; // 新增 BASE_COMPONENT 类型
+    type: 'MAIN_DOUGH' | 'PRE_DOUGH' | 'BASE_COMPONENT';
     lossRatio?: number;
-    divisionLoss?: number; // [核心新增] 新增分割定额损耗字段
+    divisionLoss?: number;
     flourRatioInMainDough?: number;
+
+    // [核心新增] 自定义含水量 (用于回显)
+    customWaterContent?: number;
+
     ingredients: ComponentIngredientTemplate[];
     procedure: string[];
 }
 
-// [核心修改] 更新顶层 DTO，使用 components 替代 doughs
 export class RecipeFormTemplateDto {
     name: string;
     type: RecipeType;
     category?: RecipeCategory;
     notes: string;
     targetTemp?: number;
-    components: ComponentTemplate[]; // [核心重命名] doughs -> components
+    components: ComponentTemplate[];
     products?: ProductTemplate[];
-    // [核心移除] 以下两个字段的数据将被移入唯一的 component 中
-    // ingredients?: ComponentIngredientTemplate[];
-    // procedure?: string[];
 }

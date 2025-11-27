@@ -33,10 +33,13 @@ import {
 } from './dto/batch-import-recipe.dto';
 
 // [新增] 单一递归类型定义
+// 🟢 [修改] 完善类型定义
 type WaterCalcFamily = {
     versions: {
         isActive: boolean;
         components: {
+            // 🟢 [新增] 显式定义这个字段，告诉 TS 它存在
+            customWaterContent?: Prisma.Decimal | number | null;
             ingredients: {
                 ratio?: Prisma.Decimal | number | null;
                 ingredient?: { waterContent: Prisma.Decimal | number } | null;
@@ -207,6 +210,8 @@ export class RecipesService {
                         targetTemp: component.targetTemp?.toNumber(),
                         lossRatio: component.lossRatio?.toNumber(),
                         divisionLoss: component.divisionLoss?.toNumber(),
+                        // [核心新增] 返回自定义含水量
+                        customWaterContent: component.customWaterContent?.toNumber(),
                         ingredients: sortedIngredients.map((componentIngredient) => {
                             let displayIngredient: DisplayIngredient | null = null;
 
@@ -329,21 +334,41 @@ export class RecipesService {
         };
     }
 
-    // [新增] 核心辅助方法：递归计算含水量
-    // 这个逻辑是从前端移植过来的，放在这里运行速度更快
     private _calculateWaterContent(family: WaterCalcFamily | null | undefined, depth = 0): number {
-        // 防止无限递归
         if (!family || depth > 4) return 0;
 
-        // 1. 找到激活的版本
         const versions = family.versions || [];
         if (versions.length === 0) return 0;
-        // 优先取 isActive=true，否则取第一个
         const activeVersion = versions.find((v) => v.isActive) || versions[0];
 
-        // 2. 找到主组件 (ingredients 都在这里)
         const component = activeVersion.components?.[0];
-        if (!component || !component.ingredients) return 0;
+        if (!component) return 0;
+
+        // 直接读取 customWaterContent
+        const rawCustomWater = component.customWaterContent;
+
+        if (rawCustomWater !== null && rawCustomWater !== undefined) {
+            let customVal: number;
+
+            if (typeof rawCustomWater === 'object' && 'toNumber' in rawCustomWater) {
+                customVal = rawCustomWater.toNumber();
+            } else {
+                customVal = Number(rawCustomWater);
+            }
+
+            // [核心修复] 优化判断逻辑
+            // 旧逻辑: return customVal > 1 ? customVal / 100 : customVal;
+            // 新逻辑: 阈值设为 5。
+            // 场景1: 用户输入 65 (65%) -> 65 > 5 -> 0.65 (正确)
+            // 场景2: 用户输入 0.65 (65%) -> 0.65 < 5 -> 0.65 (正确)
+            // 场景3: 用户输入 105 (105%) -> 105 > 5 -> 1.05 (正确)
+            // 场景4: 用户输入 1.05 (105%) -> 1.05 < 5 -> 1.05 (正确)
+            // 假设没有面包的含水量会低于 5% (0.05) 且同时用户还非要用百分比整数写 3 (3%) 这种极端情况
+            return customVal > 5 ? customVal / 100 : customVal;
+        }
+
+        // 优先级 2：计算累加值
+        if (!component.ingredients) return 0;
 
         let totalWaterUnits = 0;
         let totalUnits = 0;
@@ -775,6 +800,7 @@ export class RecipesService {
                 targetTemp,
                 lossRatio,
                 divisionLoss,
+                customWaterContent, // [核心修复] 在这里解构出 customWaterContent
                 procedure,
                 name,
                 type = 'MAIN',
@@ -815,6 +841,7 @@ export class RecipesService {
                     targetTemp: type === 'MAIN' ? targetTemp : undefined,
                     lossRatio: lossRatio,
                     divisionLoss: divisionLoss,
+                    customWaterContent: customWaterContent, // [核心修复] 将值传入 Prisma 的 create 方法
                     procedure: procedure,
                 },
             });
@@ -1114,6 +1141,7 @@ export class RecipesService {
             targetTemp,
             lossRatio,
             divisionLoss,
+            customWaterContent, // [核心修复] 同时修复创建配方时的逻辑
             procedure,
             category = 'BREAD',
         } = recipeDto;
@@ -1160,6 +1188,11 @@ export class RecipesService {
             lossRatio === null || lossRatio === undefined ? undefined : new Prisma.Decimal(lossRatio);
         const divisionLossForDb =
             divisionLoss === null || divisionLoss === undefined ? undefined : new Prisma.Decimal(divisionLoss);
+        // [核心修复] 处理 Decimal 转换 (可选，视Prisma版本而定，保持统一风格)
+        const customWaterContentForDb =
+            customWaterContent === null || customWaterContent === undefined
+                ? undefined
+                : new Prisma.Decimal(customWaterContent);
 
         const component = await tx.recipeComponent.create({
             data: {
@@ -1168,6 +1201,7 @@ export class RecipesService {
                 targetTemp: type === 'MAIN' ? targetTempForDb : undefined,
                 lossRatio: lossRatioForDb,
                 divisionLoss: divisionLossForDb,
+                customWaterContent: customWaterContentForDb, // [核心修复] 写入数据库
                 procedure: procedure,
             },
         });
@@ -1263,25 +1297,45 @@ export class RecipesService {
             },
         });
         const existingFamilyNames = new Set(existingFamilies.map((f) => f.name));
-
         // 3. 找出需要创建的新原料
         const ingredientsToCreate: Prisma.IngredientCreateManyInput[] = [];
 
-        for (const name of allIngredientNames) {
-            // 如果它既不是已存在原料，也不是已存在配方，那么就需要创建
-            if (!existingIngredientMap.has(name) && !existingFamilyNames.has(name)) {
-                const dto = allRawIngredients.find((ing) => ing.name === name); // 找到第一个 DTO 作为模板
-                if (!dto) continue; // 理论上不会发生
+        // [核心修复] 定义一个辅助函数来判断是否为“水”类原料
+        const isWaterName = (n: string) => ['水', 'water', '冰水', '温水', '纯净水'].includes(n.toLowerCase());
 
-                const isWater = name === '水';
-                // 检查 DTO 是否有 isFlour 和 waterContent 属性
-                const waterContentForDb = isWater ? 1 : 'waterContent' in dto ? (dto.waterContent ?? 0) : 0;
-                const isFlourForDb = isWater ? false : 'isFlour' in dto ? (dto.isFlour ?? false) : false;
+        for (const name of allIngredientNames) {
+            if (!existingIngredientMap.has(name) && !existingFamilyNames.has(name)) {
+                const dto = allRawIngredients.find((ing) => ing.name === name);
+                if (!dto) continue;
+
+                // [核心修复] 逻辑优先级调整：
+                // 1. 如果 DTO 明确指定了 waterContent，以 DTO 为准。
+                // 2. 否则，如果名字在白名单里，默认 waterContent 为 1。
+                // 3. 否则，默认为 0。
+
+                let waterContentForDb = 0;
+                let isFlourForDb = false;
+
+                // 优先读取前端 DTO 的值 (DTO 中的值由前端 Autocomplete 或用户输入决定)
+                if ('waterContent' in dto && dto.waterContent !== undefined) {
+                    waterContentForDb = dto.waterContent;
+                } else if (isWaterName(name)) {
+                    waterContentForDb = 1;
+                }
+
+                if ('isFlour' in dto && dto.isFlour !== undefined) {
+                    isFlourForDb = dto.isFlour;
+                }
+
+                // 修正类型：如果是水（含水量=1且不是面粉），设为 UNTRACKED，否则为 STANDARD
+                // 这样用户创建 "冰水" 时，也会被自动归类为 UNTRACKED
+                const typeForDb =
+                    waterContentForDb === 1 && !isFlourForDb ? IngredientType.UNTRACKED : IngredientType.STANDARD;
 
                 const newIngredientData: Prisma.IngredientCreateManyInput = {
                     tenantId,
                     name: name,
-                    type: isWater ? IngredientType.UNTRACKED : IngredientType.STANDARD,
+                    type: typeForDb, // 使用动态判断的类型
                     isFlour: isFlourForDb,
                     waterContent: new Prisma.Decimal(waterContentForDb),
                 };
@@ -1451,8 +1505,8 @@ export class RecipesService {
                 type: family.type,
                 category: family.category,
                 updatedAt: family.updatedAt,
-                waterContent: calculatedWater,
-                // 保留之前计算好的统计字段
+                waterContent: calculatedWater, // 返回计算后的含水量
+                // versions: family.versions, // 不返回 versions 以减少数据量
                 productCount: family.productCount,
                 ingredientCount: family.ingredientCount,
                 productionTaskCount: family.productionTaskCount,
@@ -1724,6 +1778,8 @@ export class RecipesService {
                 type: 'BASE_COMPONENT',
                 lossRatio: toCleanPercent(componentSource.lossRatio) ?? undefined,
                 divisionLoss: componentSource.divisionLoss?.toNumber(),
+                // [核心新增] 返回自定义含水量
+                customWaterContent: componentSource.customWaterContent?.toNumber(),
                 ingredients: sortedIngredients
                     .map((ing) => {
                         const linkedRecipe = ing.linkedPreDough || ing.linkedExtra;
@@ -1767,7 +1823,7 @@ export class RecipesService {
             };
         }
 
-        // 以下为 MAIN 类型配方
+        // ... (MAIN 类型配方处理逻辑)
         let componentsForForm: ComponentTemplate[] = [];
 
         if (version.family.category === RecipeCategory.BREAD) {
