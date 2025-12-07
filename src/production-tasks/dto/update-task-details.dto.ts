@@ -1,6 +1,6 @@
 /**
  * 文件路径: src/production-tasks/dto/update-task-details.dto.ts
- * 文件描述: [新增] 定义修改一个未开始的生产任务时所需的数据结构。
+ * 文件描述: [修改] 支持小数数量（用于原料制作的重量）。
  */
 import {
     IsString,
@@ -10,7 +10,8 @@ import {
     IsDateString,
     IsArray,
     ValidateNested,
-    IsInt,
+    IsNumber, // [修改]
+    Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -20,7 +21,8 @@ class ProductionTaskItemDto {
     @IsNotEmpty()
     productId: string;
 
-    @IsInt()
+    @IsNumber() // [核心修改] 改为 IsNumber
+    @Min(0.001)
     @IsNotEmpty()
     quantity: number;
 }
@@ -29,18 +31,18 @@ class ProductionTaskItemDto {
 export class UpdateTaskDetailsDto {
     @IsDateString()
     @IsNotEmpty()
-    startDate: string; // 开始日期
+    startDate: string;
 
     @IsDateString()
     @IsOptional()
-    endDate?: string; // 结束日期
+    endDate?: string;
 
     @IsString()
     @IsOptional()
-    notes?: string; // 备注
+    notes?: string;
 
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => ProductionTaskItemDto)
-    products: ProductionTaskItemDto[]; // 产品列表
+    products: ProductionTaskItemDto[];
 }

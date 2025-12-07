@@ -64,6 +64,7 @@ enum IngredientType {
   STANDARD // 标准原料，需要追踪库存和成本
   UNTRACKED // 非追踪原料，如水、盐等低价值或难计量的
   NON_INVENTORIED // 免盘点原料，需要计算成本但不追踪库存，如生鲜类原料
+  SELF_MADE // [新增] 自制原料，由 PRE_DOUGH 或 EXTRA 配方生产
 }
 
 // 新增：配方类型枚举
@@ -179,6 +180,9 @@ model RecipeFamily {
   // [G-Code-Note] 这个关系是用于 ProductIngredient 的，保持不变
   usedInProducts ProductIngredient[] @relation("ExtraLink")
 
+  // [新增] 关联：该配方产出的自制原料 (仅针对 PRE_DOUGH 和 EXTRA)
+  outputIngredient Ingredient? @relation("RecipeOutput")
+
   @@unique([tenantId, name, deletedAt])
   @@index([tenantId])
 }
@@ -210,7 +214,8 @@ model RecipeComponent {
   // [核心修改] 出缸温度
   lossRatio          Decimal               @default(0) // [核心修改] 损耗率
   divisionLoss       Decimal               @default(0) // [核心新增] 分割定额损耗(克)
-  customWaterContent Decimal? // [核心新增] 自定义含水量(0-100)，如果设置则覆盖计算值
+  customWaterContent Decimal?
+  // [核心新增] 自定义含水量(0-100)，如果设置则覆盖计算值
   procedure          String[] // 制作流程要点
   recipeVersion      RecipeVersion         @relation(fields: [recipeVersionId], references: [id], onDelete: Cascade)
   ingredients        ComponentIngredient[] // 组件包含的原料
@@ -292,15 +297,23 @@ model ProductIngredient {
 
 // 原料品类模型
 model Ingredient {
-  id                   String                      @id @default(uuid())
-  tenantId             String
-  name                 String // e.g., "High-gluten flour"
-  type                 IngredientType              @default(STANDARD)
-  isFlour              Boolean                     @default(false)
-  waterContent         Decimal                     @default(0) // [核心修改] 含水量
-  activeSkuId          String?
-  currentStockInGrams  Decimal                     @default(0) // [核心修改] 当前库存克重
-  currentStockValue    Decimal                     @default(0)
+  id                  String         @id @default(uuid())
+  tenantId            String
+  name                String // e.g., "High-gluten flour"
+  type                IngredientType @default(STANDARD)
+  isFlour             Boolean        @default(false)
+  waterContent        Decimal        @default(0) // [核心修改] 含水量
+  activeSkuId         String?
+  currentStockInGrams Decimal        @default(0) // [核心修改] 当前库存克重
+  currentStockValue   Decimal        @default(0)
+
+  // [新增] 保质期 (小时)，默认为 0 表示不管理或长期有效
+  shelfLife Int @default(0)
+
+  // [新增] 关联：该原料是由哪个配方生产的 (仅针对 SELF_MADE)
+  recipeFamilyId String?       @unique
+  recipeFamily   RecipeFamily? @relation("RecipeOutput", fields: [recipeFamilyId], references: [id])
+
   createdAt            DateTime                    @default(now())
   updatedAt            DateTime                    @updatedAt
   deletedAt            DateTime?
@@ -402,8 +415,7 @@ model ProductionTaskItem {
 }
 
 // ================================================================= //
-//   
-//           PRODUCTION LOGS & CONSUMPTION                //
+//                  PRODUCTION LOGS & CONSUMPTION                //
 // ================================================================= //
 
 // 生产日志模型

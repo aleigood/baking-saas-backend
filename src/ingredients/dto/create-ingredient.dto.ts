@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-// [修改] 导入 IsBoolean, IsNumber
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsBoolean, IsNumber } from 'class-validator';
+// [修改] 导入 IsBoolean, IsNumber, Min
+import { IsEnum, IsNotEmpty, IsOptional, IsString, IsBoolean, IsNumber, Min } from 'class-validator';
 import { IngredientType } from '@prisma/client';
 
 export class CreateIngredientDto {
@@ -30,4 +30,11 @@ export class CreateIngredientDto {
     @IsNumber()
     @IsOptional()
     waterContent?: number;
+
+    // [核心新增] 保质期 (小时)
+    @ApiProperty({ description: 'Shelf life in hours', required: false, example: 72 })
+    @IsNumber()
+    @IsOptional()
+    @Min(0)
+    shelfLife?: number;
 }

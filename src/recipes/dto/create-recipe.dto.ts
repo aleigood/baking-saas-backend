@@ -8,6 +8,7 @@ import {
     IsEnum,
     IsBoolean,
     IsUUID,
+    Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ProductIngredientType, RecipeCategory, RecipeType } from '@prisma/client';
@@ -142,6 +143,12 @@ export class CreateRecipeDto {
     @IsNumber()
     @IsOptional()
     customWaterContent?: number;
+
+    // [核心新增] 默认保质期 (小时)
+    @IsNumber()
+    @IsOptional()
+    @Min(0)
+    shelfLife?: number;
 
     @IsArray()
     @ValidateNested({ each: true })

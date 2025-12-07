@@ -1,4 +1,4 @@
-import { IsBoolean, IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { IngredientType } from '@prisma/client';
 
 // 修复：移除对 @nestjs/mapped-types 的依赖，并手动定义可选字段
@@ -20,4 +20,10 @@ export class UpdateIngredientDto {
     @IsNumber()
     @IsOptional()
     waterContent?: number;
+
+    // [核心新增] 保质期 (小时)
+    @IsNumber()
+    @IsOptional()
+    @Min(0)
+    shelfLife?: number;
 }

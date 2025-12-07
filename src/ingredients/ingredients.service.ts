@@ -7,7 +7,7 @@ import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { SkuStatus, Prisma, IngredientType } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdateProcurementDto } from './dto/update-procurement.dto';
-import { UpdateSkuDto } from './dto/update-sku.dto'; // [修复] 移除 .ts 后缀
+import { UpdateSkuDto } from './dto/update-sku.dto';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { QueryLedgerDto, LedgerEntryType, LedgerEntry } from './dto/query-ledger.dto';
 
@@ -39,25 +39,10 @@ export class IngredientsService {
     }
 
     async findAll(tenantId: string) {
-        const intermediateRecipes = await this.prisma.recipeFamily.findMany({
-            where: {
-                tenantId,
-                type: { in: ['PRE_DOUGH', 'EXTRA'] },
-                deletedAt: null,
-            },
-            select: {
-                name: true,
-            },
-        });
-        const intermediateRecipeNames = intermediateRecipes.map((r) => r.name);
-
         const ingredients = await this.prisma.ingredient.findMany({
             where: {
                 tenantId,
                 deletedAt: null,
-                name: {
-                    notIn: intermediateRecipeNames,
-                },
             },
             include: {
                 activeSku: true,
@@ -234,6 +219,25 @@ export class IngredientsService {
                         brand: 'asc',
                     },
                 },
+                // [核心新增] 关联查询配方族信息
+                recipeFamily: {
+                    select: {
+                        id: true,
+                        name: true,
+                        versions: {
+                            where: { isActive: true },
+                            select: {
+                                id: true,
+                                version: true,
+                                products: {
+                                    where: { deletedAt: null },
+                                    take: 1, // 获取第一个产品作为代表（用于成本计算）
+                                    select: { id: true },
+                                },
+                            },
+                        },
+                    },
+                },
             },
         });
 
@@ -307,7 +311,6 @@ export class IngredientsService {
 
             const { changeInGrams, reason, initialCostPerKg } = adjustStockDto;
 
-            // [核心修改] 强制要求必须提供调整原因
             if (!reason || reason.trim() === '') {
                 throw new BadRequestException('必须提供一个有效的库存调整原因。');
             }
@@ -325,29 +328,22 @@ export class IngredientsService {
             const oldStockValue = new Prisma.Decimal(ingredient.currentStockValue);
             let valueChange = new Prisma.Decimal(0);
 
-            // [核心修改] 将判断逻辑从 oldStock.isZero() 改为 reason === '初次录入'
             if (reason === '初次录入') {
-                // [新增] 增加一层保护，仅当库存确实为0时才允许“初次录入”
                 if (!oldStock.isZero()) {
                     throw new BadRequestException('只有库存为0的原料才能进行“初次录入”操作。');
                 }
                 if (!initialCostPerKg || initialCostPerKg <= 0) {
                     throw new BadRequestException('“初次录入”必须提供一个有效的初期单价(元/kg)。');
                 }
-                // [中文注释] 根据初期单价计算本次入库的库存总价值
                 valueChange = new Prisma.Decimal(initialCostPerKg).mul(changeInGrams).div(1000);
             } else if (!oldStock.isZero()) {
-                // [中文注释] 对于非初次录入（如盘盈盘亏），使用加权平均价计算库存价值变动
                 const avgCostPerGram = oldStockValue.div(oldStock);
                 valueChange = avgCostPerGram.mul(changeInGrams);
             } else {
-                // [中文注释] 如果库存为0，且不是“初次录入”（如盘盈了一个已清零的原料），则不改变其库存价值，仅增加数量。
-                // 这样做的目的是等待下一次采购时，再为这个原料引入新的成本。
                 valueChange = new Prisma.Decimal(0);
             }
 
             const newStockValue = oldStockValue.add(valueChange);
-            // [中文注释] 防止盘亏等操作导致库存价值变为负数
             if (newStockValue.isNegative()) {
                 await tx.ingredient.update({
                     where: { id },
@@ -508,16 +504,30 @@ export class IngredientsService {
                 include: { user: { select: { name: true, phone: true } } },
             });
 
-            let adjustmentLedger: LedgerEntry[] = adjustments.map((a) => ({
-                date: a.createdAt,
-                type: a.reason?.startsWith('生产报损') || a.reason?.startsWith('工艺损耗') ? '生产损耗' : '库存调整',
-                change: a.changeInGrams.toNumber(),
-                details: a.reason || '无原因',
-                operator: a.user.name || a.user.phone,
-            }));
+            let adjustmentLedger: LedgerEntry[] = adjustments.map((a) => {
+                // [核心修改] 增加对“生产入库”的识别
+                let typeStr = '库存调整';
+                if (a.reason?.startsWith('生产报损') || a.reason?.startsWith('工艺损耗')) {
+                    typeStr = '生产损耗';
+                } else if (a.reason?.startsWith('生产入库')) {
+                    typeStr = '生产入库';
+                }
+
+                return {
+                    date: a.createdAt,
+                    type: typeStr,
+                    change: a.changeInGrams.toNumber(),
+                    details: a.reason || '无原因',
+                    operator: a.user.name || a.user.phone,
+                };
+            });
 
             if (type === LedgerEntryType.ADJUSTMENT) {
-                adjustmentLedger = adjustmentLedger.filter((a) => a.type === '库存调整');
+                // 对于只选“库存调整”的情况，我们需要包含“生产入库”，因为这本质上也是一种正向调整
+                // 或者根据业务需求，如果“生产入库”是独立类型，则这里过滤掉。
+                // 假设 LedgerEntryType 枚举没有变，我们把 '生产入库' 归类在 'ADJUSTMENT' 中显示，
+                // 但在前端可以展示不同的标签颜色。
+                adjustmentLedger = adjustmentLedger.filter((a) => a.type === '库存调整' || a.type === '生产入库');
             }
             if (type === LedgerEntryType.SPOILAGE) {
                 adjustmentLedger = adjustmentLedger.filter((a) => a.type === '生产损耗');
@@ -554,7 +564,6 @@ export class IngredientsService {
         });
     }
 
-    // [新增] 更新SKU的方法
     async updateSku(tenantId: string, skuId: string, updateSkuDto: UpdateSkuDto) {
         const skuToUpdate = await this.prisma.ingredientSKU.findFirst({
             where: {
@@ -577,13 +586,10 @@ export class IngredientsService {
         const { specWeightInGrams } = updateSkuDto;
         const hasProcurementRecords = skuToUpdate._count.procurementRecords > 0;
 
-        // [中文注释] 检查是否尝试修改规格重量
         if (
             specWeightInGrams !== undefined &&
-            // [修复] 使用 !.equals() 替代 .neq()
             !new Prisma.Decimal(specWeightInGrams).equals(skuToUpdate.specWeightInGrams)
         ) {
-            // [中文注释] 如果该SKU已有采购记录，则不允许修改其规格重量，因为这会影响历史成本和库存计算
             if (hasProcurementRecords) {
                 throw new BadRequestException('该SKU已有采购记录，无法修改其规格重量。');
             }
@@ -596,7 +602,6 @@ export class IngredientsService {
             }),
         };
 
-        // [中文注释] 从 DTO 中移除 specWeightInGrams，如果它未定义的话，以防止 Prisma 尝试更新它
         if (specWeightInGrams === undefined) {
             delete data.specWeightInGrams;
         }

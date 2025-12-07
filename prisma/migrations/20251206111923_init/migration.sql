@@ -17,7 +17,7 @@ CREATE TYPE "InvitationStatus" AS ENUM ('PENDING', 'ACCEPTED', 'DECLINED', 'EXPI
 CREATE TYPE "ProductionTaskStatus" AS ENUM ('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED');
 
 -- CreateEnum
-CREATE TYPE "IngredientType" AS ENUM ('STANDARD', 'UNTRACKED', 'NON_INVENTORIED');
+CREATE TYPE "IngredientType" AS ENUM ('STANDARD', 'UNTRACKED', 'NON_INVENTORIED', 'SELF_MADE');
 
 -- CreateEnum
 CREATE TYPE "RecipeType" AS ENUM ('MAIN', 'PRE_DOUGH', 'EXTRA');
@@ -168,6 +168,8 @@ CREATE TABLE "Ingredient" (
     "activeSkuId" TEXT,
     "currentStockInGrams" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "currentStockValue" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "shelfLife" INTEGER NOT NULL DEFAULT 0,
+    "recipeFamilyId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
@@ -336,6 +338,9 @@ CREATE INDEX "ProductIngredient_linkedExtraId_idx" ON "ProductIngredient"("linke
 CREATE INDEX "ProductIngredient_ingredientId_idx" ON "ProductIngredient"("ingredientId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Ingredient_recipeFamilyId_key" ON "Ingredient"("recipeFamilyId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Ingredient_tenantId_name_deletedAt_key" ON "Ingredient"("tenantId", "name", "deletedAt");
 
 -- CreateIndex
@@ -427,6 +432,9 @@ ALTER TABLE "ProductIngredient" ADD CONSTRAINT "ProductIngredient_productId_fkey
 
 -- AddForeignKey
 ALTER TABLE "ProductIngredient" ADD CONSTRAINT "ProductIngredient_linkedExtraId_fkey" FOREIGN KEY ("linkedExtraId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ingredient" ADD CONSTRAINT "Ingredient_recipeFamilyId_fkey" FOREIGN KEY ("recipeFamilyId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Ingredient" ADD CONSTRAINT "Ingredient_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
