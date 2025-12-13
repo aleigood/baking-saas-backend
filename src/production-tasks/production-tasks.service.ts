@@ -362,6 +362,16 @@ const taskListItemsInclude = {
                 select: {
                     id: true,
                     name: true,
+                    // [核心修改] 增加品类字段，用于前端区分展示
+                    recipeVersion: {
+                        select: {
+                            family: {
+                                select: {
+                                    category: true,
+                                },
+                            },
+                        },
+                    },
                 },
             },
         },
@@ -1743,13 +1753,40 @@ export class ProductionTasksService {
                     },
                 },
             },
+            // [核心修改] 深度嵌套 include 以获取品类
             include: {
-                items: true,
+                items: {
+                    include: {
+                        product: {
+                            select: {
+                                recipeVersion: {
+                                    select: {
+                                        family: {
+                                            select: {
+                                                category: true,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             },
         });
 
+        // [核心修改] 统计逻辑：如果是 OTHER (自制原料)，计数 +1，否则 +quantity
         const pendingCount = pendingTasks.reduce((sum, task) => {
-            return sum + task.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
+            return (
+                sum +
+                task.items.reduce((itemSum, item) => {
+                    const category = item.product?.recipeVersion?.family?.category;
+                    if (category === RecipeCategory.OTHER) {
+                        return itemSum + 1; // 自制原料任务只算1个单位
+                    }
+                    return itemSum + item.quantity; // 普通产品任务算具体数量
+                }, 0)
+            );
         }, 0);
 
         return {
