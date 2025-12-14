@@ -1,5 +1,5 @@
 // 路径: src/production-tasks/production-tasks.service.ts
-// [核心修复] 修正 complete 函数中的库存检查逻辑，使其跳过 UNTRACKED (非追踪) 原料
+// [核心修复] 修正 PDF 打印逻辑，针对自制原料任务隐藏“产品数量”和“分割重量”列
 
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -48,7 +48,7 @@ const taskWithDetailsInclude = {
                     recipeVersion: {
                         include: {
                             family: {
-                                include: { outputIngredient: true }, // [核心新增]
+                                include: { outputIngredient: true },
                             },
                             components: {
                                 include: {
@@ -59,7 +59,7 @@ const taskWithDetailsInclude = {
                                             linkedPreDough: {
                                                 // L2
                                                 include: {
-                                                    outputIngredient: true, // [核心新增]
+                                                    outputIngredient: true,
                                                     versions: {
                                                         where: { isActive: true },
                                                         include: {
@@ -72,7 +72,7 @@ const taskWithDetailsInclude = {
                                                                             linkedPreDough: {
                                                                                 // L4
                                                                                 include: {
-                                                                                    outputIngredient: true, // [核心新增]
+                                                                                    outputIngredient: true,
                                                                                     versions: {
                                                                                         where: { isActive: true },
                                                                                         include: {
@@ -95,7 +95,7 @@ const taskWithDetailsInclude = {
                                                                             linkedExtra: {
                                                                                 // L4
                                                                                 include: {
-                                                                                    outputIngredient: true, // [核心新增]
+                                                                                    outputIngredient: true,
                                                                                     versions: {
                                                                                         where: { isActive: true },
                                                                                         include: {
@@ -126,7 +126,7 @@ const taskWithDetailsInclude = {
                                             linkedExtra: {
                                                 // L2
                                                 include: {
-                                                    outputIngredient: true, // [核心新增]
+                                                    outputIngredient: true,
                                                     versions: {
                                                         where: { isActive: true },
                                                         include: {
@@ -139,7 +139,7 @@ const taskWithDetailsInclude = {
                                                                             linkedPreDough: {
                                                                                 // L4
                                                                                 include: {
-                                                                                    outputIngredient: true, // [核心新增]
+                                                                                    outputIngredient: true,
                                                                                     versions: {
                                                                                         where: { isActive: true },
                                                                                         include: {
@@ -162,7 +162,7 @@ const taskWithDetailsInclude = {
                                                                             linkedExtra: {
                                                                                 // L4
                                                                                 include: {
-                                                                                    outputIngredient: true, // [核心新增]
+                                                                                    outputIngredient: true,
                                                                                     versions: {
                                                                                         where: { isActive: true },
                                                                                         include: {
@@ -201,7 +201,7 @@ const taskWithDetailsInclude = {
                             ingredient: { include: { activeSku: true } },
                             linkedExtra: {
                                 include: {
-                                    outputIngredient: true, // [核心新增]
+                                    outputIngredient: true,
                                     versions: {
                                         where: { isActive: true },
                                         include: {
@@ -214,7 +214,7 @@ const taskWithDetailsInclude = {
                                                             linkedPreDough: {
                                                                 // L4
                                                                 include: {
-                                                                    outputIngredient: true, // [核心新增]
+                                                                    outputIngredient: true,
                                                                     versions: {
                                                                         where: { isActive: true },
                                                                         include: {
@@ -237,7 +237,7 @@ const taskWithDetailsInclude = {
                                                             linkedExtra: {
                                                                 // L4
                                                                 include: {
-                                                                    outputIngredient: true, // [核心新增]
+                                                                    outputIngredient: true,
                                                                     versions: {
                                                                         where: { isActive: true },
                                                                         include: {
@@ -288,7 +288,7 @@ const recipeVersionRecursiveBatchInclude = {
             name: true,
             type: true,
             category: true,
-            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } }, // [核心新增]
+            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } },
         },
     },
     // 包含完整的 components 和 ingredients (这是快照的核心数据)
@@ -305,7 +305,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } }, // [核心新增]
+                            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } },
                             versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
                         },
                     },
@@ -316,7 +316,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } }, // [核心新增]
+                            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } },
                             versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
                         },
                     },
@@ -339,7 +339,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } }, // [核心新增]
+                            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } },
                             versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
                         },
                     },
@@ -405,7 +405,7 @@ type SnapshotRecipeFamilyStub = {
     name: string;
     type: RecipeType;
     category: RecipeCategory;
-    outputIngredient?: { id: string; currentStockInGrams: string | number } | null; // [核心新增]
+    outputIngredient?: { id: string; currentStockInGrams: string | number } | null;
     versions: {
         id: string;
         notes: string | null;
@@ -417,7 +417,7 @@ type SnapshotRecipeFamilyStub = {
                 ingredient: { id: string; isFlour: boolean } | null;
                 linkedPreDough: {
                     id: string; // family.id
-                    outputIngredient?: { id: string; currentStockInGrams: string | number } | null; // [核心新增]
+                    outputIngredient?: { id: string; currentStockInGrams: string | number } | null;
                     versions: {
                         id: string; // version.id
                         components: {
@@ -439,7 +439,7 @@ type SnapshotRecipeFamilyStub = {
                 } | null;
                 linkedExtra: {
                     id: string; // family.id
-                    outputIngredient?: { id: string; currentStockInGrams: string | number } | null; // [核心新增]
+                    outputIngredient?: { id: string; currentStockInGrams: string | number } | null;
                     versions: {
                         id: string; // version.id
                         components: {
@@ -3611,18 +3611,18 @@ export class ProductionTasksService {
 
         // --- 循环配方组 ---
         taskDetail.componentGroups.forEach((group, index) => {
-            // [核心修改] 移除强制分页，改用较大的顶部间距来区分
-            // 第一个组顶部间距 10，后续组顶部间距 40 (留白)
             const topMargin = index > 0 ? 40 : 10;
 
             content.push({
                 text: `${group.familyName} ${group.note ? `(${group.note})` : ''}`,
                 style: 'groupTitle',
                 margin: [0, topMargin, 0, 5],
-                // pageBreak 已移除
             });
 
             content.push({ text: group.productsDescription, style: 'desc', margin: [0, 0, 0, 10] });
+
+            // [核心修改] 判断是否为自制原料任务
+            const isSelfMade = group.category === RecipeCategory.OTHER;
 
             // 1. 配方总表 (面团/主料)
             const body: any[] = [];
@@ -3654,6 +3654,28 @@ export class ProductionTasksService {
                 margin: [0, 0, 0, 15],
             });
 
+            // [核心修改] 如果是自制原料，在原料列表下方直接显示汇总信息
+            if (isSelfMade) {
+                const targetOutput = group.productDetails.reduce((sum, p) => sum + p.baseComponent.quantity, 0);
+
+                // [新增] 添加一条横向分隔线
+                content.push({
+                    canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 0.5, lineColor: '#aaaaaa' }],
+                    margin: [0, -10, 0, 8], // 向上拉近与表格的距离(-10)，向下与文字保持距离(8)
+                });
+
+                content.push({
+                    text: [
+                        { text: '原料总重: ', style: 'subHeader' },
+                        { text: formatWeight(group.totalComponentWeight), style: 'weightNumber' },
+                        { text: '    目标产出: ', style: 'subHeader' },
+                        { text: formatWeight(targetOutput), style: 'weightNumber' },
+                    ],
+                    alignment: 'right',
+                    margin: [0, 0, 0, 15],
+                });
+            }
+
             // 2. 制作步骤
             if (group.baseComponentProcedure && group.baseComponentProcedure.length > 0) {
                 content.push({ text: '制作步骤:', style: 'sectionHeader' });
@@ -3667,147 +3689,166 @@ export class ProductionTasksService {
             const unifiedWidths = ['30%', '30%', '20%', '20%'];
 
             // 3. 产品详情
-            for (const product of group.productDetails) {
-                content.push({
-                    text: `产品: ${product.name}`,
-                    style: 'productTitle',
-                    margin: [0, 10, 0, 5],
-                });
+            // [核心修改] 仅当不是自制原料时，才渲染产品详情表格
+            if (!isSelfMade) {
+                for (const product of group.productDetails) {
+                    content.push({
+                        text: `产品: ${product.name}`,
+                        style: 'productTitle',
+                        margin: [0, 10, 0, 5],
+                    });
 
-                // A. 基础原料表格
-                const baseInfoBody: any[] = [];
-                baseInfoBody.push([
-                    { text: '基础原料', style: 'tableHeader' },
-                    { text: '总重', style: 'tableHeader', alignment: 'right' },
-                    { text: '产品数量', style: 'tableHeader', alignment: 'center' },
-                    { text: '分割重量', style: 'tableHeader', alignment: 'right' },
-                ]);
-
-                baseInfoBody.push([
-                    { text: product.baseComponent.name, style: 'text' },
-                    {
-                        text: formatWeight(product.baseComponent.totalBaseComponentWeight),
-                        style: 'weightNumber',
-                        alignment: 'right',
-                    },
-                    { text: product.baseComponent.quantity.toString(), style: 'text', alignment: 'center' },
-                    {
-                        text: formatWeight(product.baseComponent.divisionWeight),
-                        style: 'weightNumber',
-                        alignment: 'right',
-                    },
-                ]);
-
-                content.push({
-                    table: {
-                        headerRows: 1,
-                        keepWithHeaderRows: 1,
-                        widths: unifiedWidths,
-                        body: baseInfoBody,
-                        dontBreakRows: true,
-                    },
-                    layout: 'lightHorizontalLines',
-                    margin: [0, 0, 0, 10],
-                });
-
-                // B. 辅料表格
-                if (product.mixIns.length > 0) {
-                    const mixInsBody: any[] = [];
-                    mixInsBody.push([
-                        { text: '辅料', style: 'tableHeader' },
-                        { text: '品牌', style: 'tableHeader' },
-                        { text: '', style: 'tableHeader' },
-                        { text: '总用量', style: 'tableHeader', alignment: 'right' },
+                    // A. 基础原料表格
+                    const baseInfoBody: any[] = [];
+                    baseInfoBody.push([
+                        { text: '基础原料', style: 'tableHeader' },
+                        { text: '总重', style: 'tableHeader', alignment: 'right' },
+                        { text: '产品数量', style: 'tableHeader', alignment: 'center' },
+                        { text: '分割重量', style: 'tableHeader', alignment: 'right' },
                     ]);
-                    for (const ing of product.mixIns) {
+
+                    baseInfoBody.push([
+                        { text: product.baseComponent.name, style: 'text' },
+                        {
+                            text: formatWeight(product.baseComponent.totalBaseComponentWeight),
+                            style: 'weightNumber',
+                            alignment: 'right',
+                        },
+                        { text: product.baseComponent.quantity.toString(), style: 'text', alignment: 'center' },
+                        {
+                            text: formatWeight(product.baseComponent.divisionWeight),
+                            style: 'weightNumber',
+                            alignment: 'right',
+                        },
+                    ]);
+
+                    content.push({
+                        table: {
+                            headerRows: 1,
+                            keepWithHeaderRows: 1,
+                            widths: unifiedWidths,
+                            body: baseInfoBody,
+                            dontBreakRows: true,
+                        },
+                        layout: 'lightHorizontalLines',
+                        margin: [0, 0, 0, 10],
+                    });
+
+                    // B. 辅料表格
+                    if (product.mixIns.length > 0) {
+                        const mixInsBody: any[] = [];
                         mixInsBody.push([
-                            { text: ing.name },
-                            { text: ing.brand || '-', style: 'smallText' },
-                            { text: '-', alignment: 'center', style: 'smallText' },
-                            { text: formatWeight(ing.weightInGrams), style: 'weightNumber', alignment: 'right' },
+                            { text: '辅料', style: 'tableHeader' },
+                            { text: '品牌', style: 'tableHeader' },
+                            { text: '', style: 'tableHeader' },
+                            { text: '总用量', style: 'tableHeader', alignment: 'right' },
                         ]);
+                        for (const ing of product.mixIns) {
+                            mixInsBody.push([
+                                { text: ing.name },
+                                { text: ing.brand || '-', style: 'smallText' },
+                                { text: '-', alignment: 'center', style: 'smallText' },
+                                { text: formatWeight(ing.weightInGrams), style: 'weightNumber', alignment: 'right' },
+                            ]);
+                        }
+                        content.push({
+                            table: {
+                                headerRows: 1,
+                                keepWithHeaderRows: 1,
+                                widths: unifiedWidths,
+                                body: mixInsBody,
+                                dontBreakRows: true,
+                            },
+                            layout: 'lightHorizontalLines',
+                            margin: [0, 0, 0, 10],
+                        });
                     }
-                    content.push({
-                        table: {
-                            headerRows: 1,
-                            keepWithHeaderRows: 1,
-                            widths: unifiedWidths,
-                            body: mixInsBody,
-                            dontBreakRows: true,
-                        },
-                        layout: 'lightHorizontalLines',
-                        margin: [0, 0, 0, 10],
-                    });
-                }
 
-                // C. 馅料表格
-                if (product.fillings.length > 0) {
-                    const fillingsBody: any[] = [];
-                    fillingsBody.push([
-                        { text: '馅料', style: 'tableHeader' },
-                        { text: '品牌', style: 'tableHeader' },
-                        { text: '单个用量', style: 'tableHeader', alignment: 'right' },
-                        { text: '总用量', style: 'tableHeader', alignment: 'right' },
-                    ]);
-                    for (const ing of product.fillings) {
-                        const item = ing as typeof ing & { weightPerUnit?: number };
+                    // C. 馅料表格
+                    if (product.fillings.length > 0) {
+                        const fillingsBody: any[] = [];
                         fillingsBody.push([
-                            { text: ing.name },
-                            { text: ing.brand || '-', style: 'smallText' },
-                            { text: formatWeight(item.weightPerUnit), alignment: 'right', style: 'weightNumber' },
-                            { text: formatWeight(ing.weightInGrams), style: 'weightNumber', alignment: 'right' },
+                            { text: '馅料', style: 'tableHeader' },
+                            { text: '品牌', style: 'tableHeader' },
+                            { text: '单个用量', style: 'tableHeader', alignment: 'right' },
+                            { text: '总用量', style: 'tableHeader', alignment: 'right' },
                         ]);
+                        for (const ing of product.fillings) {
+                            const item = ing as typeof ing & { weightPerUnit?: number };
+                            fillingsBody.push([
+                                { text: ing.name },
+                                { text: ing.brand || '-', style: 'smallText' },
+                                {
+                                    text: formatWeight(item.weightPerUnit),
+                                    alignment: 'right',
+                                    style: 'weightNumber',
+                                },
+                                {
+                                    text: formatWeight(ing.weightInGrams),
+                                    style: 'weightNumber',
+                                    alignment: 'right',
+                                },
+                            ]);
+                        }
+                        content.push({
+                            table: {
+                                headerRows: 1,
+                                keepWithHeaderRows: 1,
+                                widths: unifiedWidths,
+                                body: fillingsBody,
+                                dontBreakRows: true,
+                            },
+                            layout: 'lightHorizontalLines',
+                            margin: [0, 0, 0, 10],
+                        });
                     }
-                    content.push({
-                        table: {
-                            headerRows: 1,
-                            keepWithHeaderRows: 1,
-                            widths: unifiedWidths,
-                            body: fillingsBody,
-                            dontBreakRows: true,
-                        },
-                        layout: 'lightHorizontalLines',
-                        margin: [0, 0, 0, 10],
-                    });
-                }
 
-                // D. 装饰表格
-                if (product.toppings && product.toppings.length > 0) {
-                    const toppingsBody: any[] = [];
-                    toppingsBody.push([
-                        { text: '表面装饰', style: 'tableHeader' },
-                        { text: '品牌', style: 'tableHeader' },
-                        { text: '单个用量', style: 'tableHeader', alignment: 'right' },
-                        { text: '总用量', style: 'tableHeader', alignment: 'right' },
-                    ]);
-                    for (const ing of product.toppings) {
-                        const item = ing as typeof ing & { weightPerUnit?: number };
+                    // D. 装饰表格
+                    if (product.toppings && product.toppings.length > 0) {
+                        const toppingsBody: any[] = [];
                         toppingsBody.push([
-                            { text: ing.name },
-                            { text: ing.brand || '-', style: 'smallText' },
-                            { text: formatWeight(item.weightPerUnit), alignment: 'right', style: 'weightNumber' },
-                            { text: formatWeight(ing.weightInGrams), style: 'weightNumber', alignment: 'right' },
+                            { text: '表面装饰', style: 'tableHeader' },
+                            { text: '品牌', style: 'tableHeader' },
+                            { text: '单个用量', style: 'tableHeader', alignment: 'right' },
+                            { text: '总用量', style: 'tableHeader', alignment: 'right' },
                         ]);
+                        for (const ing of product.toppings) {
+                            const item = ing as typeof ing & { weightPerUnit?: number };
+                            toppingsBody.push([
+                                { text: ing.name },
+                                { text: ing.brand || '-', style: 'smallText' },
+                                {
+                                    text: formatWeight(item.weightPerUnit),
+                                    alignment: 'right',
+                                    style: 'weightNumber',
+                                },
+                                {
+                                    text: formatWeight(ing.weightInGrams),
+                                    style: 'weightNumber',
+                                    alignment: 'right',
+                                },
+                            ]);
+                        }
+                        content.push({
+                            table: {
+                                headerRows: 1,
+                                keepWithHeaderRows: 1,
+                                widths: unifiedWidths,
+                                body: toppingsBody,
+                                dontBreakRows: true,
+                            },
+                            layout: 'lightHorizontalLines',
+                            margin: [0, 0, 0, 10],
+                        });
                     }
-                    content.push({
-                        table: {
-                            headerRows: 1,
-                            keepWithHeaderRows: 1,
-                            widths: unifiedWidths,
-                            body: toppingsBody,
-                            dontBreakRows: true,
-                        },
-                        layout: 'lightHorizontalLines',
-                        margin: [0, 0, 0, 10],
-                    });
-                }
 
-                // E. 产品制作步骤
-                if (product.procedure && product.procedure.length > 0) {
-                    const procSteps = product.procedure.map((step, idx) => {
-                        return { text: `${idx + 1}. ${step}`, margin: [0, 2, 0, 2], fontSize: 11 };
-                    });
-                    content.push({ stack: procSteps, margin: [10, 0, 0, 15] });
+                    // E. 产品制作步骤
+                    if (product.procedure && product.procedure.length > 0) {
+                        const procSteps = product.procedure.map((step, idx) => {
+                            return { text: `${idx + 1}. ${step}`, margin: [0, 2, 0, 2], fontSize: 11 };
+                        });
+                        content.push({ stack: procSteps, margin: [10, 0, 0, 15] });
+                    }
                 }
             }
         });
@@ -4024,7 +4065,6 @@ export class ProductionTasksService {
             });
         };
 
-        // [核心修复] 映射数据逻辑
         if (prepTask.items && prepTask.items.length > 0) {
             const mapToRenderItem = (item: CalculatedRecipeDetails): RenderTaskItem => ({
                 name: item.name,
@@ -4034,26 +4074,19 @@ export class ProductionTasksService {
                     name: ing.name,
                     isRecipe: ing.isRecipe,
                     brand: ing.brand,
-                    // [修复] 使用交叉类型断言，彻底解决 ESLint 报错
-                    // 这样 ing 既保留了原有类型，又被告知可能含有 extraInfo，从而消除 any
                     extraInfo: (ing as typeof ing & { extraInfo?: string }).extraInfo || null,
                     weightInGrams: ing.weightInGrams,
                 })),
                 procedure: item.procedure,
             });
 
-            // 筛选并转换面种
             const preDoughs = prepTask.items.filter((item) => item.type === 'PRE_DOUGH').map(mapToRenderItem);
-
-            // 筛选并转换馅料/辅料
             const extras = prepTask.items.filter((item) => item.type === 'EXTRA').map(mapToRenderItem);
 
-            // 渲染面种部分
             if (preDoughs.length > 0) {
                 renderTaskItems(preDoughs, '面种制作');
             }
 
-            // 渲染馅料部分
             if (extras.length > 0) {
                 renderTaskItems(extras, '馅料/辅料制作');
             }
@@ -4076,7 +4109,6 @@ export class ProductionTasksService {
                 header: { fontSize: 20, bold: true, margin: [0, 0, 0, 5] },
                 subHeader: { fontSize: 12, color: '#555555' },
                 sectionHeader: { fontSize: 14, bold: true, color: '#333333', margin: [0, 5, 0, 5] },
-                // [修改] 颜色改为黑色
                 groupTitle: { fontSize: 13, bold: true, color: '#333333' },
                 desc: { fontSize: 10, italics: true, color: '#666666' },
                 tableHeader: { fontSize: 10, bold: true, color: 'black', fillColor: '#eeeeee' },
