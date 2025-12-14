@@ -1,5 +1,3 @@
-// 路径: src/recipes/recipes.service.ts
-
 import {
     Injectable,
     NotFoundException,
@@ -313,12 +311,12 @@ export class RecipesService {
                                 displayIngredient = {
                                     ...preDoughWithLink,
                                     extraInfo: preDoughWithLink.extraInfo,
-                                    waterContent: 0,
+                                    // [核心修复] 获取 outputIngredient 的含水量，如果不存在则默认为0
+                                    waterContent: preDoughWithLink.outputIngredient?.waterContent.toNumber() ?? 0,
                                     currentStockInGrams: 0,
                                     currentStockValue: 0,
                                     isFlour: false,
                                     activeSkuId: null,
-                                    // [核心新增] 获取自制原料的保质期
                                     shelfLife: preDoughWithLink.outputIngredient?.shelfLife ?? 0,
                                     recipeFamilyId: preDoughWithLink.id,
                                 };
@@ -328,12 +326,12 @@ export class RecipesService {
                                 displayIngredient = {
                                     ...extraWithLink,
                                     extraInfo: extraWithLink.extraInfo,
-                                    waterContent: 0,
+                                    // [核心修复] 获取 outputIngredient 的含水量
+                                    waterContent: extraWithLink.outputIngredient?.waterContent.toNumber() ?? 0,
                                     currentStockInGrams: 0,
                                     currentStockValue: 0,
                                     isFlour: false,
                                     activeSkuId: null,
-                                    // [核心新增] 获取自制原料的保质期
                                     shelfLife: extraWithLink.outputIngredient?.shelfLife ?? 0,
                                     recipeFamilyId: extraWithLink.id,
                                 };
