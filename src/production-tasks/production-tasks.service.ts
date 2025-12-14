@@ -1460,6 +1460,13 @@ export class ProductionTasksService {
                     }));
                 }
             }
+            let stockUsed = 0;
+            if (data.family.outputIngredient) {
+                const stock = new Prisma.Decimal(data.family.outputIngredient.currentStockInGrams).toNumber();
+                stockUsed = stock > 0 ? stock : 0;
+            }
+
+            (details as CalculatedRecipeDetails & { stockWeight: number }).stockWeight = stockUsed;
             prepTaskItems.push(details);
         }
 
