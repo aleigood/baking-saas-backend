@@ -271,8 +271,7 @@
                                 <div class="form-item"><label class="form-item-label">面团出缸温度 (°C)</label><input class="input-field" type="number" v-model.number="currentVersion.targetTemp" placeholder="26" /></div>
                                 <div class="form-item"><label class="form-item-label">工艺损耗率 (%)</label><input class="input-field" type="number" v-model.number="mainDough.lossRatio" placeholder="1" /></div>
                             </div>
-                             <div class="form-item" v-else><label class="form-item-label">工艺损耗率 (%)</label><input class="input-field" type="number" v-model.number="mainDough.lossRatio" placeholder="1" /></div>
-
+                            <div class="form-item" v-else><label class="form-item-label">工艺损耗率 (%)</label><input class="input-field" type="number" v-model.number="mainDough.lossRatio" placeholder="1" /></div>
                             <div class="form-item"><label class="form-item-label">分割损耗 (g)</label><input class="input-field" type="number" v-model.number="mainDough.divisionLoss" placeholder="2" /></div>
                             
                             <div class="ingredient-header"><span class="col-name">原料名称</span><span class="col-ratio">比例 %</span><span class="col-action"></span></div>
@@ -373,7 +372,15 @@
                     <div v-else>
                         <div class="card">
                             <div class="card-title-wrapper"><span class="card-title">原料列表</span></div>
-                            <div class="form-item"><label class="form-item-label">工艺损耗率 (%)</label><input class="input-field" type="number" v-model.number="currentVersion.lossRatio" placeholder="1" /></div>
+                            
+                            <div class="form-grid">
+                                <div class="form-item"><label class="form-item-label">工艺损耗率 (%)</label><input class="input-field" type="number" v-model.number="currentVersion.lossRatio" placeholder="1" /></div>
+                                <div class="form-item">
+                                    <label class="form-item-label">整体含水量 (%)</label>
+                                    <input class="input-field" type="number" v-model.number="currentVersion.customWaterContent" :placeholder="calculatedWaterContent" />
+                                </div>
+                            </div>
+
                             <div class="ingredient-header"><span class="col-name">原料名称</span><span class="col-ratio">比例 %</span><span class="col-action"></span></div>
                             <div v-for="ing in sortedOtherIngredients" :key="ing.id" class="ingredient-row">
                                 <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
@@ -481,8 +488,7 @@
                     const resolveWaterContent = (ingName, visited = new Set()) => {
                         if (!ingName) return 0;
                         
-                        // 【修复点】：优先检查是否为自制配方 (Pre-Dough 或 Extra)
-                        // 只有配方里找不到，才去查基础原料库
+                        // 【核心修改点1】：检查自制配方时，优先使用自定义的含水量（如果有）
                         const recipe = recipes.value.find(r => r.name === ingName && r.type !== 'MAIN');
                         
                         if (recipe) {
@@ -490,7 +496,16 @@
                             visited.add(ingName);
 
                             const latestVersion = recipe.versions[recipe.versions.length - 1];
-                            if (!latestVersion || !latestVersion.ingredients || latestVersion.ingredients.length === 0) return 0;
+                            if (!latestVersion) return 0;
+
+                            // 1. 如果有手动设置的 customWaterContent，直接返回
+                            if (latestVersion.customWaterContent !== undefined && latestVersion.customWaterContent !== null) {
+                                // 注意：customWaterContent 存储的是百分比（如 45），计算时需要除以 100
+                                return latestVersion.customWaterContent / 100;
+                            }
+
+                            // 2. 否则进行递归计算
+                            if (!latestVersion.ingredients || latestVersion.ingredients.length === 0) return 0;
 
                             let totalWaterWeight = 0;
                             let totalWeight = 0;
@@ -498,8 +513,6 @@
                             latestVersion.ingredients.forEach(subIng => {
                                 const ratio = parseFloat(subIng.ratio) || 0;
                                 if (ratio > 0) {
-                                    // 递归计算：比如香茅草液里有“水”，这里会再次调用本函数
-                                    // 此时“水”不是配方，会落入下面的第2步查找原料库，得到 1
                                     const subWaterContent = resolveWaterContent(subIng.name, visited);
                                     totalWaterWeight += ratio * subWaterContent;
                                     totalWeight += ratio;
@@ -507,11 +520,9 @@
                             });
 
                             visited.delete(ingName);
-                            // 计算加权平均含水量
                             return totalWeight === 0 ? 0 : totalWaterWeight / totalWeight;
                         }
 
-                        // 2. 如果不是自制配方，再查基础原料库
                         if (globalIngredientLibrary.value.has(ingName)) {
                             return globalIngredientLibrary.value.get(ingName).waterContent || 0;
                         }
@@ -520,21 +531,42 @@
                     };
 
                     // ----------------------------
+                    // 新增：自动计算当前配方的理论含水量（用于 Placeholder）
+                    // ----------------------------
+                    const calculatedWaterContent = computed(() => {
+                        if (!currentVersion.value || currentFamily.value.type === 'MAIN') return '0';
+                        
+                        let totalWaterWeight = 0;
+                        let totalWeight = 0;
+                        
+                        // 避免自我引用导致死循环，这里只计算当前配方的一层原料
+                        // 原料内部的含水量通过 resolveWaterContent 递归获取
+                        currentVersion.value.ingredients.forEach(ing => {
+                            const ratio = parseFloat(ing.ratio) || 0;
+                            if (ratio > 0) {
+                                // 这里的 resolveWaterContent 会处理基础原料和嵌套的自制原料
+                                const waterContent = resolveWaterContent(ing.name); 
+                                totalWaterWeight += ratio * waterContent;
+                                totalWeight += ratio;
+                            }
+                        });
+
+                        if (totalWeight === 0) return '0';
+                        return ((totalWaterWeight / totalWeight) * 100).toFixed(1);
+                    });
+
+
+                    // ----------------------------
                     // 核心功能：计算总水量 & 确定标签位置
                     // ----------------------------
-                    // 计算主面团中含水贡献最大的原料ID
                     const waterTagTargetId = computed(() => {
                         if (!mainDough.value) return null;
-
-                        // 优先找名字叫“水”的
                         const explicitWater = mainDough.value.ingredients.find(i => i.name === '水');
                         if (explicitWater) return explicitWater.id;
 
-                        // 如果没有水，找贡献水分最多的
                         let maxContribution = -1;
                         let targetId = null;
 
-                        // 检查主原料
                         mainDough.value.ingredients.forEach(ing => {
                             const ratio = parseFloat(ing.ratio) || 0;
                             if (ratio > 0) {
@@ -546,39 +578,29 @@
                                 }
                             }
                         });
-
-                        // 注意：这里我们只在主原料列表中显示标签，
-                        // 虽然面种也贡献水，但通常不会把总水量标签贴在面种上，除非面种是唯一原料。
-                        // 简单起见，如果没有水，我们就贴在贡献最大的主原料上。
                         
-                        // 如果所有原料都不含水（maxContribution 仍为 -1 或 0），则不显示
                         if (maxContribution <= 0) return null;
-
                         return targetId;
                     });
 
                     const shouldShowWaterTag = (ing) => {
-                        // 只有当当前原料ID 等于 计算出的目标ID时才显示
                         if (!currentFamily.value || currentFamily.value.category !== 'BREAD') return false;
                         return ing.id === waterTagTargetId.value;
                     };
 
-                    // 计算总水量（主面团 + 面种）
                     const totalWaterRatio = computed(() => {
                         if (!currentFamily.value || currentFamily.value.type !== 'MAIN' || !currentVersion.value) return 0;
                         
                         let totalWater = 0;
 
-                        // 1. 主面团原料
                         if (mainDough.value) {
                             mainDough.value.ingredients.forEach(ing => {
                                 const ratio = parseFloat(ing.ratio) || 0;
-                                const content = resolveWaterContent(ing.name); // 使用递归解析
+                                const content = resolveWaterContent(ing.name);
                                 totalWater += ratio * content;
                             });
                         }
 
-                        // 2. 引用面种 (CalculatedIngredients 已经是折算后的比例了)
                         processedPreDoughs.value.forEach(pd => {
                             pd.calculatedIngredients.forEach(ing => {
                                 const ratio = parseFloat(ing.calculatedRatio) || 0;
@@ -590,33 +612,23 @@
                         return parseFloat(totalWater.toFixed(1));
                     });
 
-                    // ----------------------------
-                    // 样式与类名
-                    // ----------------------------
                     const getWrapperClass = (ing) => {
                         let count = 0;
                         if (ing.isFlour) count++;
                         if (isSelfMade(ing.name)) count++;
-                        
-                        // 使用新的判定函数
                         if (shouldShowWaterTag(ing)) {
-                            return 'input-has-water-tag'; // 专门的大宽度样式
+                            return 'input-has-water-tag'; 
                         }
-
                         if (count === 1) return 'input-has-1-tag';
                         if (count === 2) return 'input-has-2-tags';
                         return '';
                     };
 
-                    // ... (其余部分保持不变，包括 computed, watchers, methods) ...
-                    // 为了确保代码完整运行，以下是之前逻辑的精简复述
-                    
                     const currentFamilyIndex = computed(() => recipes.value.findIndex((r) => r.id === currentFamilyId.value));
                     const currentFamily = computed(() => currentFamilyIndex.value > -1 ? recipes.value[currentFamilyIndex.value] : null);
                     const currentVersion = computed(() => currentFamily.value ? currentFamily.value.versions[currentVersionIndex.value] : null);
                     const mainDough = computed(() => currentFamily.value?.type === 'MAIN' && currentVersion.value ? currentVersion.value.doughs.find((d) => d.type === 'MAIN_DOUGH') : null);
                     
-                    // 处理面种
                     const processedPreDoughs = computed(() => {
                         if (!currentFamily.value || currentFamily.value.type !== 'MAIN' || !currentVersion.value) return [];
                         const preDoughs = currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
@@ -636,7 +648,6 @@
                         });
                     });
 
-                    // 分类与排序
                     const recipeCategories = computed(() => ({
                         main: recipes.value.filter((r) => r.type === 'MAIN'),
                         preDough: recipes.value.filter((r) => r.type === 'PRE_DOUGH'),
@@ -679,7 +690,6 @@
                         return availablePreDoughs.value.filter((d) => !existingDoughNames.has(d.name));
                     });
 
-                    // 操作方法
                     function getNewVersion(type, category = 'BREAD') {
                         const commonIngredient = { id: nextIngredientId++, name: '', ratio: null, isFlour: false, waterContent: 0 };
                         if (type === 'MAIN') {
@@ -689,13 +699,14 @@
                                 products: [{ id: nextRecipeId++, name: '产品1', baseDoughWeight: 100, mixIns: [], fillings: [], toppings: [], procedure: [''] }]
                             };
                         }
-                        return { id: nextVersionId++, notes: `V${nextVersionId}`, lossRatio: null, ingredients: [JSON.parse(JSON.stringify(commonIngredient))], procedure: [''] };
+                        // 【核心修改点2】：初始化新版本时，添加 customWaterContent: null
+                        return { id: nextVersionId++, notes: `V${nextVersionId}`, lossRatio: null, customWaterContent: null, ingredients: [JSON.parse(JSON.stringify(commonIngredient))], procedure: [''] };
                     }
                     function getNewFamily(type) {
                         const id = nextRecipeId++;
                         const category = type === 'MAIN' ? 'BREAD' : 'OTHER';
                         const firstVersion = getNewVersion(type, category);
-                        firstVersion.notes = 'V1 - 初始版本';
+                        firstVersion.notes = '初版';
                         return { id, name: '', type: type, category, versions: [firstVersion] };
                     }
                     const addFamily = () => { const newFamily = getNewFamily(activeCategory.value); recipes.value.push(newFamily); selectFamily(newFamily.id); };
@@ -784,7 +795,21 @@
                             const lib = globalIngredientLibrary.value.get(ing.name);
                             return { id: nextIngredientId++, name: ing.name, ratio: toPercentage(ing.ratio), isFlour: lib.isFlour, waterContent: lib.waterContent };
                         };
-                        const base = { id: nextVersionId++, notes: vData.notes || 'V?', targetTemp: vData.targetTemp || null, lossRatio: toPercentage(vData.lossRatio), divisionLoss: vData.divisionLoss ?? 2, doughs: [], products: [], ingredients: [], procedure: vData.procedure || [''] };
+                        // 【核心修改点3】：解析 JSON 时，读取 customWaterContent (原数据是小数，这里转为百分比显示？不，customWaterContent 通常存储为百分比整数，例如 45)
+                        // 注意：如果您的 JSON 导出逻辑里 customWaterContent 是小数 (0.45)，这里需要 toPercentage。如果是整数 (45)，直接用。
+                        // 根据 getJson 逻辑，我们统一使用 toPercentage 转换小数到百分比。
+                        
+                        const base = { 
+                            id: nextVersionId++, 
+                            notes: vData.notes || 'V?', 
+                            targetTemp: vData.targetTemp || null, 
+                            lossRatio: toPercentage(vData.lossRatio), 
+                            divisionLoss: vData.divisionLoss ?? 2, 
+                            // 假设 JSON 中存储的是小数 (0.45)，转换为 45
+                            customWaterContent: vData.customWaterContent !== undefined ? toPercentage(vData.customWaterContent) : null,
+                            doughs: [], products: [], ingredients: [], procedure: vData.procedure || [''] 
+                        };
+                        
                         if (fType === 'MAIN') {
                             const pds = [], mains = [];
                             (vData.ingredients || []).forEach(ing => {
@@ -817,7 +842,14 @@
                                             ingredients: [...v.doughs.filter(d=>d.type==='PRE_DOUGH').map(d=>({name:d.name, flourRatio:toDecimal(d.flourRatioInMainDough)})), ...md.ingredients.filter(i=>i.name.trim() && i.ratio!=null).map(formatIng)],
                                             products: v.products.map(p => ({ name: p.name, weight: p.baseDoughWeight, procedure: p.procedure.filter(s=>s.trim()), mixIn: p.mixIns.map(formatIng), fillings: p.fillings.map(i=>({name:i.name, weightInGrams:i.weightInGrams})), toppings: p.toppings.map(i=>({name:i.name, weightInGrams:i.weightInGrams})) }))
                                         };
-                                    } else return { notes: v.notes, lossRatio: toDecimal(v.lossRatio), ingredients: v.ingredients.filter(i=>i.name.trim() && i.ratio!=null).map(formatIng), procedure: v.procedure.filter(p=>p.trim()) };
+                                    } else return { 
+                                        notes: v.notes, 
+                                        lossRatio: toDecimal(v.lossRatio), 
+                                        // 【核心修改点4】：导出时，将 customWaterContent (45) 转为小数 (0.45)
+                                        customWaterContent: v.customWaterContent !== null ? toDecimal(v.customWaterContent) : undefined,
+                                        ingredients: v.ingredients.filter(i=>i.name.trim() && i.ratio!=null).map(formatIng), 
+                                        procedure: v.procedure.filter(p=>p.trim()) 
+                                    };
                                 })
                             })), null, 4);
                         } catch (e) { alert(e.message); return null; }
@@ -854,7 +886,8 @@
                         addOtherIngredient, removeOtherIngredient, addOtherProcedureStep, removeOtherProcedureStep, addProduct, deleteProduct,
                         addSubIngredient, removeSubIngredient, addProductProcedureStep, removeProductProcedureStep, exportAllJson, openFile, saveFile,
                         updatePreDoughRatio, sortedMainDoughIngredients, sortedOtherIngredients, productsWithSortedMixIns, getWrapperClass, 
-                        totalWaterRatio, shouldShowWaterTag 
+                        totalWaterRatio, shouldShowWaterTag,
+                        calculatedWaterContent
                     };
                 },
             }).mount('#app');
