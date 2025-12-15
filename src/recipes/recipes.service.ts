@@ -1451,7 +1451,8 @@ export class RecipesService {
         };
 
         const rawFamilies = await this.prisma.recipeFamily.findMany({
-            where: { tenantId, deletedAt: null },
+            // [核心修复] 移除 deletedAt: null，使列表包含已停用的配方
+            where: { tenantId },
             include: queryInclude,
         });
 
@@ -1514,6 +1515,8 @@ export class RecipesService {
                 type: family.type,
                 category: family.category,
                 updatedAt: family.updatedAt,
+                // [核心修复] 返回 deletedAt 字段，供前端判断停用状态
+                deletedAt: family.deletedAt,
                 waterContent: calculatedWater, // 返回计算后的含水量
                 // versions: family.versions, // 不返回 versions 以减少数据量
                 productCount: family.productCount,
