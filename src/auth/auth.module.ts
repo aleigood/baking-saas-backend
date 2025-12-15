@@ -25,7 +25,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
                 }
                 return {
                     secret: secret,
-                    signOptions: { expiresIn: '1d' },
+                    // [核心修改] 将 Token 有效期从 1天 ('1d') 延长至 30天 ('30d')，避免用户频繁掉线
+                    // 如果需要更长时间，可以设置为 '365d' (1年)
+                    signOptions: { expiresIn: '30d' },
                 };
             },
         }),
