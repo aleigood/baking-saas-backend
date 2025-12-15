@@ -1,3 +1,7 @@
+/**
+ * 文件路径: src/ingredients/ingredients.service.ts
+ * 文件描述: (已优化) 移除库存预警预测逻辑(daysOfSupply)，仅保留总消耗量统计。
+ */
 import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
@@ -60,7 +64,8 @@ export class IngredientsService {
         if (ingredients.length === 0) {
             return {
                 allIngredients: [],
-                lowStockIngredients: [],
+                // [核心修改] 移除 lowStockIngredients
+                // lowStockIngredients: [],
             };
         }
 
@@ -84,24 +89,17 @@ export class IngredientsService {
 
         const ingredientIds = ingredients.map((i) => i.id);
 
+        // [核心修改] 简化 SQL，只查询 total (总消耗量)，移除了 taskCount, firstDate, lastDate
         const consumptionStats: {
             ingredientId: string;
             total: number;
-            taskCount: bigint;
-            firstDate: Date;
-            lastDate: Date;
         }[] = await this.prisma.$queryRaw(
             Prisma.sql`
                 SELECT
                     icl."ingredientId",
-                    SUM(icl."quantityInGrams")::float AS total,
-                    COUNT(DISTINCT pl."taskId") AS "taskCount",
-                    MIN(pl."completedAt") AS "firstDate",
-                    MAX(pl."completedAt") AS "lastDate"
+                    SUM(icl."quantityInGrams")::float AS total
                 FROM
                     "IngredientConsumptionLog" AS icl
-                JOIN
-                    "ProductionLog" AS pl ON icl."productionLogId" = pl.id
                 WHERE
                     icl."ingredientId" IN (${Prisma.join(ingredientIds)})
                 GROUP BY
@@ -109,62 +107,23 @@ export class IngredientsService {
             `,
         );
 
-        const statsMap = new Map(
-            consumptionStats.map((stat) => [
-                stat.ingredientId,
-                {
-                    ...stat,
-                    taskCount: Number(stat.taskCount),
-                },
-            ]),
-        );
+        const statsMap = new Map(consumptionStats.map((stat) => [stat.ingredientId, stat.total]));
 
         const processedIngredients = ingredients.map((ingredient) => {
-            const stats = statsMap.get(ingredient.id);
-            const totalConsumptionInGrams = stats?.total || 0;
+            const totalConsumptionInGrams = statsMap.get(ingredient.id) || 0;
+
             const currentPricePerPackage = ingredient.activeSkuId
                 ? priceMap.get(ingredient.activeSkuId) || new Prisma.Decimal(0)
                 : new Prisma.Decimal(0);
 
-            if (ingredient.type === IngredientType.UNTRACKED || ingredient.type === IngredientType.NON_INVENTORIED) {
-                const daysOfSupply = ingredient.type === IngredientType.UNTRACKED ? Infinity : 0;
-                return {
-                    ...ingredient,
-                    currentPricePerPackage:
-                        ingredient.type === IngredientType.UNTRACKED ? new Prisma.Decimal(0) : currentPricePerPackage,
-                    daysOfSupply: daysOfSupply,
-                    avgDailyConsumption: 0,
-                    avgConsumptionPerTask: 0,
-                    totalConsumptionInGrams,
-                };
-            }
-
-            if (!stats || stats.total === 0) {
-                return {
-                    ...ingredient,
-                    currentPricePerPackage: currentPricePerPackage,
-                    daysOfSupply: Infinity,
-                    avgDailyConsumption: 0,
-                    avgConsumptionPerTask: 0,
-                    totalConsumptionInGrams: 0,
-                };
-            }
-
-            const timeDiff = stats.lastDate.getTime() - stats.firstDate.getTime();
-            const dayDiff = Math.max(1, Math.ceil(timeDiff / (1000 * 3600 * 24)));
-            const avgDailyConsumption = new Prisma.Decimal(stats.total).div(dayDiff);
-            const daysOfSupply = avgDailyConsumption.gt(0)
-                ? new Prisma.Decimal(ingredient.currentStockInGrams).div(avgDailyConsumption).toNumber()
-                : Infinity;
-            const avgConsumptionPerTask =
-                stats.taskCount > 0 ? new Prisma.Decimal(stats.total).div(stats.taskCount).toNumber() : 0;
-
+            // [核心修改] 移除 daysOfSupply, avgDailyConsumption, avgConsumptionPerTask 计算逻辑
+            // 直接返回精简后的对象
             return {
                 ...ingredient,
-                currentPricePerPackage: currentPricePerPackage,
-                daysOfSupply,
-                avgDailyConsumption: avgDailyConsumption.toNumber(),
-                avgConsumptionPerTask,
+                currentPricePerPackage: currentPricePerPackage.toNumber(),
+                currentStockInGrams: ingredient.currentStockInGrams.toNumber(),
+                currentStockValue: ingredient.currentStockValue.toNumber(),
+                waterContent: ingredient.waterContent.toNumber(),
                 totalConsumptionInGrams,
             };
         });
@@ -172,29 +131,10 @@ export class IngredientsService {
         const allIngredients = [...processedIngredients].sort(
             (a, b) => b.totalConsumptionInGrams - a.totalConsumptionInGrams,
         );
-        const lowStockIngredients = [...processedIngredients]
-            .filter(
-                (ing) =>
-                    ing.type === 'STANDARD' &&
-                    (ing.daysOfSupply < 7 || new Prisma.Decimal(ing.currentStockInGrams).lessThanOrEqualTo(0)),
-            )
-            .sort((a, b) => a.daysOfSupply - b.daysOfSupply);
 
+        // [核心修改] 不再计算和返回 lowStockIngredients
         return {
-            allIngredients: allIngredients.map((ing) => ({
-                ...ing,
-                currentPricePerPackage: ing.currentPricePerPackage.toNumber(),
-                currentStockInGrams: ing.currentStockInGrams.toNumber(),
-                currentStockValue: ing.currentStockValue.toNumber(),
-                waterContent: ing.waterContent.toNumber(),
-            })),
-            lowStockIngredients: lowStockIngredients.map((ing) => ({
-                ...ing,
-                currentPricePerPackage: ing.currentPricePerPackage.toNumber(),
-                currentStockInGrams: ing.currentStockInGrams.toNumber(),
-                currentStockValue: ing.currentStockValue.toNumber(),
-                waterContent: ing.waterContent.toNumber(),
-            })),
+            allIngredients: allIngredients,
         };
     }
 
@@ -524,9 +464,6 @@ export class IngredientsService {
 
             if (type === LedgerEntryType.ADJUSTMENT) {
                 // 对于只选“库存调整”的情况，我们需要包含“生产入库”，因为这本质上也是一种正向调整
-                // 或者根据业务需求，如果“生产入库”是独立类型，则这里过滤掉。
-                // 假设 LedgerEntryType 枚举没有变，我们把 '生产入库' 归类在 'ADJUSTMENT' 中显示，
-                // 但在前端可以展示不同的标签颜色。
                 adjustmentLedger = adjustmentLedger.filter((a) => a.type === '库存调整' || a.type === '生产入库');
             }
             if (type === LedgerEntryType.SPOILAGE) {
