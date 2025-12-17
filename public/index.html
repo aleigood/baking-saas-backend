@@ -172,7 +172,7 @@
                         面种 <span v-if="recipeCategories.preDough.length > 0" class="count-badge">{{ recipeCategories.preDough.length }}</span>
                     </div>
                     <div class="sidebar-tab" :class="{active: activeCategory === 'EXTRA'}" @click="activeCategory = 'EXTRA'">
-                        馅料/其他 <span v-if="recipeCategories.extra.length > 0" class="count-badge">{{ recipeCategories.extra.length }}</span>
+                        自制原料 <span v-if="recipeCategories.extra.length > 0" class="count-badge">{{ recipeCategories.extra.length }}</span>
                     </div>
                 </div>
                 <div class="recipe-list-container">
@@ -658,7 +658,7 @@
                     const categoryDisplay = (category) => categoryDisplayMap[category] || '未知品类';
                     const mainRecipeCategories = ref(Object.entries(categoryDisplayMap).filter(([key]) => key !== 'OTHER').map(([value, text]) => ({ value, text })));
                     const recipeNamePlaceholder = computed(() => !currentFamily.value ? '' : { MAIN: '例如：法式长棍', PRE_DOUGH: '例如：波兰种', EXTRA: '例如：奶酥馅' }[currentFamily.value.type] || '配方名称');
-                    const recipeTypeDisplay = (type) => ({ MAIN: '产品配方', PRE_DOUGH: '面种', EXTRA: '馅料/其他' })[type];
+                    const recipeTypeDisplay = (type) => ({ MAIN: '产品配方', PRE_DOUGH: '面种', EXTRA: '自制原料' })[type];
                     const recipeContentTitle = computed(() => (!currentFamily.value ? '' : (currentFamily.value.category === 'BREAD' ? '主面团' : '配方内容')));
                     
                     function sortIngredients(ingredients, recipeType, recipeCategory) {
