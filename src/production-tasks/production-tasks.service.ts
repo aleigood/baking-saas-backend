@@ -481,6 +481,7 @@ interface RenderTaskItem {
     name: string;
     totalWeight: number;
     targetWeight?: number;
+    stockWeight?: number; // [核心修复] 必须显式定义此字段，修复 TS2339 和 TS2353 错误
     ingredients: {
         name: string;
         isRecipe: boolean;
@@ -2512,6 +2513,14 @@ export class ProductionTasksService {
 
                 const flourWeightPerUnitWithLoss = this._calculateTotalFlourWeightForProduct(product);
 
+                // [核心修改] 1. 计算该产品在此次任务中的总面粉重，作为步骤中 % 计算的基准
+                const totalFlourForProduct = flourWeightPerUnitWithLoss.mul(quantity);
+
+                // [核心修改] 2. 解析产品层级的制作步骤
+                // 这将处理 @原料(说明) 和 [20%] 语法
+                const { processedProcedure: productProcessedProcedure, ingredientNotes: productIngredientNotes } =
+                    this._parseAndCalculateProcedureNotes(product.procedure, totalFlourForProduct);
+
                 const flattenedProductIngredients = this._flattenIngredientsForProduct(product, false);
 
                 const mixIns: TaskIngredientDetail[] = Array.from(flattenedProductIngredients.values())
@@ -2549,6 +2558,20 @@ export class ProductionTasksService {
                         extraInfo: null,
                     }))
                     .sort((a, b) => b.weightInGrams - a.weightInGrams);
+
+                // [核心修改] 3. 将解析出的原料说明应用到对应的原料列表中
+                const applyNotesToIngredients = (list: TaskIngredientDetail[]) => {
+                    list.forEach((ing) => {
+                        const note = productIngredientNotes.get(ing.name);
+                        if (note) {
+                            const existing = ing.extraInfo ? `${ing.extraInfo}\n` : '';
+                            ing.extraInfo = `${existing}${note}`;
+                        }
+                    });
+                };
+                applyNotesToIngredients(mixIns);
+                applyNotesToIngredients(fillings);
+                applyNotesToIngredients(toppings);
 
                 const theoreticalFlourWeightPerUnit = this._calculateTheoreticalTotalFlourWeightForProduct(product);
                 const theoreticalMixInWeightPerUnit = Array.from(flattenedProductIngredients.values())
@@ -2596,7 +2619,7 @@ export class ProductionTasksService {
                         weightPerUnit: i.weightInGrams,
                         weightInGrams: i.weightInGrams * quantity,
                     })),
-                    procedure: product.procedure || [],
+                    procedure: productProcessedProcedure, // [核心修改] 4. 使用处理后的步骤文本
                 });
             });
 
@@ -4012,19 +4035,14 @@ export class ProductionTasksService {
             content.push({ text: getSectionTitle(title), style: 'sectionHeader', margin: [0, 30, 0, 5] });
 
             items.forEach((item, index) => {
+                // 1. 标题
                 content.push({
                     text: `${index + 1}. ${item.name}`,
                     style: 'groupTitle',
                     margin: [0, 15, 0, 5],
                 });
 
-                content.push({
-                    text: `目标总重: ${formatWeight(item.totalWeight)}${item.targetWeight ? ` (需求: ${formatWeight(item.targetWeight)})` : ''}`,
-                    style: 'desc',
-                    margin: [0, 0, 0, 5],
-                });
-
-                // 配方表
+                // 2. 配方表格
                 const body: any[] = [];
                 body.push([
                     { text: '完成', style: 'tableHeader' },
@@ -4038,7 +4056,7 @@ export class ProductionTasksService {
 
                     body.push([
                         { text: '□', style: 'checkbox' },
-                        { text: ing.name, style: 'text' },
+                        { text: ing.name, style: ing.isRecipe ? 'recipeName' : 'text' },
                         { text: `${ing.isRecipe ? '自制' : ing.brand || '-'}\n${extraInfo}`, style: 'smallText' },
                         { text: formatWeight(ing.weightInGrams), style: 'weightNumber', alignment: 'right' },
                     ]);
@@ -4053,10 +4071,50 @@ export class ProductionTasksService {
                         dontBreakRows: true,
                     },
                     layout: 'lightHorizontalLines',
-                    margin: [0, 0, 0, 10],
+                    margin: [0, 0, 0, 5], // 减少底部间距，让分割线紧凑一些
                 });
 
-                // 制作步骤
+                // [新增] 表格与汇总信息之间的分割线
+                content.push({
+                    canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 0.5, lineColor: '#bbbbbb' }],
+                    margin: [0, 2, 0, 8], // 上边距 2 (离表格底边), 下边距 8 (离汇总信息)
+                });
+
+                // 3. 汇总信息栏 (靠右对齐)
+                const stock = item.stockWeight || 0;
+                const total = item.totalWeight;
+                const target = item.targetWeight;
+                const totalNeed = (target || total) + stock;
+
+                const createSummaryItem = (label: string, value: string, valueStyle = 'summaryValue') => ({
+                    stack: [
+                        { text: label, style: 'summaryLabel', alignment: 'right' },
+                        { text: value, style: valueStyle, alignment: 'right' },
+                    ],
+                    width: 'auto',
+                    margin: [15, 0, 0, 0],
+                });
+
+                const summaryColumns: any[] = [];
+
+                // 占位列，挤到右边
+                summaryColumns.push({ text: '', width: '*' });
+
+                summaryColumns.push(createSummaryItem('需求总量', formatWeight(totalNeed)));
+                summaryColumns.push(createSummaryItem('库存抵扣', formatWeight(stock)));
+
+                if (target != null) {
+                    summaryColumns.push(createSummaryItem('目标产出', formatWeight(target), 'highlightValue'));
+                }
+
+                summaryColumns.push(createSummaryItem('预计投料', formatWeight(total), 'secondaryValue'));
+
+                content.push({
+                    columns: summaryColumns,
+                    margin: [0, 0, 0, 15],
+                });
+
+                // 4. 制作步骤
                 if (item.procedure && item.procedure.length > 0) {
                     const steps = item.procedure.map((step, idx) => ({
                         text: `${idx + 1}. ${step}`,
@@ -4065,7 +4123,7 @@ export class ProductionTasksService {
                     }));
                     content.push({
                         stack: steps,
-                        margin: [10, 0, 0, 15],
+                        margin: [10, 5, 0, 15],
                         color: '#555555',
                     });
                 }
@@ -4073,19 +4131,27 @@ export class ProductionTasksService {
         };
 
         if (prepTask.items && prepTask.items.length > 0) {
-            const mapToRenderItem = (item: CalculatedRecipeDetails): RenderTaskItem => ({
-                name: item.name,
-                totalWeight: item.totalWeight,
-                targetWeight: item.targetWeight,
-                ingredients: item.ingredients.map((ing) => ({
-                    name: ing.name,
-                    isRecipe: ing.isRecipe,
-                    brand: ing.brand,
-                    extraInfo: (ing as typeof ing & { extraInfo?: string }).extraInfo || null,
-                    weightInGrams: ing.weightInGrams,
-                })),
-                procedure: item.procedure,
-            });
+            // [核心修复] 使用交叉类型断言代替 'as any'，修复 unsafe-member-access 错误
+            const mapToRenderItem = (item: CalculatedRecipeDetails): RenderTaskItem => {
+                // 安全地断言 item 包含 stockWeight 属性
+                const itemWithStock = item as CalculatedRecipeDetails & { stockWeight?: number };
+
+                return {
+                    name: item.name,
+                    totalWeight: item.totalWeight,
+                    targetWeight: item.targetWeight,
+                    // [核心修复] 安全访问
+                    stockWeight: itemWithStock.stockWeight || 0,
+                    ingredients: item.ingredients.map((ing) => ({
+                        name: ing.name,
+                        isRecipe: ing.isRecipe,
+                        brand: ing.brand,
+                        extraInfo: (ing as typeof ing & { extraInfo?: string }).extraInfo || null,
+                        weightInGrams: ing.weightInGrams,
+                    })),
+                    procedure: item.procedure,
+                };
+            };
 
             const preDoughs = prepTask.items.filter((item) => item.type === 'PRE_DOUGH').map(mapToRenderItem);
             const extras = prepTask.items.filter((item) => item.type === 'EXTRA').map(mapToRenderItem);
@@ -4113,16 +4179,24 @@ export class ProductionTasksService {
         const docDefinition: any = {
             content: content,
             styles: {
+                // ... 原有样式保持不变 ...
                 header: { fontSize: 20, bold: true, margin: [0, 0, 0, 5] },
                 subHeader: { fontSize: 12, color: '#555555' },
                 sectionHeader: { fontSize: 14, bold: true, color: '#333333', margin: [0, 5, 0, 5] },
                 groupTitle: { fontSize: 13, bold: true, color: '#333333' },
+                // [删除] desc 样式可能不再需要，或者保留备用
                 desc: { fontSize: 10, italics: true, color: '#666666' },
                 tableHeader: { fontSize: 10, bold: true, color: 'black', fillColor: '#eeeeee' },
                 checkbox: { fontSize: 14, alignment: 'center' },
                 weightNumber: { fontSize: 11, bold: true },
                 text: { fontSize: 10 },
                 smallText: { fontSize: 9, color: '#666666' },
+
+                // [新增] 汇总栏样式
+                summaryLabel: { fontSize: 8, color: '#999999', margin: [0, 0, 0, 2] },
+                summaryValue: { fontSize: 10, bold: true, color: '#333333' },
+                highlightValue: { fontSize: 10, bold: true, color: '#000000' }, // 对应前端 highlight-value
+                secondaryValue: { fontSize: 10, color: '#666666' }, // 对应前端 text-secondary
             },
             defaultStyle: {
                 font: 'Roboto',

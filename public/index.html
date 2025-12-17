@@ -248,7 +248,7 @@
                                 <button class="btn-delete-dough" @click="removePreDough(doughIndex)"><svg><use href="#icon-close"></use></svg></button>
                                 <div class="card-title-wrapper"><span class="card-title">{{ dough.name }}</span></div>
                                 <div class="form-item">
-                                    <label class="form-item-label">面种中面粉占总面粉的百分比 (%)</label>
+                                    <label class="form-item-label">面种用粉占比 (%)</label>
                                     <input class="input-field" type="number" :value="dough.flourRatioInMainDough" @input="updatePreDoughRatio(dough.id, $event.target.value)" placeholder="例如: 20" />
                                 </div>
                                 <div class="ingredient-header" style="opacity: 0.7; margin-top: 0">
