@@ -86,6 +86,10 @@
             .input-field, .picker { width: 100%; height: 44px; line-height: 44px; padding: 0 12px; border: 1px solid var(--border-color); border-radius: 10px; font-size: 14px; background-color: #f8f9fa; box-sizing: border-box; color: var(--text-primary); transition: border-color 0.2s, box-shadow 0.2s; }
             .input-field.ratio-input { width: 100px; text-align: center; flex-shrink: 0; flex-grow: 0; flex-basis: 100px; }
             .input-field:focus, .picker:focus { outline: none; border-color: var(--primary-color); box-shadow: 0 0 0 3px rgba(140, 90, 59, 0.15); }
+            /* 错误状态样式 */
+            .input-field.error { border-color: var(--danger-color); }
+            .input-error-msg { color: var(--danger-color); font-size: 12px; margin-top: 4px; padding-left: 2px; }
+
             .btn { display: inline-flex; justify-content: center; align-items: center; padding: 10px 15px; min-height: 44px; box-sizing: border-box; border-radius: 15px; font-size: 16px; font-weight: 500; cursor: pointer; transition: transform 0.2s, box-shadow 0.28s; border: none; }
             .btn:active { transform: scale(0.97); }
             .btn:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -208,7 +212,8 @@
                         <div class="form-grid">
                             <div class="form-item" style="margin-bottom: 0">
                                 <label class="form-item-label">配方名称 (配方族)</label>
-                                <input class="input-field" v-model="currentFamily.name" :placeholder="recipeNamePlaceholder" />
+                                <input class="input-field" :class="{ error: nameValidationError }" v-model="currentFamily.name" :placeholder="recipeNamePlaceholder" />
+                                <div v-if="nameValidationError" class="input-error-msg">{{ nameValidationError }}</div>
                             </div>
                             <div class="form-item" style="margin-bottom: 0">
                                 <label class="form-item-label">配方类型</label>
@@ -660,6 +665,20 @@
                     const recipeNamePlaceholder = computed(() => !currentFamily.value ? '' : { MAIN: '例如：法式长棍', PRE_DOUGH: '例如：波兰种', EXTRA: '例如：奶酥馅' }[currentFamily.value.type] || '配方名称');
                     const recipeTypeDisplay = (type) => ({ MAIN: '产品配方', PRE_DOUGH: '面种', EXTRA: '自制原料' })[type];
                     const recipeContentTitle = computed(() => (!currentFamily.value ? '' : (currentFamily.value.category === 'BREAD' ? '主面团' : '配方内容')));
+
+                    // ----------------------------
+                    // 新增：配方名校验逻辑
+                    // ----------------------------
+                    const nameValidationError = computed(() => {
+                        if (!currentFamily.value) return null;
+                        const name = (currentFamily.value.name || '').trim();
+                        // 1. 不能为空
+                        if (!name) return '配方名称不能为空';
+                        // 2. 不能重复 (查找是否有其他配方使用了相同的名字，忽略当前正在编辑的这个)
+                        const duplicate = recipes.value.find(r => r.id !== currentFamily.value.id && (r.name || '').trim() === name);
+                        if (duplicate) return '配方名称已存在，请使用其他名称';
+                        return null;
+                    });
                     
                     function sortIngredients(ingredients, recipeType, recipeCategory) {
                         const isBreadLogic = (recipeType === 'PRE_DOUGH') || (recipeType === 'MAIN' && recipeCategory === 'BREAD');
@@ -887,7 +906,8 @@
                         addSubIngredient, removeSubIngredient, addProductProcedureStep, removeProductProcedureStep, exportAllJson, openFile, saveFile,
                         updatePreDoughRatio, sortedMainDoughIngredients, sortedOtherIngredients, productsWithSortedMixIns, getWrapperClass, 
                         totalWaterRatio, shouldShowWaterTag,
-                        calculatedWaterContent
+                        calculatedWaterContent,
+                        nameValidationError // 新增的校验属性
                     };
                 },
             }).mount('#app');
