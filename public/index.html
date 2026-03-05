@@ -3,7 +3,8 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>配方编辑器</title> <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+        <title>配方编辑器</title>
+        <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
         <style>
             :root {
                 /* 保持原始文件的颜色变量 */
@@ -16,9 +17,9 @@
                 --danger-color: #e74c3c;
                 --border-color: #f3e9e3;
                 --sidebar-bg: #f7f4ef;
-                
+
                 /* 标签颜色 */
-                --tag-flour-bg: #f0e6de; 
+                --tag-flour-bg: #f0e6de;
                 --tag-flour-text: #8c5a3b;
                 --tag-self-bg: #faedcd;
                 --tag-self-text: #8c5a3b;
@@ -35,130 +36,681 @@
             }
 
             /* 滚动条样式 */
-            ::-webkit-scrollbar { width: 8px; height: 8px; }
-            ::-webkit-scrollbar-track { background: transparent; }
-            ::-webkit-scrollbar-thumb { background-color: #e0d3c9; border-radius: 4px; border: 2px solid transparent; background-clip: content-box; }
-            ::-webkit-scrollbar-thumb:hover { background-color: var(--accent-color); }
+            ::-webkit-scrollbar {
+                width: 8px;
+                height: 8px;
+            }
+            ::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            ::-webkit-scrollbar-thumb {
+                background-color: #e0d3c9;
+                border-radius: 4px;
+                border: 2px solid transparent;
+                background-clip: content-box;
+            }
+            ::-webkit-scrollbar-thumb:hover {
+                background-color: var(--accent-color);
+            }
 
-            #app { display: flex; height: 100vh; overflow: hidden; max-width: 1024px; margin: 0 auto; box-shadow: 0 0 30px rgba(0, 0, 0, 0.1); }
+            #app {
+                display: flex;
+                height: 100vh;
+                overflow: hidden;
+                max-width: 1024px;
+                margin: 0 auto;
+                box-shadow: 0 0 30px rgba(0, 0, 0, 0.1);
+            }
 
             /* Modal */
-            .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
-            .modal-content { background-color: white; border-radius: 20px; padding: 25px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2); width: 90%; max-width: 400px; max-height: 80vh; display: flex; flex-direction: column; }
-            .modal-header { font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 20px; text-align: center; }
-            .modal-body { overflow-y: auto; flex-grow: 1; }
-            .modal-body .selection-item { padding: 12px; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: background-color 0.2s; text-align: center; font-weight: 500; border: 1px solid var(--border-color); }
-            .modal-footer { margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px; }
+            .modal-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: rgba(0, 0, 0, 0.5);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+            }
+            .modal-content {
+                background-color: white;
+                border-radius: 20px;
+                padding: 25px;
+                box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+                width: 90%;
+                max-width: 400px;
+                max-height: 80vh;
+                display: flex;
+                flex-direction: column;
+            }
+            .modal-header {
+                font-size: 18px;
+                font-weight: 600;
+                color: var(--text-primary);
+                margin-bottom: 20px;
+                text-align: center;
+            }
+            .modal-body {
+                overflow-y: auto;
+                flex-grow: 1;
+            }
+            .modal-body .selection-item {
+                padding: 12px;
+                border-radius: 10px;
+                margin-bottom: 8px;
+                cursor: pointer;
+                transition: background-color 0.2s;
+                text-align: center;
+                font-weight: 500;
+                border: 1px solid var(--border-color);
+            }
+            .modal-footer {
+                margin-top: 20px;
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+            }
 
             /* Sidebar */
-            .sidebar { width: 300px; flex-shrink: 0; background-color: var(--sidebar-bg); display: flex; flex-direction: column; border-right: 1px solid var(--border-color); }
-            .sidebar-header { padding: 20px; text-align: center; border-bottom: 1px solid var(--border-color); }
-            .sidebar-header h1 { font-size: 24px; color: var(--primary-color); margin: 0; }
-            .sidebar-header p { font-size: 13px; color: var(--text-secondary); margin-top: 5px; }
-            .sidebar-tabs { display: flex; padding: 10px; gap: 5px; border-bottom: 1px solid var(--border-color); }
-            .sidebar-tab { flex: 1; padding: 8px 5px; text-align: center; font-size: 14px; color: var(--text-secondary); border-radius: 10px; cursor: pointer; transition: background-color 0.2s, color 0.2s; position: relative; }
-            .sidebar-tab.active { background-color: var(--primary-color); color: white; font-weight: 600; }
-            .sidebar-tab .count-badge { position: absolute; top: -5px; right: -5px; background-color: var(--accent-color); color: white; font-size: 10px; border-radius: 50%; width: 18px; height: 18px; line-height: 18px; text-align: center; }
-            .recipe-list-container { flex-grow: 1; overflow-y: auto; padding: 10px; }
-            .recipe-list-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: background-color 0.2s, box-shadow 0.2s; }
-            .recipe-list-item:hover { background-color: var(--border-color); }
-            .recipe-list-item.active { background-color: var(--primary-color); color: white; box-shadow: 0 4px 12px rgba(140, 90, 59, 0.2); }
-            .recipe-list-item.active .recipe-info span { color: white !important; }
-            .recipe-list-item.active .recipe-info .recipe-category-tag { background-color: white; color: var(--text-secondary) !important; }
-            .recipe-info { display: flex; flex-direction: column; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .recipe-item-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-            .recipe-info strong { font-size: 15px; font-weight: 600; }
-            .recipe-category-tag { font-size: 10px; font-weight: 500; background-color: var(--border-color); color: var(--text-secondary); padding: 2px 6px; border-radius: 5px; margin-left: 6px; vertical-align: middle; }
-            .btn-delete-recipe { background: none; color: var(--text-secondary); border-radius: 50%; width: 24px; height: 24px; border: none; cursor: pointer; flex-shrink: 0; transition: all 0.2s; display: flex; align-items: center; justify-content: center; padding: 5px; visibility: hidden; opacity: 0; }
-            .recipe-list-item:hover .btn-delete-recipe, .recipe-list-item.active .btn-delete-recipe { visibility: visible; opacity: 1; }
-            .btn-delete-recipe:hover { background: var(--danger-color); color: white; }
-            .btn-delete-recipe svg, .btn-delete-dough svg, .btn-remove svg { width: 100%; height: 100%; }
-            .sidebar-footer { padding: 15px; border-top: 1px solid var(--border-color); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+            .sidebar {
+                width: 300px;
+                flex-shrink: 0;
+                background-color: var(--sidebar-bg);
+                display: flex;
+                flex-direction: column;
+                border-right: 1px solid var(--border-color);
+            }
+            .sidebar-header {
+                padding: 20px;
+                text-align: center;
+                border-bottom: 1px solid var(--border-color);
+            }
+            .sidebar-header h1 {
+                font-size: 24px;
+                color: var(--primary-color);
+                margin: 0;
+            }
+            .sidebar-header p {
+                font-size: 13px;
+                color: var(--text-secondary);
+                margin-top: 5px;
+            }
+            .sidebar-tabs {
+                display: flex;
+                padding: 10px;
+                gap: 5px;
+                border-bottom: 1px solid var(--border-color);
+            }
+            .sidebar-tab {
+                flex: 1;
+                padding: 8px 5px;
+                text-align: center;
+                font-size: 14px;
+                color: var(--text-secondary);
+                border-radius: 10px;
+                cursor: pointer;
+                transition:
+                    background-color 0.2s,
+                    color 0.2s;
+                position: relative;
+            }
+            .sidebar-tab.active {
+                background-color: var(--primary-color);
+                color: white;
+                font-weight: 600;
+            }
+            .sidebar-tab .count-badge {
+                position: absolute;
+                top: -5px;
+                right: -5px;
+                background-color: var(--accent-color);
+                color: white;
+                font-size: 10px;
+                border-radius: 50%;
+                width: 18px;
+                height: 18px;
+                line-height: 18px;
+                text-align: center;
+            }
+            .recipe-list-container {
+                flex-grow: 1;
+                overflow-y: auto;
+                padding: 10px;
+            }
+            .recipe-list-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px;
+                border-radius: 10px;
+                margin-bottom: 8px;
+                cursor: pointer;
+                transition:
+                    background-color 0.2s,
+                    box-shadow 0.2s;
+            }
+            .recipe-list-item:hover {
+                background-color: var(--border-color);
+            }
+            .recipe-list-item.active {
+                background-color: var(--primary-color);
+                color: white;
+                box-shadow: 0 4px 12px rgba(140, 90, 59, 0.2);
+            }
+            .recipe-list-item.active .recipe-info span {
+                color: white !important;
+            }
+            .recipe-list-item.active .recipe-info .recipe-category-tag {
+                background-color: white;
+                color: var(--text-secondary) !important;
+            }
+            .recipe-info {
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .recipe-item-controls {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-shrink: 0;
+            }
+            .recipe-info strong {
+                font-size: 15px;
+                font-weight: 600;
+            }
+            .recipe-category-tag {
+                font-size: 10px;
+                font-weight: 500;
+                background-color: var(--border-color);
+                color: var(--text-secondary);
+                padding: 2px 6px;
+                border-radius: 5px;
+                margin-left: 6px;
+                vertical-align: middle;
+            }
+            .btn-delete-recipe {
+                background: none;
+                color: var(--text-secondary);
+                border-radius: 50%;
+                width: 24px;
+                height: 24px;
+                border: none;
+                cursor: pointer;
+                flex-shrink: 0;
+                transition: all 0.2s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 5px;
+                visibility: hidden;
+                opacity: 0;
+            }
+            .recipe-list-item:hover .btn-delete-recipe,
+            .recipe-list-item.active .btn-delete-recipe {
+                visibility: visible;
+                opacity: 1;
+            }
+            .btn-delete-recipe:hover {
+                background: var(--danger-color);
+                color: white;
+            }
+            .btn-delete-recipe svg,
+            .btn-delete-dough svg,
+            .btn-remove svg {
+                width: 100%;
+                height: 100%;
+            }
+            .sidebar-footer {
+                padding: 15px;
+                border-top: 1px solid var(--border-color);
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+            }
 
             /* Content & Card */
-            .main-content { flex-grow: 1; overflow-y: auto; padding: 30px 20px; position: relative; }
-            .card { background: var(--card-bg); padding: 20px; border-radius: 20px; margin-bottom: 20px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05); position: relative; }
-            .card-title-wrapper { display: flex; justify-content: space-between; align-items: center; padding: 0 5px; margin-bottom: 20px; }
-            .card-title { font-size: 18px; font-weight: 600; color: var(--text-primary); }
-            .form-item { margin-bottom: 20px; }
-            .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-            .form-item-label { display: block; margin-bottom: 8px; font-size: 14px; color: #606266; }
-            .input-field, .picker { width: 100%; height: 44px; line-height: 44px; padding: 0 12px; border: 1px solid var(--border-color); border-radius: 10px; font-size: 14px; background-color: #f8f9fa; box-sizing: border-box; color: var(--text-primary); transition: border-color 0.2s, box-shadow 0.2s; }
-            .input-field.ratio-input { width: 100px; text-align: center; flex-shrink: 0; flex-grow: 0; flex-basis: 100px; }
-            .input-field:focus, .picker:focus { outline: none; border-color: var(--primary-color); box-shadow: 0 0 0 3px rgba(140, 90, 59, 0.15); }
+            .main-content {
+                flex-grow: 1;
+                overflow-y: auto;
+                padding: 30px 20px;
+                position: relative;
+            }
+            .card {
+                background: var(--card-bg);
+                padding: 20px;
+                border-radius: 20px;
+                margin-bottom: 20px;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+                position: relative;
+            }
+            .card-title-wrapper {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 0 5px;
+                margin-bottom: 20px;
+            }
+            .card-title {
+                font-size: 18px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .form-item {
+                margin-bottom: 20px;
+            }
+            .form-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+            }
+            .form-item-label {
+                display: block;
+                margin-bottom: 8px;
+                font-size: 14px;
+                color: #606266;
+            }
+            .input-field,
+            .picker {
+                width: 100%;
+                height: 44px;
+                line-height: 44px;
+                padding: 0 12px;
+                border: 1px solid var(--border-color);
+                border-radius: 10px;
+                font-size: 14px;
+                background-color: #f8f9fa;
+                box-sizing: border-box;
+                color: var(--text-primary);
+                transition:
+                    border-color 0.2s,
+                    box-shadow 0.2s;
+            }
+            .input-field.ratio-input {
+                width: 100px;
+                text-align: center;
+                flex-shrink: 0;
+                flex-grow: 0;
+                flex-basis: 100px;
+            }
+            .input-field:focus,
+            .picker:focus {
+                outline: none;
+                border-color: var(--primary-color);
+                box-shadow: 0 0 0 3px rgba(140, 90, 59, 0.15);
+            }
             /* 错误状态样式 */
-            .input-field.error { border-color: var(--danger-color); }
-            .input-error-msg { color: var(--danger-color); font-size: 12px; margin-top: 4px; padding-left: 2px; }
+            .input-field.error {
+                border-color: var(--danger-color);
+            }
+            .input-error-msg {
+                color: var(--danger-color);
+                font-size: 12px;
+                margin-top: 4px;
+                padding-left: 2px;
+            }
 
-            .btn { display: inline-flex; justify-content: center; align-items: center; padding: 10px 15px; min-height: 44px; box-sizing: border-box; border-radius: 15px; font-size: 16px; font-weight: 500; cursor: pointer; transition: transform 0.2s, box-shadow 0.28s; border: none; }
-            .btn:active { transform: scale(0.97); }
-            .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-            .btn-primary { background-image: linear-gradient(135deg, var(--accent-color) 0%, var(--primary-color) 100%); color: white; box-shadow: 0 4px 15px rgba(140, 90, 59, 0.2); }
-            .btn-secondary { background-color: #f3e9e3; color: var(--text-secondary); }
-            .btn-dashed { border: 1px dashed var(--primary-color); color: var(--primary-color); background: transparent; min-height: 46px; }
-            .btn-full-width { width: 100%; }
-            .btn-remove { width: 40px; height: 40px; border: 1px dashed var(--border-color); border-radius: 10px; color: var(--danger-color); background: transparent; padding: 10px; min-height: auto; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-            .btn-delete-dough { position: absolute; top: 20px; right: 20px; background: none; border: none; color: var(--primary-color); cursor: pointer; width: 24px; height: 24px; opacity: 0.8; transition: opacity 0.2s; }
-            .btn-delete-dough:hover { opacity: 1; }
+            .btn {
+                display: inline-flex;
+                justify-content: center;
+                align-items: center;
+                padding: 10px 15px;
+                min-height: 44px;
+                box-sizing: border-box;
+                border-radius: 15px;
+                font-size: 16px;
+                font-weight: 500;
+                cursor: pointer;
+                transition:
+                    transform 0.2s,
+                    box-shadow 0.28s;
+                border: none;
+            }
+            .btn:active {
+                transform: scale(0.97);
+            }
+            .btn:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+            }
+            .btn-primary {
+                background-image: linear-gradient(135deg, var(--accent-color) 0%, var(--primary-color) 100%);
+                color: white;
+                box-shadow: 0 4px 15px rgba(140, 90, 59, 0.2);
+            }
+            .btn-secondary {
+                background-color: #f3e9e3;
+                color: var(--text-secondary);
+            }
+            .btn-dashed {
+                border: 1px dashed var(--primary-color);
+                color: var(--primary-color);
+                background: transparent;
+                min-height: 46px;
+            }
+            .btn-full-width {
+                width: 100%;
+            }
+            .btn-remove {
+                width: 40px;
+                height: 40px;
+                border: 1px dashed var(--border-color);
+                border-radius: 10px;
+                color: var(--danger-color);
+                background: transparent;
+                padding: 10px;
+                min-height: auto;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+            }
+            .btn-delete-dough {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                background: none;
+                border: none;
+                color: var(--primary-color);
+                cursor: pointer;
+                width: 24px;
+                height: 24px;
+                opacity: 0.8;
+                transition: opacity 0.2s;
+            }
+            .btn-delete-dough:hover {
+                opacity: 1;
+            }
 
             /* Ingredients & Tags */
-            .ingredient-header { display: flex; align-items: center; color: var(--text-secondary); font-size: 13px; margin-top: 15px; margin-bottom: 8px; gap: 10px; }
-            .col-name { flex: 1; }
-            .col-ratio { width: 100px; text-align: center; }
-            .col-action { width: 40px; text-align: right; }
-            .ingredient-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-            .ingredient-row > .input-with-tag-wrapper { flex: 1; }
-            
-            .input-with-tag-wrapper { position: relative; display: flex; align-items: center; width: 100%; }
-            .tags-container { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: flex; gap: 4px; pointer-events: none; z-index: 2; height: auto; }
-            .ing-tag { font-size: 12px; padding: 4px 8px; border-radius: 6px; font-weight: 600; line-height: 1; white-space: nowrap; }
-            .tag-flour { background-color: var(--tag-flour-bg); color: var(--tag-flour-text); }
-            .tag-self { background-color: var(--tag-self-bg); color: var(--tag-self-text); }
-            .tag-water { background-color: var(--tag-water-bg); color: var(--tag-water-text); }
-            
-            .input-with-tag-wrapper.input-has-1-tag .input-field { padding-right: 55px !important; }
-            .input-with-tag-wrapper.input-has-2-tags .input-field { padding-right: 110px !important; } /* 加宽以容纳水标签 */
-            .input-with-tag-wrapper.input-has-water-tag .input-field { padding-right: 110px !important; } 
+            .ingredient-header {
+                display: flex;
+                align-items: center;
+                color: var(--text-secondary);
+                font-size: 13px;
+                margin-top: 15px;
+                margin-bottom: 8px;
+                gap: 10px;
+            }
+            .col-name {
+                flex: 1;
+            }
+            .col-ratio {
+                width: 100px;
+                text-align: center;
+            }
+            .col-action {
+                width: 40px;
+                text-align: right;
+            }
+            .ingredient-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 10px;
+            }
+            .ingredient-row > .input-with-tag-wrapper {
+                flex: 1;
+            }
+
+            .input-with-tag-wrapper {
+                position: relative;
+                display: flex;
+                align-items: center;
+                width: 100%;
+            }
+            .tags-container {
+                position: absolute;
+                right: 8px;
+                top: 50%;
+                transform: translateY(-50%);
+                display: flex;
+                gap: 4px;
+                pointer-events: none;
+                z-index: 2;
+                height: auto;
+            }
+            .ing-tag {
+                font-size: 12px;
+                padding: 4px 8px;
+                border-radius: 6px;
+                font-weight: 600;
+                line-height: 1;
+                white-space: nowrap;
+            }
+            .tag-flour {
+                background-color: var(--tag-flour-bg);
+                color: var(--tag-flour-text);
+            }
+            .tag-self {
+                background-color: var(--tag-self-bg);
+                color: var(--tag-self-text);
+            }
+            .tag-water {
+                background-color: var(--tag-water-bg);
+                color: var(--tag-water-text);
+            }
+
+            .input-with-tag-wrapper.input-has-1-tag .input-field {
+                padding-right: 55px !important;
+            }
+            .input-with-tag-wrapper.input-has-2-tags .input-field {
+                padding-right: 110px !important;
+            } /* 加宽以容纳水标签 */
+            .input-with-tag-wrapper.input-has-water-tag .input-field {
+                padding-right: 110px !important;
+            }
 
             /* Procedures & Subgroups */
-            .procedure-item { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-            .procedure-notes .notes-title { display: block; margin-bottom: 8px; font-size: 14px; color: #606266; }
-            .sub-group { margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px; }
-            .sub-group-title { font-size: 14px; font-weight: 500; color: var(--text-primary); margin-bottom: 15px; }
-            .editor-placeholder { display: flex; justify-content: center; align-items: center; height: 100%; text-align: center; color: var(--text-secondary); font-size: 18px; }
+            .procedure-item {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 10px;
+            }
+            .procedure-notes .notes-title {
+                display: block;
+                margin-bottom: 8px;
+                font-size: 14px;
+                color: #606266;
+            }
+            .sub-group {
+                margin-top: 20px;
+                border-top: 1px solid var(--border-color);
+                padding-top: 20px;
+            }
+            .sub-group-title {
+                font-size: 14px;
+                font-weight: 500;
+                color: var(--text-primary);
+                margin-bottom: 15px;
+            }
+            .editor-placeholder {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100%;
+                text-align: center;
+                color: var(--text-secondary);
+                font-size: 18px;
+            }
 
             /* Tabs */
-            .tabs-wrapper { position: relative; display: flex; align-items: center; margin-bottom: 20px; }
-            .tabs { display: flex; gap: 10px; border-bottom: 1px solid var(--border-color); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-            .tabs::-webkit-scrollbar { display: none; }
-            .tab-item { padding: 10px 15px; cursor: pointer; color: var(--text-secondary); border-bottom: 3px solid transparent; transition: color 0.3s, border-color 0.3s; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-            .tab-item.active { color: var(--primary-color); border-bottom-color: var(--primary-color); font-weight: 600; }
-            .add-tab { font-weight: bold; color: var(--primary-color); }
-            .tab-delete-btn { background-color: var(--border-color); border-radius: 50%; border: none; padding: 0; margin: 0; width: 18px; height: 18px; color: var(--text-secondary); cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; visibility: hidden; opacity: 0; }
-            .tab-item:hover .tab-delete-btn, .tab-item.active .tab-delete-btn { visibility: visible; opacity: 1; }
-            .tab-delete-btn:hover { background-color: var(--danger-color); color: white; }
-            .tab-scroll-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255, 255, 255, 0.8); border: 1px solid var(--border-color); border-radius: 50%; width: 28px; height: 28px; z-index: 10; cursor: pointer; color: var(--text-secondary); font-size: 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1); }
-            .tab-scroll-btn.left { left: -14px; } .tab-scroll-btn.right { right: -14px; }
-            .tab-scroll-btn:hover { color: var(--primary-color); }
-            .tab-delete-btn svg { width: 10px; height: 10px; }
+            .tabs-wrapper {
+                position: relative;
+                display: flex;
+                align-items: center;
+                margin-bottom: 20px;
+            }
+            .tabs {
+                display: flex;
+                gap: 10px;
+                border-bottom: 1px solid var(--border-color);
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                scrollbar-width: none;
+            }
+            .tabs::-webkit-scrollbar {
+                display: none;
+            }
+            .tab-item {
+                padding: 10px 15px;
+                cursor: pointer;
+                color: var(--text-secondary);
+                border-bottom: 3px solid transparent;
+                transition:
+                    color 0.3s,
+                    border-color 0.3s;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                white-space: nowrap;
+            }
+            .tab-item.active {
+                color: var(--primary-color);
+                border-bottom-color: var(--primary-color);
+                font-weight: 600;
+            }
+            .add-tab {
+                font-weight: bold;
+                color: var(--primary-color);
+            }
+            .tab-delete-btn {
+                background-color: var(--border-color);
+                border-radius: 50%;
+                border: none;
+                padding: 0;
+                margin: 0;
+                width: 18px;
+                height: 18px;
+                color: var(--text-secondary);
+                cursor: pointer;
+                transition: all 0.2s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                visibility: hidden;
+                opacity: 0;
+            }
+            .tab-item:hover .tab-delete-btn,
+            .tab-item.active .tab-delete-btn {
+                visibility: visible;
+                opacity: 1;
+            }
+            .tab-delete-btn:hover {
+                background-color: var(--danger-color);
+                color: white;
+            }
+            .tab-scroll-btn {
+                position: absolute;
+                top: 50%;
+                transform: translateY(-50%);
+                background-color: rgba(255, 255, 255, 0.8);
+                border: 1px solid var(--border-color);
+                border-radius: 50%;
+                width: 28px;
+                height: 28px;
+                z-index: 10;
+                cursor: pointer;
+                color: var(--text-secondary);
+                font-size: 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+            }
+            .tab-scroll-btn.left {
+                left: -14px;
+            }
+            .tab-scroll-btn.right {
+                right: -14px;
+            }
+            .tab-scroll-btn:hover {
+                color: var(--primary-color);
+            }
+            .tab-delete-btn svg {
+                width: 10px;
+                height: 10px;
+            }
 
             /* Suggestion Box */
-            .suggestion-box { position: absolute; background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); z-index: 100; max-height: 200px; overflow-y: auto; list-style: none; margin: 0; padding: 5px; box-sizing: border-box; }
-            .suggestion-item { padding: 8px 12px; font-size: 14px; cursor: pointer; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
-            .suggestion-item:hover { background-color: var(--sidebar-bg); }
-            .suggestion-tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 500; margin-left: 8px; }
-            .suggestion-action { color: var(--primary-color); font-weight: 600; }
+            .suggestion-box {
+                position: absolute;
+                background-color: var(--card-bg);
+                border: 1px solid var(--border-color);
+                border-radius: 10px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+                z-index: 100;
+                max-height: 200px;
+                overflow-y: auto;
+                list-style: none;
+                margin: 0;
+                padding: 5px;
+                box-sizing: border-box;
+            }
+            .suggestion-item {
+                padding: 8px 12px;
+                font-size: 14px;
+                cursor: pointer;
+                border-radius: 8px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            .suggestion-item:hover {
+                background-color: var(--sidebar-bg);
+            }
+            .suggestion-tag {
+                font-size: 10px;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-weight: 500;
+                margin-left: 8px;
+            }
+            .suggestion-action {
+                color: var(--primary-color);
+                font-weight: 600;
+            }
         </style>
     </head>
 
     <body>
         <svg style="display: none">
             <symbol id="icon-trash" viewBox="0 0 72 72">
-                <path style="fill: currentColor" d="M31.4,5.9c-1.3,0-2.6,0.5-3.6,1.4c-0.9,0.9-1.4,2.3-1.4,3.6v2.5H11.5v5H14v39.8c0,4.1,3.4,7.5,7.5,7.5h29.8 c4.1,0,7.5-3.4,7.5-7.5V18.3h2.5v-5H46.3v-2.5c0-1.3-0.5-2.6-1.4-3.6s-2.3-1.4-3.6-1.4H31.4z M31.4,10.9h9.9v2.5h-9.9V10.9z M18.9,18.3h34.8v39.8c0,1.4-1.1,2.5-2.5,2.5H21.4c-1.4,0-2.5-1.1-2.5-2.5V18.3z M23.9,25.8v27.3h5V25.8H23.9z M33.9,25.8v27.3h5 V25.8H33.9z M43.8,25.8v27.3h5V25.8H43.8z" />
+                <path
+                    style="fill: currentColor"
+                    d="M31.4,5.9c-1.3,0-2.6,0.5-3.6,1.4c-0.9,0.9-1.4,2.3-1.4,3.6v2.5H11.5v5H14v39.8c0,4.1,3.4,7.5,7.5,7.5h29.8 c4.1,0,7.5-3.4,7.5-7.5V18.3h2.5v-5H46.3v-2.5c0-1.3-0.5-2.6-1.4-3.6s-2.3-1.4-3.6-1.4H31.4z M31.4,10.9h9.9v2.5h-9.9V10.9z M18.9,18.3h34.8v39.8c0,1.4-1.1,2.5-2.5,2.5H21.4c-1.4,0-2.5-1.1-2.5-2.5V18.3z M23.9,25.8v27.3h5V25.8H23.9z M33.9,25.8v27.3h5 V25.8H33.9z M43.8,25.8v27.3h5V25.8H43.8z"
+                />
             </symbol>
             <symbol id="icon-close" viewBox="0 0 16 16">
-                <line fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" x1="14" y1="2" x2="2" y2="14" />
-                <line fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" x1="2" y1="2" x2="14" y2="14" />
+                <line
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    x1="14"
+                    y1="2"
+                    x2="2"
+                    y2="14"
+                />
+                <line
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    x1="2"
+                    y1="2"
+                    x2="14"
+                    y2="14"
+                />
             </symbol>
         </svg>
 
@@ -169,23 +721,54 @@
                     <p>打开、编辑并保存您的配方</p>
                 </header>
                 <div class="sidebar-tabs">
-                    <div class="sidebar-tab" :class="{active: activeCategory === 'MAIN'}" @click="activeCategory = 'MAIN'">
-                        产品配方 <span v-if="recipeCategories.main.length > 0" class="count-badge">{{ recipeCategories.main.length }}</span>
+                    <div
+                        class="sidebar-tab"
+                        :class="{active: activeCategory === 'MAIN'}"
+                        @click="activeCategory = 'MAIN'"
+                    >
+                        产品配方
+                        <span v-if="recipeCategories.main.length > 0" class="count-badge"
+                            >{{ recipeCategories.main.length }}</span
+                        >
                     </div>
-                    <div class="sidebar-tab" :class="{active: activeCategory === 'PRE_DOUGH'}" @click="activeCategory = 'PRE_DOUGH'">
-                        面种 <span v-if="recipeCategories.preDough.length > 0" class="count-badge">{{ recipeCategories.preDough.length }}</span>
+                    <div
+                        class="sidebar-tab"
+                        :class="{active: activeCategory === 'PRE_DOUGH'}"
+                        @click="activeCategory = 'PRE_DOUGH'"
+                    >
+                        面种
+                        <span v-if="recipeCategories.preDough.length > 0" class="count-badge"
+                            >{{ recipeCategories.preDough.length }}</span
+                        >
                     </div>
-                    <div class="sidebar-tab" :class="{active: activeCategory === 'EXTRA'}" @click="activeCategory = 'EXTRA'">
-                        自制原料 <span v-if="recipeCategories.extra.length > 0" class="count-badge">{{ recipeCategories.extra.length }}</span>
+                    <div
+                        class="sidebar-tab"
+                        :class="{active: activeCategory === 'EXTRA'}"
+                        @click="activeCategory = 'EXTRA'"
+                    >
+                        自制原料
+                        <span v-if="recipeCategories.extra.length > 0" class="count-badge"
+                            >{{ recipeCategories.extra.length }}</span
+                        >
                     </div>
                 </div>
                 <div class="recipe-list-container">
-                    <div v-for="family in filteredFamilies" :key="family.id" class="recipe-list-item" :class="{ active: currentFamily && currentFamily.id === family.id }" @click="selectFamily(family.id)">
+                    <div
+                        v-for="family in filteredFamilies"
+                        :key="family.id"
+                        class="recipe-list-item"
+                        :class="{ active: currentFamily && currentFamily.id === family.id }"
+                        @click="selectFamily(family.id)"
+                    >
                         <div class="recipe-info">
                             <strong>
                                 {{ family.name || `未命名配方` }}
-                                <span v-if="family.type === 'MAIN'" class="recipe-category-tag">{{ categoryDisplay(family.category) }}</span>
-                                <span v-if="isFamilyDirty(family)" style="color: var(--danger-color); margin-left: 4px">*</span>
+                                <span v-if="family.type === 'MAIN'" class="recipe-category-tag"
+                                    >{{ categoryDisplay(family.category) }}</span
+                                >
+                                <span v-if="isFamilyDirty(family)" style="color: var(--danger-color); margin-left: 4px"
+                                    >*</span
+                                >
                             </strong>
                         </div>
                         <div class="recipe-item-controls">
@@ -197,13 +780,36 @@
                 </div>
                 <footer class="sidebar-footer">
                     <button class="btn btn-dashed btn-full-width" @click="addFamily()">+ 新增配方</button>
-                    <button class="btn btn-secondary btn-full-width" @click="openFile" v-if="isFSApiSupported">打开文件</button>
-                    <button class="btn btn-primary btn-full-width" @click="saveFile" v-if="isFSApiSupported" :disabled="!fileHandle" style="grid-column: 1 / -1">保存文件</button>
+                    <button class="btn btn-secondary btn-full-width" @click="openFile" v-if="isFSApiSupported">
+                        打开文件
+                    </button>
+                    <button
+                        class="btn btn-primary btn-full-width"
+                        @click="saveFile"
+                        v-if="isFSApiSupported"
+                        :disabled="!fileHandle"
+                        style="grid-column: 1 / -1"
+                    >
+                        保存文件
+                    </button>
                     <template v-if="!isFSApiSupported">
                         <button class="btn btn-secondary btn-full-width" @click="triggerImport">导入JSON</button>
-                        <button class="btn btn-primary btn-full-width" @click="exportAllJson" :disabled="recipes.length === 0" style="grid-column: 1 / -1">导出JSON</button>
+                        <button
+                            class="btn btn-primary btn-full-width"
+                            @click="exportAllJson"
+                            :disabled="recipes.length === 0"
+                            style="grid-column: 1 / -1"
+                        >
+                            导出JSON
+                        </button>
                     </template>
-                    <input type="file" ref="fileInput" @change="handleFileImport" accept=".json" style="display: none" />
+                    <input
+                        type="file"
+                        ref="fileInput"
+                        @change="handleFileImport"
+                        accept=".json"
+                        style="display: none"
+                    />
                 </footer>
             </aside>
             <main class="main-content" ref="mainContentRef">
@@ -212,212 +818,538 @@
                         <div class="form-grid">
                             <div class="form-item" style="margin-bottom: 0">
                                 <label class="form-item-label">配方名称 (配方族)</label>
-                                <input class="input-field" :class="{ error: nameValidationError }" v-model="currentFamily.name" :placeholder="recipeNamePlaceholder" />
+                                <input
+                                    class="input-field"
+                                    :class="{ error: nameValidationError }"
+                                    v-model="currentFamily.name"
+                                    :placeholder="recipeNamePlaceholder"
+                                />
                                 <div v-if="nameValidationError" class="input-error-msg">{{ nameValidationError }}</div>
                             </div>
                             <div class="form-item" style="margin-bottom: 0">
                                 <label class="form-item-label">配方类型</label>
-                                <input class="input-field" :value="recipeTypeDisplay(currentFamily.type)" readonly disabled />
+                                <input
+                                    class="input-field"
+                                    :value="recipeTypeDisplay(currentFamily.type)"
+                                    readonly
+                                    disabled
+                                />
                             </div>
                         </div>
                         <div v-if="currentFamily.type === 'MAIN'" class="form-item" style="margin-top: 20px">
                             <label class="form-item-label">配方品类</label>
                             <select class="picker" v-model="currentFamily.category">
-                                <option v-for="cat in mainRecipeCategories" :key="cat.value" :value="cat.value">{{ cat.text }}</option>
+                                <option v-for="cat in mainRecipeCategories" :key="cat.value" :value="cat.value">
+                                    {{ cat.text }}
+                                </option>
                             </select>
                         </div>
                     </div>
 
                     <div class="card">
-                        <div class="card-title-wrapper" style="margin-bottom: 10px"><span class="card-title">版本管理</span></div>
+                        <div class="card-title-wrapper" style="margin-bottom: 10px">
+                            <span class="card-title">版本管理</span>
+                        </div>
                         <div class="tabs-wrapper">
-                            <button v-if="tabScrollState.version.showLeft" class="tab-scroll-btn left" @click="scrollVersionTabs(-150)">&lt;</button>
+                            <button
+                                v-if="tabScrollState.version.showLeft"
+                                class="tab-scroll-btn left"
+                                @click="scrollVersionTabs(-150)"
+                            >
+                                &lt;
+                            </button>
                             <div class="tabs" ref="versionTabsRef" @scroll="updateVersionTabScrollButtons">
-                                <div v-for="(version, index) in currentFamily.versions" :key="version.id" class="tab-item" :class="{ active: currentVersionIndex === index }" @click="currentVersionIndex = index">
+                                <div
+                                    v-for="(version, index) in currentFamily.versions"
+                                    :key="version.id"
+                                    class="tab-item"
+                                    :class="{ active: currentVersionIndex === index }"
+                                    @click="currentVersionIndex = index"
+                                >
                                     <span>{{ version.notes || `版本 ${index + 1}` }}</span>
-                                    <button class="tab-delete-btn" @click.stop="deleteVersion(index)"><svg><use href="#icon-close"></use></svg></button>
+                                    <button class="tab-delete-btn" @click.stop="deleteVersion(index)">
+                                        <svg><use href="#icon-close"></use></svg>
+                                    </button>
                                 </div>
                                 <div class="tab-item add-tab" @click="addVersion">+</div>
                             </div>
-                            <button v-if="tabScrollState.version.showRight" class="tab-scroll-btn right" @click="scrollVersionTabs(150)">&gt;</button>
+                            <button
+                                v-if="tabScrollState.version.showRight"
+                                class="tab-scroll-btn right"
+                                @click="scrollVersionTabs(150)"
+                            >
+                                &gt;
+                            </button>
                         </div>
                         <div class="form-item" style="margin-top: 20px; margin-bottom: 0">
                             <label class="form-item-label">版本备注</label>
-                            <input class="input-field" v-model="currentVersion.notes" placeholder="例如: V1 - 冬季配方" />
+                            <input
+                                class="input-field"
+                                v-model="currentVersion.notes"
+                                placeholder="例如: V1 - 冬季配方"
+                            />
                         </div>
                     </div>
 
                     <div v-if="currentFamily.type === 'MAIN'">
                         <template v-if="currentFamily.category === 'BREAD'">
                             <div v-for="(dough, doughIndex) in processedPreDoughs" :key="dough.id" class="card">
-                                <button class="btn-delete-dough" @click="removePreDough(doughIndex)"><svg><use href="#icon-close"></use></svg></button>
+                                <button class="btn-delete-dough" @click="removePreDough(doughIndex)">
+                                    <svg><use href="#icon-close"></use></svg>
+                                </button>
                                 <div class="card-title-wrapper"><span class="card-title">{{ dough.name }}</span></div>
                                 <div class="form-item">
                                     <label class="form-item-label">面种用粉占比 (%)</label>
-                                    <input class="input-field" type="number" :value="dough.flourRatioInMainDough" @input="updatePreDoughRatio(dough.id, $event.target.value)" placeholder="例如: 20" />
+                                    <input
+                                        class="input-field"
+                                        type="number"
+                                        :value="dough.flourRatioInMainDough"
+                                        @input="updatePreDoughRatio(dough.id, $event.target.value)"
+                                        placeholder="例如: 20"
+                                    />
                                 </div>
                                 <div class="ingredient-header" style="opacity: 0.7; margin-top: 0">
-                                    <span class="col-name">原料 (换算后)</span><span class="col-ratio">比例 %</span><span class="col-action"></span>
+                                    <span class="col-name">原料 (换算后)</span><span class="col-ratio">比例 %</span
+                                    ><span class="col-action"></span>
                                 </div>
-                                <div v-for="ing in dough.calculatedIngredients" :key="ing.id" class="ingredient-row" style="opacity: 0.7">
+                                <div
+                                    v-for="ing in dough.calculatedIngredients"
+                                    :key="ing.id"
+                                    class="ingredient-row"
+                                    style="opacity: 0.7"
+                                >
                                     <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
                                         <input class="input-field" :value="ing.name" readonly />
-                                        <div class="tags-container"><span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span></div>
+                                        <div class="tags-container">
+                                            <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
+                                        </div>
                                     </div>
-                                    <input class="input-field ratio-input" type="number" :value="ing.calculatedRatio" readonly /><div style="width: 40px; flex-shrink: 0"></div>
+                                    <input
+                                        class="input-field ratio-input"
+                                        type="number"
+                                        :value="ing.calculatedRatio"
+                                        readonly
+                                    />
+                                    <div style="width: 40px; flex-shrink: 0"></div>
                                 </div>
                             </div>
-                            <button class="btn btn-dashed btn-full-width" style="margin-bottom: 20px" @click="openAddPreDoughModal">+ 添加面种引用</button>
+                            <button
+                                class="btn btn-dashed btn-full-width"
+                                style="margin-bottom: 20px"
+                                @click="openAddPreDoughModal"
+                            >
+                                + 添加面种引用
+                            </button>
                         </template>
 
                         <div class="card">
-                            <div class="card-title-wrapper"><span class="card-title">{{ recipeContentTitle }}</span></div>
-                            <div class="form-grid" v-if="currentFamily.category === 'BREAD'">
-                                <div class="form-item"><label class="form-item-label">面团出缸温度 (°C)</label><input class="input-field" type="number" v-model.number="currentVersion.targetTemp" placeholder="26" /></div>
-                                <div class="form-item"><label class="form-item-label">工艺损耗率 (%)</label><input class="input-field" type="number" v-model.number="mainDough.lossRatio" placeholder="1" /></div>
+                            <div class="card-title-wrapper">
+                                <span class="card-title">{{ recipeContentTitle }}</span>
                             </div>
-                            <div class="form-item" v-else><label class="form-item-label">工艺损耗率 (%)</label><input class="input-field" type="number" v-model.number="mainDough.lossRatio" placeholder="1" /></div>
-                            <div class="form-item"><label class="form-item-label">分割损耗 (g)</label><input class="input-field" type="number" v-model.number="mainDough.divisionLoss" placeholder="2" /></div>
-                            
-                            <div class="ingredient-header"><span class="col-name">原料名称</span><span class="col-ratio">比例 %</span><span class="col-action"></span></div>
-                            
+                            <div class="form-grid" v-if="currentFamily.category === 'BREAD'">
+                                <div class="form-item">
+                                    <label class="form-item-label">面团出缸温度 (°C)</label
+                                    ><input
+                                        class="input-field"
+                                        type="number"
+                                        v-model.number="currentVersion.targetTemp"
+                                        placeholder="26"
+                                    />
+                                </div>
+                                <div class="form-item">
+                                    <label class="form-item-label">工艺损耗率 (%)</label
+                                    ><input
+                                        class="input-field"
+                                        type="number"
+                                        v-model.number="mainDough.lossRatio"
+                                        placeholder="1"
+                                    />
+                                </div>
+                            </div>
+                            <div class="form-item" v-else>
+                                <label class="form-item-label">工艺损耗率 (%)</label
+                                ><input
+                                    class="input-field"
+                                    type="number"
+                                    v-model.number="mainDough.lossRatio"
+                                    placeholder="1"
+                                />
+                            </div>
+                            <div class="form-item">
+                                <label class="form-item-label">分割损耗 (g)</label
+                                ><input
+                                    class="input-field"
+                                    type="number"
+                                    v-model.number="mainDough.divisionLoss"
+                                    placeholder="2"
+                                />
+                            </div>
+
+                            <div class="ingredient-header">
+                                <span class="col-name">原料名称</span><span class="col-ratio">比例 %</span
+                                ><span class="col-action"></span>
+                            </div>
+
                             <div v-for="ing in sortedMainDoughIngredients" :key="ing.id" class="ingredient-row">
                                 <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
-                                    <input class="input-field" v-model="ing.name" placeholder="输入原料名称" @focus="handleIngredientInput(ing, $event)" @input="handleIngredientInput(ing, $event)" @blur="handleIngredientBlur(ing)" />
+                                    <input
+                                        class="input-field"
+                                        v-model="ing.name"
+                                        placeholder="输入原料名称"
+                                        @focus="handleIngredientInput(ing, $event)"
+                                        @input="handleIngredientInput(ing, $event)"
+                                        @blur="handleIngredientBlur(ing)"
+                                    />
                                     <div class="tags-container">
                                         <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
                                         <span v-if="isSelfMade(ing.name)" class="ing-tag tag-self">自制</span>
-                                        <span v-if="shouldShowWaterTag(ing)" class="ing-tag tag-water">总量: {{ totalWaterRatio }}%</span>
+                                        <span v-if="shouldShowWaterTag(ing)" class="ing-tag tag-water"
+                                            >总量: {{ totalWaterRatio }}%</span
+                                        >
                                     </div>
                                 </div>
-                                <input class="input-field ratio-input" type="number" v-model.lazy.number="ing.ratio" placeholder="%" />
-                                <button class="btn btn-remove" @click="removeMainDoughIngredient(ing.id)"><svg><use href="#icon-trash"></use></svg></button>
+                                <input
+                                    class="input-field ratio-input"
+                                    type="number"
+                                    v-model.lazy.number="ing.ratio"
+                                    placeholder="%"
+                                />
+                                <button class="btn btn-remove" @click="removeMainDoughIngredient(ing.id)">
+                                    <svg><use href="#icon-trash"></use></svg>
+                                </button>
                             </div>
-                            <button class="btn btn-dashed btn-full-width" @click="addMainDoughIngredient">+ 添加原料</button>
-                            
+                            <button class="btn btn-dashed btn-full-width" @click="addMainDoughIngredient">
+                                + 添加原料
+                            </button>
+
                             <div class="procedure-notes sub-group">
                                 <span class="notes-title">制作要点:</span>
                                 <div v-for="(step, index) in mainDough.procedure" :key="index" class="procedure-item">
-                                    <input class="input-field" v-model="mainDough.procedure[index]" placeholder="输入制作步骤" />
-                                    <button class="btn btn-remove" @click="removeMainDoughProcedureStep(index)"><svg><use href="#icon-trash"></use></svg></button>
+                                    <input
+                                        class="input-field"
+                                        v-model="mainDough.procedure[index]"
+                                        placeholder="输入制作步骤"
+                                    />
+                                    <button class="btn btn-remove" @click="removeMainDoughProcedureStep(index)">
+                                        <svg><use href="#icon-trash"></use></svg>
+                                    </button>
                                 </div>
-                                <button class="btn btn-dashed btn-full-width" @click="addMainDoughProcedureStep">+ 添加要点</button>
+                                <button class="btn btn-dashed btn-full-width" @click="addMainDoughProcedureStep">
+                                    + 添加要点
+                                </button>
                             </div>
                         </div>
 
                         <div class="card">
                             <div class="card-title-wrapper"><span class="card-title">产品列表</span></div>
                             <div class="tabs-wrapper">
-                                <button v-if="tabScrollState.product.showLeft" class="tab-scroll-btn left" @click="scrollProductTabs(-150)">&lt;</button>
+                                <button
+                                    v-if="tabScrollState.product.showLeft"
+                                    class="tab-scroll-btn left"
+                                    @click="scrollProductTabs(-150)"
+                                >
+                                    &lt;
+                                </button>
                                 <div class="tabs" ref="productTabsRef" @scroll="updateProductTabScrollButtons">
-                                    <div v-for="(product, index) in productsWithSortedMixIns" :key="product.id" class="tab-item" :class="{ active: activeProductTab === index }" @click="activeProductTab = index">
+                                    <div
+                                        v-for="(product, index) in productsWithSortedMixIns"
+                                        :key="product.id"
+                                        class="tab-item"
+                                        :class="{ active: activeProductTab === index }"
+                                        @click="activeProductTab = index"
+                                    >
                                         <span>{{ product.name || `产品${index + 1}` }}</span>
-                                        <button class="tab-delete-btn" @click.stop="deleteProduct(index)"><svg><use href="#icon-close"></use></svg></button>
+                                        <button class="tab-delete-btn" @click.stop="deleteProduct(index)">
+                                            <svg><use href="#icon-close"></use></svg>
+                                        </button>
                                     </div>
                                     <div class="tab-item add-tab" @click="addProduct">+</div>
                                 </div>
-                                <button v-if="tabScrollState.product.showRight" class="tab-scroll-btn right" @click="scrollProductTabs(150)">&gt;</button>
+                                <button
+                                    v-if="tabScrollState.product.showRight"
+                                    class="tab-scroll-btn right"
+                                    @click="scrollProductTabs(150)"
+                                >
+                                    &gt;
+                                </button>
                             </div>
                             <div v-if="currentVersion.products.length > 0">
-                                <div v-for="(product, prodIndex) in productsWithSortedMixIns" v-show="activeProductTab === prodIndex" :key="product.id">
+                                <div
+                                    v-for="(product, prodIndex) in productsWithSortedMixIns"
+                                    v-show="activeProductTab === prodIndex"
+                                    :key="product.id"
+                                >
                                     <div class="form-grid">
-                                        <div class="form-item"><label class="form-item-label">产品名称</label><input class="input-field" v-model="currentVersion.products[prodIndex].name" :placeholder="`产品${prodIndex + 1}`" /></div>
-                                        <div class="form-item"><label class="form-item-label">基础原料克重 (g)</label><input class="input-field" type="number" v-model.number="currentVersion.products[prodIndex].baseDoughWeight" placeholder="100" /></div>
+                                        <div class="form-item">
+                                            <label class="form-item-label">产品名称</label
+                                            ><input
+                                                class="input-field"
+                                                v-model="currentVersion.products[prodIndex].name"
+                                                :placeholder="`产品${prodIndex + 1}`"
+                                            />
+                                        </div>
+                                        <div class="form-item">
+                                            <label class="form-item-label">基础原料克重 (g)</label
+                                            ><input
+                                                class="input-field"
+                                                type="number"
+                                                v-model.number="currentVersion.products[prodIndex].baseDoughWeight"
+                                                placeholder="100"
+                                            />
+                                        </div>
                                     </div>
                                     <div class="sub-group">
                                         <h4 class="sub-group-title">辅料 (配方百分比)</h4>
                                         <div v-for="ing in product.sortedMixIns" :key="ing.id" class="ingredient-row">
                                             <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
-                                                <input class="input-field" v-model="ing.name" placeholder="输入辅料名称" @focus="handleIngredientInput(ing, $event)" @input="handleIngredientInput(ing, $event)" @blur="handleIngredientBlur(ing)" />
-                                                <div class="tags-container"><span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span><span v-if="isSelfMade(ing.name)" class="ing-tag tag-self">自制</span></div>
+                                                <input
+                                                    class="input-field"
+                                                    v-model="ing.name"
+                                                    placeholder="输入辅料名称"
+                                                    @focus="handleIngredientInput(ing, $event)"
+                                                    @input="handleIngredientInput(ing, $event)"
+                                                    @blur="handleIngredientBlur(ing)"
+                                                />
+                                                <div class="tags-container">
+                                                    <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span
+                                                    ><span v-if="isSelfMade(ing.name)" class="ing-tag tag-self"
+                                                        >自制</span
+                                                    >
+                                                </div>
                                             </div>
-                                            <input class="input-field ratio-input" type="number" v-model.lazy.number="ing.ratio" placeholder="%" />
-                                            <button class="btn btn-remove" @click="removeSubIngredient(product.id, 'mixIns', ing.id)"><svg><use href="#icon-trash"></use></svg></button>
+                                            <input
+                                                class="input-field ratio-input"
+                                                type="number"
+                                                v-model.lazy.number="ing.ratio"
+                                                placeholder="%"
+                                            />
+                                            <button
+                                                class="btn btn-remove"
+                                                @click="removeSubIngredient(product.id, 'mixIns', ing.id)"
+                                            >
+                                                <svg><use href="#icon-trash"></use></svg>
+                                            </button>
                                         </div>
-                                        <button class="btn btn-dashed btn-full-width" @click="addSubIngredient(prodIndex, 'mixIns')">+ 添加辅料</button>
+                                        <button
+                                            class="btn btn-dashed btn-full-width"
+                                            @click="addSubIngredient(prodIndex, 'mixIns')"
+                                        >
+                                            + 添加辅料
+                                        </button>
                                     </div>
                                     <div class="sub-group">
                                         <h4 class="sub-group-title">馅料 (克/个)</h4>
                                         <div v-for="ing in product.sortedFillings" :key="ing.id" class="ingredient-row">
                                             <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
-                                                <input class="input-field" v-model="ing.name" placeholder="输入馅料名称" @focus="handleIngredientInput(ing, $event)" @input="handleIngredientInput(ing, $event)" @blur="handleIngredientBlur(ing)" />
-                                                <div class="tags-container"><span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span><span v-if="isSelfMade(ing.name)" class="ing-tag tag-self">自制</span></div>
+                                                <input
+                                                    class="input-field"
+                                                    v-model="ing.name"
+                                                    placeholder="输入馅料名称"
+                                                    @focus="handleIngredientInput(ing, $event)"
+                                                    @input="handleIngredientInput(ing, $event)"
+                                                    @blur="handleIngredientBlur(ing)"
+                                                />
+                                                <div class="tags-container">
+                                                    <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span
+                                                    ><span v-if="isSelfMade(ing.name)" class="ing-tag tag-self"
+                                                        >自制</span
+                                                    >
+                                                </div>
                                             </div>
-                                            <input class="input-field ratio-input" type="number" v-model.lazy.number="ing.weightInGrams" placeholder="g" />
-                                            <button class="btn btn-remove" @click="removeSubIngredient(product.id, 'fillings', ing.id)"><svg><use href="#icon-trash"></use></svg></button>
+                                            <input
+                                                class="input-field ratio-input"
+                                                type="number"
+                                                v-model.lazy.number="ing.weightInGrams"
+                                                placeholder="g"
+                                            />
+                                            <button
+                                                class="btn btn-remove"
+                                                @click="removeSubIngredient(product.id, 'fillings', ing.id)"
+                                            >
+                                                <svg><use href="#icon-trash"></use></svg>
+                                            </button>
                                         </div>
-                                        <button class="btn btn-dashed btn-full-width" @click="addSubIngredient(prodIndex, 'fillings')">+ 添加馅料</button>
+                                        <button
+                                            class="btn btn-dashed btn-full-width"
+                                            @click="addSubIngredient(prodIndex, 'fillings')"
+                                        >
+                                            + 添加馅料
+                                        </button>
                                     </div>
                                     <div class="sub-group">
                                         <h4 class="sub-group-title">表面装饰 (克/个)</h4>
                                         <div v-for="ing in product.sortedToppings" :key="ing.id" class="ingredient-row">
                                             <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
-                                                <input class="input-field" v-model="ing.name" placeholder="输入装饰名称" @focus="handleIngredientInput(ing, $event)" @input="handleIngredientInput(ing, $event)" @blur="handleIngredientBlur(ing)" />
-                                                <div class="tags-container"><span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span><span v-if="isSelfMade(ing.name)" class="ing-tag tag-self">自制</span></div>
+                                                <input
+                                                    class="input-field"
+                                                    v-model="ing.name"
+                                                    placeholder="输入装饰名称"
+                                                    @focus="handleIngredientInput(ing, $event)"
+                                                    @input="handleIngredientInput(ing, $event)"
+                                                    @blur="handleIngredientBlur(ing)"
+                                                />
+                                                <div class="tags-container">
+                                                    <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span
+                                                    ><span v-if="isSelfMade(ing.name)" class="ing-tag tag-self"
+                                                        >自制</span
+                                                    >
+                                                </div>
                                             </div>
-                                            <input class="input-field ratio-input" type="number" v-model.lazy.number="ing.weightInGrams" placeholder="g" />
-                                            <button class="btn btn-remove" @click="removeSubIngredient(product.id, 'toppings', ing.id)"><svg><use href="#icon-trash"></use></svg></button>
+                                            <input
+                                                class="input-field ratio-input"
+                                                type="number"
+                                                v-model.lazy.number="ing.weightInGrams"
+                                                placeholder="g"
+                                            />
+                                            <button
+                                                class="btn btn-remove"
+                                                @click="removeSubIngredient(product.id, 'toppings', ing.id)"
+                                            >
+                                                <svg><use href="#icon-trash"></use></svg>
+                                            </button>
                                         </div>
-                                        <button class="btn btn-dashed btn-full-width" @click="addSubIngredient(prodIndex, 'toppings')">+ 添加表面装饰</button>
+                                        <button
+                                            class="btn btn-dashed btn-full-width"
+                                            @click="addSubIngredient(prodIndex, 'toppings')"
+                                        >
+                                            + 添加表面装饰
+                                        </button>
                                     </div>
                                     <div class="procedure-notes sub-group">
                                         <span class="notes-title">产品制作要点:</span>
-                                        <div v-for="(step, stepIndex) in product.procedure" :key="stepIndex" class="procedure-item">
-                                            <input class="input-field" v-model="product.procedure[stepIndex]" placeholder="输入制作步骤" />
-                                            <button class="btn btn-remove" @click="removeProductProcedureStep(prodIndex, stepIndex)"><svg><use href="#icon-trash"></use></svg></button>
+                                        <div
+                                            v-for="(step, stepIndex) in product.procedure"
+                                            :key="stepIndex"
+                                            class="procedure-item"
+                                        >
+                                            <input
+                                                class="input-field"
+                                                v-model="product.procedure[stepIndex]"
+                                                placeholder="输入制作步骤"
+                                            />
+                                            <button
+                                                class="btn btn-remove"
+                                                @click="removeProductProcedureStep(prodIndex, stepIndex)"
+                                            >
+                                                <svg><use href="#icon-trash"></use></svg>
+                                            </button>
                                         </div>
-                                        <button class="btn btn-dashed btn-full-width" @click="addProductProcedureStep(prodIndex)">+ 添加要点</button>
+                                        <button
+                                            class="btn btn-dashed btn-full-width"
+                                            @click="addProductProcedureStep(prodIndex)"
+                                        >
+                                            + 添加要点
+                                        </button>
                                     </div>
                                 </div>
                             </div>
-                            <div v-else class="editor-placeholder"><p>暂无产品<br />点击上方的 "+" 添加一个新产品</p></div>
+                            <div v-else class="editor-placeholder">
+                                <p>暂无产品<br />点击上方的 "+" 添加一个新产品</p>
+                            </div>
                         </div>
                     </div>
 
                     <div v-else>
                         <div class="card">
                             <div class="card-title-wrapper"><span class="card-title">原料列表</span></div>
-                            
+
                             <div class="form-grid">
-                                <div class="form-item"><label class="form-item-label">工艺损耗率 (%)</label><input class="input-field" type="number" v-model.number="currentVersion.lossRatio" placeholder="1" /></div>
+                                <div class="form-item">
+                                    <label class="form-item-label">工艺损耗率 (%)</label
+                                    ><input
+                                        class="input-field"
+                                        type="number"
+                                        v-model.number="currentVersion.lossRatio"
+                                        placeholder="1"
+                                    />
+                                </div>
                                 <div class="form-item">
                                     <label class="form-item-label">整体含水量 (%)</label>
-                                    <input class="input-field" type="number" v-model.number="currentVersion.customWaterContent" :placeholder="calculatedWaterContent" />
+                                    <input
+                                        class="input-field"
+                                        type="number"
+                                        v-model.number="currentVersion.customWaterContent"
+                                        :placeholder="calculatedWaterContent"
+                                    />
                                 </div>
                             </div>
 
-                            <div class="ingredient-header"><span class="col-name">原料名称</span><span class="col-ratio">比例 %</span><span class="col-action"></span></div>
+                            <div class="ingredient-header">
+                                <span class="col-name">原料名称</span><span class="col-ratio">比例 %</span
+                                ><span class="col-action"></span>
+                            </div>
                             <div v-for="ing in sortedOtherIngredients" :key="ing.id" class="ingredient-row">
                                 <div class="input-with-tag-wrapper" :class="getWrapperClass(ing)">
-                                    <input class="input-field" v-model="ing.name" placeholder="输入原料名称" @focus="handleIngredientInput(ing, $event)" @input="handleIngredientInput(ing, $event)" @blur="handleIngredientBlur(ing)" />
-                                    <div class="tags-container"><span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span></div>
+                                    <input
+                                        class="input-field"
+                                        v-model="ing.name"
+                                        placeholder="输入原料名称"
+                                        @focus="handleIngredientInput(ing, $event)"
+                                        @input="handleIngredientInput(ing, $event)"
+                                        @blur="handleIngredientBlur(ing)"
+                                    />
+                                    <div class="tags-container">
+                                        <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
+                                    </div>
                                 </div>
-                                <input class="input-field ratio-input" type="number" v-model.lazy.number="ing.ratio" placeholder="%" />
-                                <button class="btn btn-remove" @click="removeOtherIngredient(ing.id)"><svg><use href="#icon-trash"></use></svg></button>
+                                <input
+                                    class="input-field ratio-input"
+                                    type="number"
+                                    v-model.lazy.number="ing.ratio"
+                                    placeholder="%"
+                                />
+                                <button class="btn btn-remove" @click="removeOtherIngredient(ing.id)">
+                                    <svg><use href="#icon-trash"></use></svg>
+                                </button>
                             </div>
-                            <button class="btn btn-dashed btn-full-width" @click="addOtherIngredient">+ 添加原料</button>
+                            <button class="btn btn-dashed btn-full-width" @click="addOtherIngredient">
+                                + 添加原料
+                            </button>
                             <div class="procedure-notes sub-group">
                                 <span class="notes-title">制作要点:</span>
-                                <div v-for="(step, index) in currentVersion.procedure" :key="index" class="procedure-item">
-                                    <input class="input-field" v-model="currentVersion.procedure[index]" placeholder="输入制作步骤" />
-                                    <button class="btn btn-remove" @click="removeOtherProcedureStep(index)"><svg><use href="#icon-trash"></use></svg></button>
+                                <div
+                                    v-for="(step, index) in currentVersion.procedure"
+                                    :key="index"
+                                    class="procedure-item"
+                                >
+                                    <input
+                                        class="input-field"
+                                        v-model="currentVersion.procedure[index]"
+                                        placeholder="输入制作步骤"
+                                    />
+                                    <button class="btn btn-remove" @click="removeOtherProcedureStep(index)">
+                                        <svg><use href="#icon-trash"></use></svg>
+                                    </button>
                                 </div>
-                                <button class="btn btn-dashed btn-full-width" @click="addOtherProcedureStep">+ 添加要点</button>
+                                <button class="btn btn-dashed btn-full-width" @click="addOtherProcedureStep">
+                                    + 添加要点
+                                </button>
                             </div>
                         </div>
                     </div>
                 </div>
-                <div v-else class="editor-placeholder"><p>← 从左侧选择一个配方进行编辑<br />或新增一个配方</p></div>
-                
+                <div v-else class="editor-placeholder">
+                    <p>← 从左侧选择一个配方进行编辑<br />或新增一个配方</p>
+                </div>
+
                 <ul v-if="suggestionState.visible" class="suggestion-box" :style="suggestionBoxStyle">
-                    <li v-for="sugg in suggestionState.suggestions" :key="sugg.key" class="suggestion-item" @mousedown="selectSuggestion(sugg)">
+                    <li
+                        v-for="sugg in suggestionState.suggestions"
+                        :key="sugg.key"
+                        class="suggestion-item"
+                        @mousedown="selectSuggestion(sugg)"
+                    >
                         <template v-if="sugg.type === 'EXISTING'">
                             <span>{{ sugg.name }}</span>
                             <span v-if="sugg.isFlour" class="suggestion-tag tag-flour">面粉</span>
                             <span v-if="sugg.selfMade" class="suggestion-tag tag-self">自制</span>
                         </template>
-                        <template v-else-if="sugg.type === 'NEW_NORMAL'"><span class="suggestion-action">+ 新建原料: {{ sugg.name }}</span></template>
-                        <template v-else-if="sugg.type === 'NEW_FLOUR'"><span class="suggestion-action">+ 新建面粉: {{ sugg.name }}</span></template>
+                        <template v-else-if="sugg.type === 'NEW_NORMAL'"
+                            ><span class="suggestion-action">+ 新建原料: {{ sugg.name }}</span></template
+                        >
+                        <template v-else-if="sugg.type === 'NEW_FLOUR'"
+                            ><span class="suggestion-action">+ 新建面粉: {{ sugg.name }}</span></template
+                        >
                     </li>
                 </ul>
             </main>
@@ -426,12 +1358,24 @@
                 <div class="modal-content" @click.stop>
                     <div class="modal-header">选择要引用的面种</div>
                     <div class="modal-body">
-                        <div v-for="dough in availablePreDoughsForReferencing" :key="dough.id" class="recipe-list-item" @click="addPreDoughReference(dough)">
+                        <div
+                            v-for="dough in availablePreDoughsForReferencing"
+                            :key="dough.id"
+                            class="recipe-list-item"
+                            @click="addPreDoughReference(dough)"
+                        >
                             <div class="recipe-info"><strong>{{ dough.name }}</strong></div>
                         </div>
-                        <div v-if="availablePreDoughsForReferencing.length === 0" style="text-align: center; color: var(--text-secondary)">暂无可引用的面种</div>
+                        <div
+                            v-if="availablePreDoughsForReferencing.length === 0"
+                            style="text-align: center; color: var(--text-secondary)"
+                        >
+                            暂无可引用的面种
+                        </div>
                     </div>
-                    <div class="modal-footer"><button class="btn btn-secondary" @click="isAddPreDoughModalVisible = false">关闭</button></div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" @click="isAddPreDoughModalVisible = false">关闭</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -442,49 +1386,74 @@
                 setup() {
                     let nextRecipeId = 1;
                     let nextIngredientId = 1000;
-                    let nextVersionId = 10000; 
-                    const recipes = ref([]); 
-                    const currentFamilyId = ref(null); 
-                    const currentVersionIndex = ref(0); 
+                    let nextVersionId = 10000;
+                    const recipes = ref([]);
+                    const currentFamilyId = ref(null);
+                    const currentVersionIndex = ref(0);
                     const activeProductTab = ref(0);
                     const fileInput = ref(null);
                     const isAddPreDoughModalVisible = ref(false);
                     const activeCategory = ref('MAIN');
                     const mainContentRef = ref(null);
                     const productTabsRef = ref(null);
-                    const versionTabsRef = ref(null); 
+                    const versionTabsRef = ref(null);
                     const fileHandle = ref(null);
                     const savedRecipeSnapshots = ref(new Map());
                     const globalIngredientLibrary = ref(new Map());
                     const suggestionState = ref({ visible: false, suggestions: [], target: null, ingRef: null });
                     const suggestionBoxStyle = ref({});
-                    const tabScrollState = ref({ version: { showLeft: false, showRight: false }, product: { showLeft: false, showRight: false } });
+                    const tabScrollState = ref({
+                        version: { showLeft: false, showRight: false },
+                        product: { showLeft: false, showRight: false },
+                    });
 
                     const isFSApiSupported = computed(() => 'showOpenFilePicker' in window);
 
                     // 初始化原料库
                     const initIngredientLibrary = () => {
                         const defaults = [
-                            { name: '面包粉', isFlour: true, waterContent: 0 }, { name: '高筋粉', isFlour: true, waterContent: 0 },
-                            { name: '中筋粉', isFlour: true, waterContent: 0 }, { name: '全麦粉', isFlour: true, waterContent: 0 },
-                            { name: '裸麦粉', isFlour: true, waterContent: 0 }, { name: '黑麦粉', isFlour: true, waterContent: 0 },
-                            { name: 'T45', isFlour: true, waterContent: 0 }, { name: 'T55', isFlour: true, waterContent: 0 },
-                            { name: 'T65', isFlour: true, waterContent: 0 }, { name: '水', isFlour: false, waterContent: 1 },
-                            { name: '牛奶', isFlour: false, waterContent: 0.87 }, { name: '鲜牛奶', isFlour: false, waterContent: 0.87 },
-                            { name: '鲜奶', isFlour: false, waterContent: 0.87 }, { name: '淡奶油', isFlour: false, waterContent: 0.6 },
-                            { name: '蜂蜜', isFlour: false, waterContent: 0.17 }, { name: '炼乳', isFlour: false, waterContent: 0.27 },
-                            { name: '鸡蛋', isFlour: false, waterContent: 0.75 }, { name: '全蛋', isFlour: false, waterContent: 0.75 },
-                            { name: '全蛋液', isFlour: false, waterContent: 0.75 }, { name: '蛋黄', isFlour: false, waterContent: 0.5 },
-                            { name: '蛋清', isFlour: false, waterContent: 0.88 }, { name: '白砂糖', isFlour: false, waterContent: 0 },
-                            { name: '盐', isFlour: false, waterContent: 0 }, { name: '即发干酵母', isFlour: false, waterContent: 0 },
-                            { name: '鲜酵母', isFlour: false, waterContent: 0 }, { name: '黄油', isFlour: false, waterContent: 0 },
-                            { name: '奶粉', isFlour: false, waterContent: 0 }, { name: '麦芽精', isFlour: false, waterContent: 0 },
+                            { name: '面包粉', isFlour: true, waterContent: 0 },
+                            { name: '高筋粉', isFlour: true, waterContent: 0 },
+                            { name: '特高筋粉', isFlour: true, waterContent: 0 },
+                            { name: '中筋粉', isFlour: true, waterContent: 0 },
+                            { name: '全麦粉', isFlour: true, waterContent: 0 },
+                            { name: '裸麦粉', isFlour: true, waterContent: 0 },
+                            { name: '黑麦粉', isFlour: true, waterContent: 0 },
+                            { name: 'T45', isFlour: true, waterContent: 0 },
+                            { name: 'T55', isFlour: true, waterContent: 0 },
+                            { name: 'T65', isFlour: true, waterContent: 0 },
+                            { name: 'T80', isFlour: true, waterContent: 0 },
+                            { name: 'T110', isFlour: true, waterContent: 0 },
+                            { name: 'T130', isFlour: true, waterContent: 0 },
+                            { name: 'T150', isFlour: true, waterContent: 0 },
+                            { name: 'T170', isFlour: true, waterContent: 0 },
+                            { name: '水', isFlour: false, waterContent: 1 },
+                            { name: '牛奶', isFlour: false, waterContent: 0.87 },
+                            { name: '鲜牛奶', isFlour: false, waterContent: 0.87 },
+                            { name: '鲜奶', isFlour: false, waterContent: 0.87 },
+                            { name: '淡奶油', isFlour: false, waterContent: 0.6 },
+                            { name: '蜂蜜', isFlour: false, waterContent: 0.17 },
+                            { name: '炼乳', isFlour: false, waterContent: 0.27 },
+                            { name: '鸡蛋', isFlour: false, waterContent: 0.75 },
+                            { name: '全蛋', isFlour: false, waterContent: 0.75 },
+                            { name: '全蛋液', isFlour: false, waterContent: 0.75 },
+                            { name: '蛋黄', isFlour: false, waterContent: 0.5 },
+                            { name: '蛋清', isFlour: false, waterContent: 0.88 },
+                            { name: '白砂糖', isFlour: false, waterContent: 0 },
+                            { name: '盐', isFlour: false, waterContent: 0 },
+                            { name: '即发干酵母', isFlour: false, waterContent: 0 },
+                            { name: '鲜酵母', isFlour: false, waterContent: 0 },
+                            { name: '黄油', isFlour: false, waterContent: 0 },
+                            { name: '奶粉', isFlour: false, waterContent: 0 },
+                            { name: '麦芽精', isFlour: false, waterContent: 0 },
                         ];
-                        defaults.forEach(ing => globalIngredientLibrary.value.set(ing.name, ing));
+                        defaults.forEach((ing) => globalIngredientLibrary.value.set(ing.name, ing));
                     };
                     initIngredientLibrary();
 
-                    const selfMadeRecipeNames = computed(() => new Set(recipes.value.filter((r) => r.type !== 'MAIN').map((r) => r.name)));
+                    const selfMadeRecipeNames = computed(
+                        () => new Set(recipes.value.filter((r) => r.type !== 'MAIN').map((r) => r.name)),
+                    );
                     const isSelfMade = (name) => selfMadeRecipeNames.value.has(name);
 
                     // ----------------------------
@@ -492,10 +1461,10 @@
                     // ----------------------------
                     const resolveWaterContent = (ingName, visited = new Set()) => {
                         if (!ingName) return 0;
-                        
+
                         // 【核心修改点1】：检查自制配方时，优先使用自定义的含水量（如果有）
-                        const recipe = recipes.value.find(r => r.name === ingName && r.type !== 'MAIN');
-                        
+                        const recipe = recipes.value.find((r) => r.name === ingName && r.type !== 'MAIN');
+
                         if (recipe) {
                             if (visited.has(ingName)) return 0; // 防止死循环
                             visited.add(ingName);
@@ -504,7 +1473,10 @@
                             if (!latestVersion) return 0;
 
                             // 1. 如果有手动设置的 customWaterContent，直接返回
-                            if (latestVersion.customWaterContent !== undefined && latestVersion.customWaterContent !== null) {
+                            if (
+                                latestVersion.customWaterContent !== undefined &&
+                                latestVersion.customWaterContent !== null
+                            ) {
                                 // 注意：customWaterContent 存储的是百分比（如 45），计算时需要除以 100
                                 return latestVersion.customWaterContent / 100;
                             }
@@ -515,7 +1487,7 @@
                             let totalWaterWeight = 0;
                             let totalWeight = 0;
 
-                            latestVersion.ingredients.forEach(subIng => {
+                            latestVersion.ingredients.forEach((subIng) => {
                                 const ratio = parseFloat(subIng.ratio) || 0;
                                 if (ratio > 0) {
                                     const subWaterContent = resolveWaterContent(subIng.name, visited);
@@ -532,7 +1504,7 @@
                             return globalIngredientLibrary.value.get(ingName).waterContent || 0;
                         }
 
-                        return 0; 
+                        return 0;
                     };
 
                     // ----------------------------
@@ -540,17 +1512,17 @@
                     // ----------------------------
                     const calculatedWaterContent = computed(() => {
                         if (!currentVersion.value || currentFamily.value.type === 'MAIN') return '0';
-                        
+
                         let totalWaterWeight = 0;
                         let totalWeight = 0;
-                        
+
                         // 避免自我引用导致死循环，这里只计算当前配方的一层原料
                         // 原料内部的含水量通过 resolveWaterContent 递归获取
-                        currentVersion.value.ingredients.forEach(ing => {
+                        currentVersion.value.ingredients.forEach((ing) => {
                             const ratio = parseFloat(ing.ratio) || 0;
                             if (ratio > 0) {
                                 // 这里的 resolveWaterContent 会处理基础原料和嵌套的自制原料
-                                const waterContent = resolveWaterContent(ing.name); 
+                                const waterContent = resolveWaterContent(ing.name);
                                 totalWaterWeight += ratio * waterContent;
                                 totalWeight += ratio;
                             }
@@ -560,19 +1532,18 @@
                         return ((totalWaterWeight / totalWeight) * 100).toFixed(1);
                     });
 
-
                     // ----------------------------
                     // 核心功能：计算总水量 & 确定标签位置
                     // ----------------------------
                     const waterTagTargetId = computed(() => {
                         if (!mainDough.value) return null;
-                        const explicitWater = mainDough.value.ingredients.find(i => i.name === '水');
+                        const explicitWater = mainDough.value.ingredients.find((i) => i.name === '水');
                         if (explicitWater) return explicitWater.id;
 
                         let maxContribution = -1;
                         let targetId = null;
 
-                        mainDough.value.ingredients.forEach(ing => {
+                        mainDough.value.ingredients.forEach((ing) => {
                             const ratio = parseFloat(ing.ratio) || 0;
                             if (ratio > 0) {
                                 const content = resolveWaterContent(ing.name);
@@ -583,7 +1554,7 @@
                                 }
                             }
                         });
-                        
+
                         if (maxContribution <= 0) return null;
                         return targetId;
                     });
@@ -594,20 +1565,21 @@
                     };
 
                     const totalWaterRatio = computed(() => {
-                        if (!currentFamily.value || currentFamily.value.type !== 'MAIN' || !currentVersion.value) return 0;
-                        
+                        if (!currentFamily.value || currentFamily.value.type !== 'MAIN' || !currentVersion.value)
+                            return 0;
+
                         let totalWater = 0;
 
                         if (mainDough.value) {
-                            mainDough.value.ingredients.forEach(ing => {
+                            mainDough.value.ingredients.forEach((ing) => {
                                 const ratio = parseFloat(ing.ratio) || 0;
                                 const content = resolveWaterContent(ing.name);
                                 totalWater += ratio * content;
                             });
                         }
 
-                        processedPreDoughs.value.forEach(pd => {
-                            pd.calculatedIngredients.forEach(ing => {
+                        processedPreDoughs.value.forEach((pd) => {
+                            pd.calculatedIngredients.forEach((ing) => {
                                 const ratio = parseFloat(ing.calculatedRatio) || 0;
                                 const content = resolveWaterContent(ing.name);
                                 totalWater += ratio * content;
@@ -622,33 +1594,57 @@
                         if (ing.isFlour) count++;
                         if (isSelfMade(ing.name)) count++;
                         if (shouldShowWaterTag(ing)) {
-                            return 'input-has-water-tag'; 
+                            return 'input-has-water-tag';
                         }
                         if (count === 1) return 'input-has-1-tag';
                         if (count === 2) return 'input-has-2-tags';
                         return '';
                     };
 
-                    const currentFamilyIndex = computed(() => recipes.value.findIndex((r) => r.id === currentFamilyId.value));
-                    const currentFamily = computed(() => currentFamilyIndex.value > -1 ? recipes.value[currentFamilyIndex.value] : null);
-                    const currentVersion = computed(() => currentFamily.value ? currentFamily.value.versions[currentVersionIndex.value] : null);
-                    const mainDough = computed(() => currentFamily.value?.type === 'MAIN' && currentVersion.value ? currentVersion.value.doughs.find((d) => d.type === 'MAIN_DOUGH') : null);
-                    
+                    const currentFamilyIndex = computed(() =>
+                        recipes.value.findIndex((r) => r.id === currentFamilyId.value),
+                    );
+                    const currentFamily = computed(() =>
+                        currentFamilyIndex.value > -1 ? recipes.value[currentFamilyIndex.value] : null,
+                    );
+                    const currentVersion = computed(() =>
+                        currentFamily.value ? currentFamily.value.versions[currentVersionIndex.value] : null,
+                    );
+                    const mainDough = computed(() =>
+                        currentFamily.value?.type === 'MAIN' && currentVersion.value
+                            ? currentVersion.value.doughs.find((d) => d.type === 'MAIN_DOUGH')
+                            : null,
+                    );
+
                     const processedPreDoughs = computed(() => {
-                        if (!currentFamily.value || currentFamily.value.type !== 'MAIN' || !currentVersion.value) return [];
+                        if (!currentFamily.value || currentFamily.value.type !== 'MAIN' || !currentVersion.value)
+                            return [];
                         const preDoughs = currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
                         return preDoughs.map((dough) => {
-                            const totalFlourRatioInPreDough = dough.ingredients.filter((ing) => ing.isFlour).reduce((sum, ing) => sum + (ing.ratio || 0), 0);
+                            const totalFlourRatioInPreDough = dough.ingredients
+                                .filter((ing) => ing.isFlour)
+                                .reduce((sum, ing) => sum + (ing.ratio || 0), 0);
                             if (totalFlourRatioInPreDough === 0) {
-                                return { ...dough, calculatedIngredients: dough.ingredients.map((ing) => ({ ...ing, calculatedRatio: ing.ratio })) };
+                                return {
+                                    ...dough,
+                                    calculatedIngredients: dough.ingredients.map((ing) => ({
+                                        ...ing,
+                                        calculatedRatio: ing.ratio,
+                                    })),
+                                };
                             }
                             const flourRatioInMainDough = dough.flourRatioInMainDough || 0;
                             return {
                                 ...dough,
                                 calculatedIngredients: dough.ingredients.map((ing) => ({
                                     ...ing,
-                                    calculatedRatio: parseFloat(((ing.ratio || 0) / totalFlourRatioInPreDough * flourRatioInMainDough).toFixed(3))
-                                }))
+                                    calculatedRatio: parseFloat(
+                                        (
+                                            ((ing.ratio || 0) / totalFlourRatioInPreDough) *
+                                            flourRatioInMainDough
+                                        ).toFixed(3),
+                                    ),
+                                })),
                             };
                         });
                     });
@@ -658,13 +1654,34 @@
                         preDough: recipes.value.filter((r) => r.type === 'PRE_DOUGH'),
                         extra: recipes.value.filter((r) => r.type === 'EXTRA'),
                     }));
-                    const filteredFamilies = computed(() => recipes.value.filter((r) => r.type === activeCategory.value));
-                    const categoryDisplayMap = { BREAD: '面包', PASTRY: '西点', DESSERT: '甜品', DRINK: '饮品', OTHER: '其他' };
+                    const filteredFamilies = computed(() =>
+                        recipes.value.filter((r) => r.type === activeCategory.value),
+                    );
+                    const categoryDisplayMap = {
+                        BREAD: '面包',
+                        PASTRY: '西点',
+                        DESSERT: '甜品',
+                        DRINK: '饮品',
+                        OTHER: '其他',
+                    };
                     const categoryDisplay = (category) => categoryDisplayMap[category] || '未知品类';
-                    const mainRecipeCategories = ref(Object.entries(categoryDisplayMap).filter(([key]) => key !== 'OTHER').map(([value, text]) => ({ value, text })));
-                    const recipeNamePlaceholder = computed(() => !currentFamily.value ? '' : { MAIN: '例如：法式长棍', PRE_DOUGH: '例如：波兰种', EXTRA: '例如：奶酥馅' }[currentFamily.value.type] || '配方名称');
-                    const recipeTypeDisplay = (type) => ({ MAIN: '产品配方', PRE_DOUGH: '面种', EXTRA: '自制原料' })[type];
-                    const recipeContentTitle = computed(() => (!currentFamily.value ? '' : (currentFamily.value.category === 'BREAD' ? '主面团' : '配方内容')));
+                    const mainRecipeCategories = ref(
+                        Object.entries(categoryDisplayMap)
+                            .filter(([key]) => key !== 'OTHER')
+                            .map(([value, text]) => ({ value, text })),
+                    );
+                    const recipeNamePlaceholder = computed(() =>
+                        !currentFamily.value
+                            ? ''
+                            : { MAIN: '例如：法式长棍', PRE_DOUGH: '例如：波兰种', EXTRA: '例如：奶酥馅' }[
+                                  currentFamily.value.type
+                              ] || '配方名称',
+                    );
+                    const recipeTypeDisplay = (type) =>
+                        ({ MAIN: '产品配方', PRE_DOUGH: '面种', EXTRA: '自制原料' })[type];
+                    const recipeContentTitle = computed(() =>
+                        !currentFamily.value ? '' : currentFamily.value.category === 'BREAD' ? '主面团' : '配方内容',
+                    );
 
                     // ----------------------------
                     // 新增：配方名校验逻辑
@@ -675,13 +1692,16 @@
                         // 1. 不能为空
                         if (!name) return '配方名称不能为空';
                         // 2. 不能重复 (查找是否有其他配方使用了相同的名字，忽略当前正在编辑的这个)
-                        const duplicate = recipes.value.find(r => r.id !== currentFamily.value.id && (r.name || '').trim() === name);
+                        const duplicate = recipes.value.find(
+                            (r) => r.id !== currentFamily.value.id && (r.name || '').trim() === name,
+                        );
                         if (duplicate) return '配方名称已存在，请使用其他名称';
                         return null;
                     });
-                    
+
                     function sortIngredients(ingredients, recipeType, recipeCategory) {
-                        const isBreadLogic = (recipeType === 'PRE_DOUGH') || (recipeType === 'MAIN' && recipeCategory === 'BREAD');
+                        const isBreadLogic =
+                            recipeType === 'PRE_DOUGH' || (recipeType === 'MAIN' && recipeCategory === 'BREAD');
                         const getRatio = (ing) => ing.ratio ?? -Infinity;
                         return [...ingredients].sort((a, b) => {
                             if (isBreadLogic) {
@@ -693,33 +1713,95 @@
                             }
                         });
                     }
-                    const sortedMainDoughIngredients = computed(() => !mainDough.value ? [] : sortIngredients(mainDough.value.ingredients, currentFamily.value.type, currentFamily.value.category));
-                    const sortedOtherIngredients = computed(() => (!currentVersion.value || currentFamily.value.type === 'MAIN') ? [] : sortIngredients(currentVersion.value.ingredients, currentFamily.value.type, currentFamily.value.category));
-                    const productsWithSortedMixIns = computed(() => (!currentVersion.value || !currentVersion.value.products) ? [] : currentVersion.value.products.map(product => ({
-                        ...product,
-                        sortedMixIns: sortIngredients(product.mixIns, 'EXTRA', 'OTHER'),
-                        sortedFillings: [...product.fillings].sort((a,b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity)),
-                        sortedToppings: [...product.toppings].sort((a,b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity)),
-                    })));
+                    const sortedMainDoughIngredients = computed(() =>
+                        !mainDough.value
+                            ? []
+                            : sortIngredients(
+                                  mainDough.value.ingredients,
+                                  currentFamily.value.type,
+                                  currentFamily.value.category,
+                              ),
+                    );
+                    const sortedOtherIngredients = computed(() =>
+                        !currentVersion.value || currentFamily.value.type === 'MAIN'
+                            ? []
+                            : sortIngredients(
+                                  currentVersion.value.ingredients,
+                                  currentFamily.value.type,
+                                  currentFamily.value.category,
+                              ),
+                    );
+                    const productsWithSortedMixIns = computed(() =>
+                        !currentVersion.value || !currentVersion.value.products
+                            ? []
+                            : currentVersion.value.products.map((product) => ({
+                                  ...product,
+                                  sortedMixIns: sortIngredients(product.mixIns, 'EXTRA', 'OTHER'),
+                                  sortedFillings: [...product.fillings].sort(
+                                      (a, b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity),
+                                  ),
+                                  sortedToppings: [...product.toppings].sort(
+                                      (a, b) => (b.weightInGrams ?? -Infinity) - (a.weightInGrams ?? -Infinity),
+                                  ),
+                              })),
+                    );
 
                     const availablePreDoughs = computed(() => recipes.value.filter((r) => r.type === 'PRE_DOUGH'));
                     const availablePreDoughsForReferencing = computed(() => {
-                        if (!currentFamily.value || currentFamily.value.type !== 'MAIN' || !currentVersion.value) return [];
-                        const existingDoughNames = new Set(currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH').map((d) => d.name));
+                        if (!currentFamily.value || currentFamily.value.type !== 'MAIN' || !currentVersion.value)
+                            return [];
+                        const existingDoughNames = new Set(
+                            currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH').map((d) => d.name),
+                        );
                         return availablePreDoughs.value.filter((d) => !existingDoughNames.has(d.name));
                     });
 
                     function getNewVersion(type, category = 'BREAD') {
-                        const commonIngredient = { id: nextIngredientId++, name: '', ratio: null, isFlour: false, waterContent: 0 };
+                        const commonIngredient = {
+                            id: nextIngredientId++,
+                            name: '',
+                            ratio: null,
+                            isFlour: false,
+                            waterContent: 0,
+                        };
                         if (type === 'MAIN') {
                             return {
-                                id: nextVersionId++, notes: `V${nextVersionId}`, targetTemp: null,
-                                doughs: [{ id: nextIngredientId++, name: '主面团', type: 'MAIN_DOUGH', lossRatio: 1, divisionLoss: 2, ingredients: [JSON.parse(JSON.stringify(commonIngredient))], procedure: [''] }],
-                                products: [{ id: nextRecipeId++, name: '产品1', baseDoughWeight: 100, mixIns: [], fillings: [], toppings: [], procedure: [''] }]
+                                id: nextVersionId++,
+                                notes: `V${nextVersionId}`,
+                                targetTemp: null,
+                                doughs: [
+                                    {
+                                        id: nextIngredientId++,
+                                        name: '主面团',
+                                        type: 'MAIN_DOUGH',
+                                        lossRatio: 1,
+                                        divisionLoss: 2,
+                                        ingredients: [JSON.parse(JSON.stringify(commonIngredient))],
+                                        procedure: [''],
+                                    },
+                                ],
+                                products: [
+                                    {
+                                        id: nextRecipeId++,
+                                        name: '产品1',
+                                        baseDoughWeight: 100,
+                                        mixIns: [],
+                                        fillings: [],
+                                        toppings: [],
+                                        procedure: [''],
+                                    },
+                                ],
                             };
                         }
                         // 【核心修改点2】：初始化新版本时，添加 customWaterContent: null
-                        return { id: nextVersionId++, notes: `V${nextVersionId}`, lossRatio: null, customWaterContent: null, ingredients: [JSON.parse(JSON.stringify(commonIngredient))], procedure: [''] };
+                        return {
+                            id: nextVersionId++,
+                            notes: `V${nextVersionId}`,
+                            lossRatio: null,
+                            customWaterContent: null,
+                            ingredients: [JSON.parse(JSON.stringify(commonIngredient))],
+                            procedure: [''],
+                        };
                     }
                     function getNewFamily(type) {
                         const id = nextRecipeId++;
@@ -728,186 +1810,612 @@
                         firstVersion.notes = '初版';
                         return { id, name: '', type: type, category, versions: [firstVersion] };
                     }
-                    const addFamily = () => { const newFamily = getNewFamily(activeCategory.value); recipes.value.push(newFamily); selectFamily(newFamily.id); };
-                    const selectFamily = (id) => { suggestionState.value.visible = false; currentFamilyId.value = id; currentVersionIndex.value = 0; };
+                    const addFamily = () => {
+                        const newFamily = getNewFamily(activeCategory.value);
+                        recipes.value.push(newFamily);
+                        selectFamily(newFamily.id);
+                    };
+                    const selectFamily = (id) => {
+                        suggestionState.value.visible = false;
+                        currentFamilyId.value = id;
+                        currentVersionIndex.value = 0;
+                    };
                     const isFamilyDirty = (family) => {
                         if (!family) return false;
                         const savedSnapshot = savedRecipeSnapshots.value.get(family.id);
                         return !savedSnapshot || JSON.stringify(family) !== savedSnapshot;
                     };
-                    const isDirty = computed(() => recipes.value.length !== savedRecipeSnapshots.value.size || recipes.value.some((family) => isFamilyDirty(family)));
+                    const isDirty = computed(
+                        () =>
+                            recipes.value.length !== savedRecipeSnapshots.value.size ||
+                            recipes.value.some((family) => isFamilyDirty(family)),
+                    );
 
                     const deleteFamily = (id) => {
                         const index = recipes.value.findIndex((r) => r.id === id);
-                        if (index === -1 || !confirm(`确定要删除 "${recipes.value[index].name || '未命名配方'}" 吗？`)) return;
-                        if (currentFamilyId.value === id) { currentFamilyId.value = null; currentVersionIndex.value = 0; }
+                        if (index === -1 || !confirm(`确定要删除 "${recipes.value[index].name || '未命名配方'}" 吗？`))
+                            return;
+                        if (currentFamilyId.value === id) {
+                            currentFamilyId.value = null;
+                            currentVersionIndex.value = 0;
+                        }
                         savedRecipeSnapshots.value.delete(id);
                         recipes.value.splice(index, 1);
                     };
-                    const addVersion = () => { if (!currentFamily.value) return; const newVersion = JSON.parse(JSON.stringify(currentVersion.value)); newVersion.id = nextVersionId++; newVersion.notes = `${currentVersion.value.notes} (副本)`; currentFamily.value.versions.push(newVersion); nextTick(() => currentVersionIndex.value = currentFamily.value.versions.length - 1); };
+                    const addVersion = () => {
+                        if (!currentFamily.value) return;
+                        const newVersion = JSON.parse(JSON.stringify(currentVersion.value));
+                        newVersion.id = nextVersionId++;
+                        newVersion.notes = `${currentVersion.value.notes} (副本)`;
+                        currentFamily.value.versions.push(newVersion);
+                        nextTick(() => (currentVersionIndex.value = currentFamily.value.versions.length - 1));
+                    };
                     const deleteVersion = (index) => {
-                        if (!currentFamily.value || currentFamily.value.versions.length <= 1) return alert('必须至少保留一个版本。');
+                        if (!currentFamily.value || currentFamily.value.versions.length <= 1)
+                            return alert('必须至少保留一个版本。');
                         if (!confirm('确定删除此版本？')) return;
                         currentFamily.value.versions.splice(index, 1);
-                        if (currentVersionIndex.value >= currentFamily.value.versions.length) currentVersionIndex.value = currentFamily.value.versions.length - 1;
+                        if (currentVersionIndex.value >= currentFamily.value.versions.length)
+                            currentVersionIndex.value = currentFamily.value.versions.length - 1;
                     };
 
-                    const addMainDoughIngredient = () => mainDough.value.ingredients.push({ id: nextIngredientId++, name: '', ratio: null, isFlour: false, waterContent: 0 });
-                    const removeMainDoughIngredient = (id) => { const index = mainDough.value.ingredients.findIndex(i => i.id === id); if (index > -1) mainDough.value.ingredients.splice(index, 1); };
+                    const addMainDoughIngredient = () =>
+                        mainDough.value.ingredients.push({
+                            id: nextIngredientId++,
+                            name: '',
+                            ratio: null,
+                            isFlour: false,
+                            waterContent: 0,
+                        });
+                    const removeMainDoughIngredient = (id) => {
+                        const index = mainDough.value.ingredients.findIndex((i) => i.id === id);
+                        if (index > -1) mainDough.value.ingredients.splice(index, 1);
+                    };
                     const addMainDoughProcedureStep = () => mainDough.value.procedure.push('');
                     const removeMainDoughProcedureStep = (index) => mainDough.value.procedure.splice(index, 1);
-                    const addOtherIngredient = () => currentVersion.value.ingredients.push({ id: nextIngredientId++, name: '', ratio: null, isFlour: false, waterContent: 0 });
-                    const removeOtherIngredient = (id) => { const index = currentVersion.value.ingredients.findIndex(i => i.id === id); if (index > -1) currentVersion.value.ingredients.splice(index, 1); };
+                    const addOtherIngredient = () =>
+                        currentVersion.value.ingredients.push({
+                            id: nextIngredientId++,
+                            name: '',
+                            ratio: null,
+                            isFlour: false,
+                            waterContent: 0,
+                        });
+                    const removeOtherIngredient = (id) => {
+                        const index = currentVersion.value.ingredients.findIndex((i) => i.id === id);
+                        if (index > -1) currentVersion.value.ingredients.splice(index, 1);
+                    };
                     const addOtherProcedureStep = () => currentVersion.value.procedure.push('');
                     const removeOtherProcedureStep = (index) => currentVersion.value.procedure.splice(index, 1);
-                    
-                    const addProduct = () => { currentVersion.value.products.push({ id: nextRecipeId++, name: `产品${currentVersion.value.products.length + 1}`, baseDoughWeight: 100, mixIns: [], fillings: [], toppings: [], procedure: [''] }); nextTick(() => activeProductTab.value = currentVersion.value.products.length - 1); };
-                    const deleteProduct = (index) => { if (!confirm('确定删除？')) return; currentVersion.value.products.splice(index, 1); activeProductTab.value = Math.max(0, currentVersion.value.products.length - 1); };
-                    const addSubIngredient = (prodIndex, type) => currentVersion.value.products[prodIndex][type].push({ id: nextIngredientId++, name: '', ratio: null, weightInGrams: null, isFlour: false, waterContent: 0 });
-                    const removeSubIngredient = (productId, type, ingredientId) => { const product = currentVersion.value.products.find(p => p.id === productId); if (product) { const index = product[type].findIndex(i => i.id === ingredientId); if (index > -1) product[type].splice(index, 1); } };
-                    const addProductProcedureStep = (prodIndex) => currentVersion.value.products[prodIndex].procedure.push('');
-                    const removeProductProcedureStep = (prodIndex, stepIndex) => currentVersion.value.products[prodIndex].procedure.splice(stepIndex, 1);
 
-                    const openAddPreDoughModal = () => isAddPreDoughModalVisible.value = true;
-                    const addPreDoughReference = (dough) => { const latestVersion = dough.versions[dough.versions.length - 1]; currentVersion.value.doughs.push({ ...JSON.parse(JSON.stringify(latestVersion)), id: nextRecipeId++, name: dough.name, type: 'PRE_DOUGH', flourRatioInMainDough: 20 }); isAddPreDoughModalVisible.value = false; };
-                    const removePreDough = (index) => { const preDoughs = currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH'); const idx = currentVersion.value.doughs.indexOf(preDoughs[index]); if (idx > -1) currentVersion.value.doughs.splice(idx, 1); };
-                    const updatePreDoughRatio = (doughId, val) => { const d = currentVersion.value.doughs.find(d => d.id === doughId); if (d) d.flourRatioInMainDough = parseFloat(val) || null; };
+                    const addProduct = () => {
+                        currentVersion.value.products.push({
+                            id: nextRecipeId++,
+                            name: `产品${currentVersion.value.products.length + 1}`,
+                            baseDoughWeight: 100,
+                            mixIns: [],
+                            fillings: [],
+                            toppings: [],
+                            procedure: [''],
+                        });
+                        nextTick(() => (activeProductTab.value = currentVersion.value.products.length - 1));
+                    };
+                    const deleteProduct = (index) => {
+                        if (!confirm('确定删除？')) return;
+                        currentVersion.value.products.splice(index, 1);
+                        activeProductTab.value = Math.max(0, currentVersion.value.products.length - 1);
+                    };
+                    const addSubIngredient = (prodIndex, type) =>
+                        currentVersion.value.products[prodIndex][type].push({
+                            id: nextIngredientId++,
+                            name: '',
+                            ratio: null,
+                            weightInGrams: null,
+                            isFlour: false,
+                            waterContent: 0,
+                        });
+                    const removeSubIngredient = (productId, type, ingredientId) => {
+                        const product = currentVersion.value.products.find((p) => p.id === productId);
+                        if (product) {
+                            const index = product[type].findIndex((i) => i.id === ingredientId);
+                            if (index > -1) product[type].splice(index, 1);
+                        }
+                    };
+                    const addProductProcedureStep = (prodIndex) =>
+                        currentVersion.value.products[prodIndex].procedure.push('');
+                    const removeProductProcedureStep = (prodIndex, stepIndex) =>
+                        currentVersion.value.products[prodIndex].procedure.splice(stepIndex, 1);
+
+                    const openAddPreDoughModal = () => (isAddPreDoughModalVisible.value = true);
+                    const addPreDoughReference = (dough) => {
+                        const latestVersion = dough.versions[dough.versions.length - 1];
+                        currentVersion.value.doughs.push({
+                            ...JSON.parse(JSON.stringify(latestVersion)),
+                            id: nextRecipeId++,
+                            name: dough.name,
+                            type: 'PRE_DOUGH',
+                            flourRatioInMainDough: 20,
+                        });
+                        isAddPreDoughModalVisible.value = false;
+                    };
+                    const removePreDough = (index) => {
+                        const preDoughs = currentVersion.value.doughs.filter((d) => d.type === 'PRE_DOUGH');
+                        const idx = currentVersion.value.doughs.indexOf(preDoughs[index]);
+                        if (idx > -1) currentVersion.value.doughs.splice(idx, 1);
+                    };
+                    const updatePreDoughRatio = (doughId, val) => {
+                        const d = currentVersion.value.doughs.find((d) => d.id === doughId);
+                        if (d) d.flourRatioInMainDough = parseFloat(val) || null;
+                    };
 
                     // Suggestion Logic
                     const handleIngredientInput = (ingredient, event) => {
                         const query = event.target.value;
                         suggestionState.value.ingRef = ingredient;
                         suggestionState.value.target = event.target;
-                        if (!query) return suggestionState.value.visible = false;
+                        if (!query) return (suggestionState.value.visible = false);
                         const lower = query.toLowerCase();
                         const suggestions = [];
-                        globalIngredientLibrary.value.forEach((data, name) => { if (name.toLowerCase().includes(lower)) suggestions.push({ type: 'EXISTING', key: 'EXIST_'+name, name, isFlour: data.isFlour, selfMade: false }); });
-                        selfMadeRecipeNames.value.forEach(name => { if (name.toLowerCase().includes(lower)) { const idx = suggestions.findIndex(s => s.name === name); if(idx > -1) suggestions[idx].selfMade = true; else suggestions.push({ type: 'EXISTING', key: 'SELF_'+name, name, isFlour: false, selfMade: true }); } });
-                        if (!suggestions.find(s => s.name === query)) { suggestions.push({ type: 'NEW_NORMAL', key: 'NEW_N_'+query, name: query }); suggestions.push({ type: 'NEW_FLOUR', key: 'NEW_F_'+query, name: query }); }
+                        globalIngredientLibrary.value.forEach((data, name) => {
+                            if (name.toLowerCase().includes(lower))
+                                suggestions.push({
+                                    type: 'EXISTING',
+                                    key: 'EXIST_' + name,
+                                    name,
+                                    isFlour: data.isFlour,
+                                    selfMade: false,
+                                });
+                        });
+                        selfMadeRecipeNames.value.forEach((name) => {
+                            if (name.toLowerCase().includes(lower)) {
+                                const idx = suggestions.findIndex((s) => s.name === name);
+                                if (idx > -1) suggestions[idx].selfMade = true;
+                                else
+                                    suggestions.push({
+                                        type: 'EXISTING',
+                                        key: 'SELF_' + name,
+                                        name,
+                                        isFlour: false,
+                                        selfMade: true,
+                                    });
+                            }
+                        });
+                        if (!suggestions.find((s) => s.name === query)) {
+                            suggestions.push({ type: 'NEW_NORMAL', key: 'NEW_N_' + query, name: query });
+                            suggestions.push({ type: 'NEW_FLOUR', key: 'NEW_F_' + query, name: query });
+                        }
                         suggestionState.value.suggestions = suggestions;
                         suggestionState.value.visible = suggestions.length > 0;
                     };
-                    const handleIngredientBlur = (ing) => { setTimeout(() => { if (suggestionState.value.ingRef === ing) { suggestionState.value.visible = false; if(ing.name && globalIngredientLibrary.value.has(ing.name)) { const d = globalIngredientLibrary.value.get(ing.name); ing.isFlour = d.isFlour; ing.waterContent = d.waterContent; } suggestionState.value.ingRef = null; } }, 200); };
+                    const handleIngredientBlur = (ing) => {
+                        setTimeout(() => {
+                            if (suggestionState.value.ingRef === ing) {
+                                suggestionState.value.visible = false;
+                                if (ing.name && globalIngredientLibrary.value.has(ing.name)) {
+                                    const d = globalIngredientLibrary.value.get(ing.name);
+                                    ing.isFlour = d.isFlour;
+                                    ing.waterContent = d.waterContent;
+                                }
+                                suggestionState.value.ingRef = null;
+                            }
+                        }, 200);
+                    };
                     const selectSuggestion = (sugg) => {
                         const t = suggestionState.value.ingRef;
-                        if (t) { t.name = sugg.name; if (sugg.type === 'EXISTING') { t.isFlour = sugg.isFlour; t.waterContent = globalIngredientLibrary.value.get(sugg.name)?.waterContent || 0; } else { t.isFlour = (sugg.type === 'NEW_FLOUR'); t.waterContent = 0; globalIngredientLibrary.value.set(sugg.name, { name: sugg.name, isFlour: t.isFlour, waterContent: 0 }); } }
+                        if (t) {
+                            t.name = sugg.name;
+                            if (sugg.type === 'EXISTING') {
+                                t.isFlour = sugg.isFlour;
+                                t.waterContent = globalIngredientLibrary.value.get(sugg.name)?.waterContent || 0;
+                            } else {
+                                t.isFlour = sugg.type === 'NEW_FLOUR';
+                                t.waterContent = 0;
+                                globalIngredientLibrary.value.set(sugg.name, {
+                                    name: sugg.name,
+                                    isFlour: t.isFlour,
+                                    waterContent: 0,
+                                });
+                            }
+                        }
                         suggestionState.value.visible = false;
                     };
-                    watch(() => suggestionState.value.target, (el) => { nextTick(() => { if(el && mainContentRef.value) { const tr = el.getBoundingClientRect(), pr = mainContentRef.value.getBoundingClientRect(); suggestionBoxStyle.value = { top: `${tr.bottom - pr.top + mainContentRef.value.scrollTop}px`, left: `${tr.left - pr.left}px`, width: `${tr.width}px` }; } }); });
-                    
+                    watch(
+                        () => suggestionState.value.target,
+                        (el) => {
+                            nextTick(() => {
+                                if (el && mainContentRef.value) {
+                                    const tr = el.getBoundingClientRect(),
+                                        pr = mainContentRef.value.getBoundingClientRect();
+                                    suggestionBoxStyle.value = {
+                                        top: `${tr.bottom - pr.top + mainContentRef.value.scrollTop}px`,
+                                        left: `${tr.left - pr.left}px`,
+                                        width: `${tr.width}px`,
+                                    };
+                                }
+                            });
+                        },
+                    );
+
                     // Tabs Scrolling
-                    const updateScrollBtns = (refEl, stateKey) => { const el = refEl.value; if(!el) return; const over = el.scrollWidth > el.clientWidth; tabScrollState.value[stateKey] = { showLeft: over && el.scrollLeft > 0, showRight: over && el.scrollLeft < el.scrollWidth - el.clientWidth - 1 }; };
+                    const updateScrollBtns = (refEl, stateKey) => {
+                        const el = refEl.value;
+                        if (!el) return;
+                        const over = el.scrollWidth > el.clientWidth;
+                        tabScrollState.value[stateKey] = {
+                            showLeft: over && el.scrollLeft > 0,
+                            showRight: over && el.scrollLeft < el.scrollWidth - el.clientWidth - 1,
+                        };
+                    };
                     const scrollTabs = (refEl, amt) => refEl.value?.scrollBy({ left: amt, behavior: 'smooth' });
                     const updateVersionTabScrollButtons = () => updateScrollBtns(versionTabsRef, 'version');
                     const scrollVersionTabs = (n) => scrollTabs(versionTabsRef, n);
                     const updateProductTabScrollButtons = () => updateScrollBtns(productTabsRef, 'product');
                     const scrollProductTabs = (n) => scrollTabs(productTabsRef, n);
-                    watch(() => currentVersion.value?.products, () => nextTick(updateProductTabScrollButtons), { deep: true });
-                    watch([currentFamily, currentVersionIndex], () => nextTick(() => { updateVersionTabScrollButtons(); if(currentFamily.value?.type === 'MAIN') { activeProductTab.value = 0; updateProductTabScrollButtons(); } }));
+                    watch(
+                        () => currentVersion.value?.products,
+                        () => nextTick(updateProductTabScrollButtons),
+                        { deep: true },
+                    );
+                    watch([currentFamily, currentVersionIndex], () =>
+                        nextTick(() => {
+                            updateVersionTabScrollButtons();
+                            if (currentFamily.value?.type === 'MAIN') {
+                                activeProductTab.value = 0;
+                                updateProductTabScrollButtons();
+                            }
+                        }),
+                    );
 
                     // Import/Export/File
-                    const toPercentage = (d) => d == null ? null : parseFloat((d * 100).toPrecision(12));
-                    const toDecimal = (p) => p == null ? 0 : parseFloat((parseFloat(p) / 100).toPrecision(12));
+                    const toPercentage = (d) => (d == null ? null : parseFloat((d * 100).toPrecision(12)));
+                    const toDecimal = (p) => (p == null ? 0 : parseFloat((parseFloat(p) / 100).toPrecision(12)));
                     const normalizeVersion = (vData, fType, fCat, pdMap) => {
-                        const processIng = (ing) => { 
-                            if (!globalIngredientLibrary.value.has(ing.name)) globalIngredientLibrary.value.set(ing.name, { name: ing.name, isFlour: !!ing.isFlour, waterContent: ing.waterContent || 0 });
+                        const processIng = (ing) => {
+                            if (!globalIngredientLibrary.value.has(ing.name))
+                                globalIngredientLibrary.value.set(ing.name, {
+                                    name: ing.name,
+                                    isFlour: !!ing.isFlour,
+                                    waterContent: ing.waterContent || 0,
+                                });
                             const lib = globalIngredientLibrary.value.get(ing.name);
-                            return { id: nextIngredientId++, name: ing.name, ratio: toPercentage(ing.ratio), isFlour: lib.isFlour, waterContent: lib.waterContent };
+                            return {
+                                id: nextIngredientId++,
+                                name: ing.name,
+                                ratio: toPercentage(ing.ratio),
+                                isFlour: lib.isFlour,
+                                waterContent: lib.waterContent,
+                            };
                         };
                         // 【核心修改点3】：解析 JSON 时，读取 customWaterContent (原数据是小数，这里转为百分比显示？不，customWaterContent 通常存储为百分比整数，例如 45)
                         // 注意：如果您的 JSON 导出逻辑里 customWaterContent 是小数 (0.45)，这里需要 toPercentage。如果是整数 (45)，直接用。
                         // 根据 getJson 逻辑，我们统一使用 toPercentage 转换小数到百分比。
-                        
-                        const base = { 
-                            id: nextVersionId++, 
-                            notes: vData.notes || 'V?', 
-                            targetTemp: vData.targetTemp || null, 
-                            lossRatio: toPercentage(vData.lossRatio), 
-                            divisionLoss: vData.divisionLoss ?? 2, 
+
+                        const base = {
+                            id: nextVersionId++,
+                            notes: vData.notes || 'V?',
+                            targetTemp: vData.targetTemp || null,
+                            lossRatio: toPercentage(vData.lossRatio),
+                            divisionLoss: vData.divisionLoss ?? 2,
                             // 假设 JSON 中存储的是小数 (0.45)，转换为 45
-                            customWaterContent: vData.customWaterContent !== undefined ? toPercentage(vData.customWaterContent) : null,
-                            doughs: [], products: [], ingredients: [], procedure: vData.procedure || [''] 
+                            customWaterContent:
+                                vData.customWaterContent !== undefined ? toPercentage(vData.customWaterContent) : null,
+                            doughs: [],
+                            products: [],
+                            ingredients: [],
+                            procedure: vData.procedure || [''],
                         };
-                        
+
                         if (fType === 'MAIN') {
-                            const pds = [], mains = [];
-                            (vData.ingredients || []).forEach(ing => {
-                                const isRef = pdMap.has(ing.name) && (ing.flourRatio !== undefined || ing.ratio === undefined);
+                            const pds = [],
+                                mains = [];
+                            (vData.ingredients || []).forEach((ing) => {
+                                const isRef =
+                                    pdMap.has(ing.name) && (ing.flourRatio !== undefined || ing.ratio === undefined);
                                 if (isRef) {
                                     const def = pdMap.get(ing.name);
-                                    pds.push({ id: nextRecipeId++, name: ing.name, type: 'PRE_DOUGH', flourRatioInMainDough: toPercentage(ing.flourRatio), ingredients: (def.ingredients||[]).map(processIng), procedure: def.procedure||[] });
+                                    pds.push({
+                                        id: nextRecipeId++,
+                                        name: ing.name,
+                                        type: 'PRE_DOUGH',
+                                        flourRatioInMainDough: toPercentage(ing.flourRatio),
+                                        ingredients: (def.ingredients || []).map(processIng),
+                                        procedure: def.procedure || [],
+                                    });
                                 } else mains.push(processIng(ing));
                             });
-                            base.doughs = [{ id: nextIngredientId++, name: '主面团', type: 'MAIN_DOUGH', lossRatio: toPercentage(vData.lossRatio), divisionLoss: vData.divisionLoss ?? 2, procedure: vData.procedure||[''], ingredients: mains.length ? mains : [{id: nextIngredientId++, name:'', ratio:null, isFlour:false, waterContent:0}] }, ...pds];
-                            base.products = (vData.products||[]).map(p => ({ id: nextRecipeId++, name: p.name, baseDoughWeight: p.weight, mixIns: (p.mixIn||[]).map(processIng), fillings: (p.fillings||[]).map(i => ({...processIng(i), weightInGrams: i.weightInGrams})), toppings: (p.toppings||[]).map(i => ({...processIng(i), weightInGrams: i.weightInGrams})), procedure: p.procedure||[''] }));
-                            if(!base.products.length) base.products.push({ id: nextRecipeId++, name: '产品1', baseDoughWeight: 100, mixIns: [], fillings: [], toppings: [], procedure: [''] });
+                            base.doughs = [
+                                {
+                                    id: nextIngredientId++,
+                                    name: '主面团',
+                                    type: 'MAIN_DOUGH',
+                                    lossRatio: toPercentage(vData.lossRatio),
+                                    divisionLoss: vData.divisionLoss ?? 2,
+                                    procedure: vData.procedure || [''],
+                                    ingredients: mains.length
+                                        ? mains
+                                        : [
+                                              {
+                                                  id: nextIngredientId++,
+                                                  name: '',
+                                                  ratio: null,
+                                                  isFlour: false,
+                                                  waterContent: 0,
+                                              },
+                                          ],
+                                },
+                                ...pds,
+                            ];
+                            base.products = (vData.products || []).map((p) => ({
+                                id: nextRecipeId++,
+                                name: p.name,
+                                baseDoughWeight: p.weight,
+                                mixIns: (p.mixIn || []).map(processIng),
+                                fillings: (p.fillings || []).map((i) => ({
+                                    ...processIng(i),
+                                    weightInGrams: i.weightInGrams,
+                                })),
+                                toppings: (p.toppings || []).map((i) => ({
+                                    ...processIng(i),
+                                    weightInGrams: i.weightInGrams,
+                                })),
+                                procedure: p.procedure || [''],
+                            }));
+                            if (!base.products.length)
+                                base.products.push({
+                                    id: nextRecipeId++,
+                                    name: '产品1',
+                                    baseDoughWeight: 100,
+                                    mixIns: [],
+                                    fillings: [],
+                                    toppings: [],
+                                    procedure: [''],
+                                });
                         } else {
-                            base.ingredients = (vData.ingredients||[]).length ? (vData.ingredients||[]).map(processIng) : [{id: nextIngredientId++, name:'', ratio:null, isFlour:false, waterContent:0}];
+                            base.ingredients = (vData.ingredients || []).length
+                                ? (vData.ingredients || []).map(processIng)
+                                : [{ id: nextIngredientId++, name: '', ratio: null, isFlour: false, waterContent: 0 }];
                         }
                         return base;
                     };
                     const getJson = () => {
-                        if (!recipes.value.length) return alert('请先添加配方'), null;
+                        if (!recipes.value.length) return (alert('请先添加配方'), null);
                         try {
-                            const sorted = [...recipes.value].sort((a, b) => ({ 'PRE_DOUGH': 1, 'EXTRA': 2, 'MAIN': 3 }[a.type] - { 'PRE_DOUGH': 1, 'EXTRA': 2, 'MAIN': 3 }[b.type]));
-                            return JSON.stringify(sorted.map(f => ({
-                                name: f.name, type: f.type, category: f.category,
-                                versions: f.versions.map(v => {
-                                    const formatIng = (i) => { const r = { name: i.name, ratio: toDecimal(i.ratio) }; if(i.isFlour) r.isFlour=true; if(i.waterContent) r.waterContent=i.waterContent; return r; };
-                                    if (f.type === 'MAIN') {
-                                        const md = v.doughs.find(d => d.type === 'MAIN_DOUGH');
-                                        return {
-                                            notes: v.notes, targetTemp: v.targetTemp, lossRatio: toDecimal(md.lossRatio), divisionLoss: md.divisionLoss, procedure: md.procedure.filter(p=>p.trim()),
-                                            ingredients: [...v.doughs.filter(d=>d.type==='PRE_DOUGH').map(d=>({name:d.name, flourRatio:toDecimal(d.flourRatioInMainDough)})), ...md.ingredients.filter(i=>i.name.trim() && i.ratio!=null).map(formatIng)],
-                                            products: v.products.map(p => ({ name: p.name, weight: p.baseDoughWeight, procedure: p.procedure.filter(s=>s.trim()), mixIn: p.mixIns.map(formatIng), fillings: p.fillings.map(i=>({name:i.name, weightInGrams:i.weightInGrams})), toppings: p.toppings.map(i=>({name:i.name, weightInGrams:i.weightInGrams})) }))
+                            const sorted = [...recipes.value].sort(
+                                (a, b) =>
+                                    ({ PRE_DOUGH: 1, EXTRA: 2, MAIN: 3 })[a.type] -
+                                    { PRE_DOUGH: 1, EXTRA: 2, MAIN: 3 }[b.type],
+                            );
+                            return JSON.stringify(
+                                sorted.map((f) => ({
+                                    name: f.name,
+                                    type: f.type,
+                                    category: f.category,
+                                    versions: f.versions.map((v) => {
+                                        const formatIng = (i) => {
+                                            const r = { name: i.name, ratio: toDecimal(i.ratio) };
+                                            if (i.isFlour) r.isFlour = true;
+                                            if (i.waterContent) r.waterContent = i.waterContent;
+                                            return r;
                                         };
-                                    } else return { 
-                                        notes: v.notes, 
-                                        lossRatio: toDecimal(v.lossRatio), 
-                                        // 【核心修改点4】：导出时，将 customWaterContent (45) 转为小数 (0.45)
-                                        customWaterContent: v.customWaterContent !== null ? toDecimal(v.customWaterContent) : undefined,
-                                        ingredients: v.ingredients.filter(i=>i.name.trim() && i.ratio!=null).map(formatIng), 
-                                        procedure: v.procedure.filter(p=>p.trim()) 
-                                    };
-                                })
-                            })), null, 4);
-                        } catch (e) { alert(e.message); return null; }
+                                        if (f.type === 'MAIN') {
+                                            const md = v.doughs.find((d) => d.type === 'MAIN_DOUGH');
+                                            return {
+                                                notes: v.notes,
+                                                targetTemp: v.targetTemp,
+                                                lossRatio: toDecimal(md.lossRatio),
+                                                divisionLoss: md.divisionLoss,
+                                                procedure: md.procedure.filter((p) => p.trim()),
+                                                ingredients: [
+                                                    ...v.doughs
+                                                        .filter((d) => d.type === 'PRE_DOUGH')
+                                                        .map((d) => ({
+                                                            name: d.name,
+                                                            flourRatio: toDecimal(d.flourRatioInMainDough),
+                                                        })),
+                                                    ...md.ingredients
+                                                        .filter((i) => i.name.trim() && i.ratio != null)
+                                                        .map(formatIng),
+                                                ],
+                                                products: v.products.map((p) => ({
+                                                    name: p.name,
+                                                    weight: p.baseDoughWeight,
+                                                    procedure: p.procedure.filter((s) => s.trim()),
+                                                    mixIn: p.mixIns.map(formatIng),
+                                                    fillings: p.fillings.map((i) => ({
+                                                        name: i.name,
+                                                        weightInGrams: i.weightInGrams,
+                                                    })),
+                                                    toppings: p.toppings.map((i) => ({
+                                                        name: i.name,
+                                                        weightInGrams: i.weightInGrams,
+                                                    })),
+                                                })),
+                                            };
+                                        } else
+                                            return {
+                                                notes: v.notes,
+                                                lossRatio: toDecimal(v.lossRatio),
+                                                // 【核心修改点4】：导出时，将 customWaterContent (45) 转为小数 (0.45)
+                                                customWaterContent:
+                                                    v.customWaterContent !== null
+                                                        ? toDecimal(v.customWaterContent)
+                                                        : undefined,
+                                                ingredients: v.ingredients
+                                                    .filter((i) => i.name.trim() && i.ratio != null)
+                                                    .map(formatIng),
+                                                procedure: v.procedure.filter((p) => p.trim()),
+                                            };
+                                    }),
+                                })),
+                                null,
+                                4,
+                            );
+                        } catch (e) {
+                            alert(e.message);
+                            return null;
+                        }
                     };
                     const loadJson = (str) => {
                         try {
                             const data = JSON.parse(str);
                             const pdMap = new Map();
-                            data.filter(r => r.type !== 'MAIN').forEach(f => { if(f.versions?.length) pdMap.set(f.name, f.versions[f.versions.length-1]); });
-                            recipes.value = data.map(f => ({ id: nextRecipeId++, name: f.name, type: f.type, category: f.category || (f.type==='MAIN'?'BREAD':'OTHER'), versions: (f.versions||[]).length ? f.versions.map(v => normalizeVersion(v, f.type, f.category, pdMap)) : [Object.assign(getNewVersion(f.type), {notes: 'V1 (Imported)'})] }));
-                            savedRecipeSnapshots.value.clear(); recipes.value.forEach(f => savedRecipeSnapshots.value.set(f.id, JSON.stringify(f)));
-                            if(recipes.value.length) nextTick(() => { activeCategory.value = 'MAIN'; const main = recipes.value.find(r=>r.type==='MAIN'); selectFamily(main ? main.id : recipes.value[0].id); });
+                            data.filter((r) => r.type !== 'MAIN').forEach((f) => {
+                                if (f.versions?.length) pdMap.set(f.name, f.versions[f.versions.length - 1]);
+                            });
+                            recipes.value = data.map((f) => ({
+                                id: nextRecipeId++,
+                                name: f.name,
+                                type: f.type,
+                                category: f.category || (f.type === 'MAIN' ? 'BREAD' : 'OTHER'),
+                                versions: (f.versions || []).length
+                                    ? f.versions.map((v) => normalizeVersion(v, f.type, f.category, pdMap))
+                                    : [Object.assign(getNewVersion(f.type), { notes: 'V1 (Imported)' })],
+                            }));
+                            savedRecipeSnapshots.value.clear();
+                            recipes.value.forEach((f) => savedRecipeSnapshots.value.set(f.id, JSON.stringify(f)));
+                            if (recipes.value.length)
+                                nextTick(() => {
+                                    activeCategory.value = 'MAIN';
+                                    const main = recipes.value.find((r) => r.type === 'MAIN');
+                                    selectFamily(main ? main.id : recipes.value[0].id);
+                                });
                             alert(`成功加载 ${recipes.value.length} 个配方`);
-                        } catch (e) { console.error(e); alert('加载失败: ' + e.message); }
+                        } catch (e) {
+                            console.error(e);
+                            alert('加载失败: ' + e.message);
+                        }
                     };
                     const triggerImport = () => fileInput.value.click();
-                    const handleFileImport = (e) => { const f = e.target.files[0]; if(f) { const r = new FileReader(); r.onload = (ev) => { fileHandle.value=null; loadJson(ev.target.result); e.target.value=''; }; r.readAsText(f); } };
-                    const exportAllJson = () => { const s = getJson(); if(s) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([s], {type:'application/json'})); a.download = 'recipes_export.json'; a.click(); } };
-                    const openFile = async () => { try { const [h] = await showOpenFilePicker({types:[{description:'JSON',accept:{'application/json':['.json']}}]}); const f = await h.getFile(); fileHandle.value = h; loadJson(await f.text()); } catch(e) { if(e.name!=='AbortError') alert(e.message); } };
-                    const saveFile = async () => { if(!fileHandle.value) return alert('无文件句柄'); const s = getJson(); if(s) { const w = await fileHandle.value.createWritable(); await w.write(s); await w.close(); savedRecipeSnapshots.value.clear(); recipes.value.forEach(f => savedRecipeSnapshots.value.set(f.id, JSON.stringify(f))); alert('保存成功'); } };
-                    
-                    onMounted(() => window.addEventListener('beforeunload', (e) => { if (isDirty.value) { e.preventDefault(); e.returnValue = ''; } }));
+                    const handleFileImport = (e) => {
+                        const f = e.target.files[0];
+                        if (f) {
+                            const r = new FileReader();
+                            r.onload = (ev) => {
+                                fileHandle.value = null;
+                                loadJson(ev.target.result);
+                                e.target.value = '';
+                            };
+                            r.readAsText(f);
+                        }
+                    };
+                    const exportAllJson = () => {
+                        const s = getJson();
+                        if (s) {
+                            const a = document.createElement('a');
+                            a.href = URL.createObjectURL(new Blob([s], { type: 'application/json' }));
+                            a.download = 'recipes_export.json';
+                            a.click();
+                        }
+                    };
+                    const openFile = async () => {
+                        try {
+                            const [h] = await showOpenFilePicker({
+                                types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+                            });
+                            const f = await h.getFile();
+                            fileHandle.value = h;
+                            loadJson(await f.text());
+                        } catch (e) {
+                            if (e.name !== 'AbortError') alert(e.message);
+                        }
+                    };
+                    const saveFile = async () => {
+                        if (!fileHandle.value) return alert('无文件句柄');
+                        const s = getJson();
+                        if (s) {
+                            const w = await fileHandle.value.createWritable();
+                            await w.write(s);
+                            await w.close();
+                            savedRecipeSnapshots.value.clear();
+                            recipes.value.forEach((f) => savedRecipeSnapshots.value.set(f.id, JSON.stringify(f)));
+                            alert('保存成功');
+                        }
+                    };
+
+                    onMounted(() =>
+                        window.addEventListener('beforeunload', (e) => {
+                            if (isDirty.value) {
+                                e.preventDefault();
+                                e.returnValue = '';
+                            }
+                        }),
+                    );
                     onUnmounted(() => window.removeEventListener('beforeunload', () => {}));
 
                     return {
-                        recipes, currentFamilyId, currentVersionIndex, activeProductTab, currentFamily, currentVersion, mainDough, fileInput,
-                        recipeNamePlaceholder, recipeTypeDisplay, isSelfMade, recipeCategories, filteredFamilies, isAddPreDoughModalVisible, categoryDisplay, recipeContentTitle,
-                        mainRecipeCategories, availablePreDoughs, availablePreDoughsForReferencing, activeCategory, mainContentRef, productTabsRef, versionTabsRef,
-                        tabScrollState, suggestionState, suggestionBoxStyle, processedPreDoughs, isFSApiSupported, fileHandle, isFamilyDirty,
-                        addFamily, selectFamily, deleteFamily, addVersion, deleteVersion, triggerImport, handleFileImport, openAddPreDoughModal,
-                        addPreDoughReference, removePreDough, handleIngredientInput, handleIngredientBlur, selectSuggestion,
-                        scrollVersionTabs, updateVersionTabScrollButtons, scrollProductTabs, updateProductTabScrollButtons,
-                        addMainDoughIngredient, removeMainDoughIngredient, addMainDoughProcedureStep, removeMainDoughProcedureStep,
-                        addOtherIngredient, removeOtherIngredient, addOtherProcedureStep, removeOtherProcedureStep, addProduct, deleteProduct,
-                        addSubIngredient, removeSubIngredient, addProductProcedureStep, removeProductProcedureStep, exportAllJson, openFile, saveFile,
-                        updatePreDoughRatio, sortedMainDoughIngredients, sortedOtherIngredients, productsWithSortedMixIns, getWrapperClass, 
-                        totalWaterRatio, shouldShowWaterTag,
+                        recipes,
+                        currentFamilyId,
+                        currentVersionIndex,
+                        activeProductTab,
+                        currentFamily,
+                        currentVersion,
+                        mainDough,
+                        fileInput,
+                        recipeNamePlaceholder,
+                        recipeTypeDisplay,
+                        isSelfMade,
+                        recipeCategories,
+                        filteredFamilies,
+                        isAddPreDoughModalVisible,
+                        categoryDisplay,
+                        recipeContentTitle,
+                        mainRecipeCategories,
+                        availablePreDoughs,
+                        availablePreDoughsForReferencing,
+                        activeCategory,
+                        mainContentRef,
+                        productTabsRef,
+                        versionTabsRef,
+                        tabScrollState,
+                        suggestionState,
+                        suggestionBoxStyle,
+                        processedPreDoughs,
+                        isFSApiSupported,
+                        fileHandle,
+                        isFamilyDirty,
+                        addFamily,
+                        selectFamily,
+                        deleteFamily,
+                        addVersion,
+                        deleteVersion,
+                        triggerImport,
+                        handleFileImport,
+                        openAddPreDoughModal,
+                        addPreDoughReference,
+                        removePreDough,
+                        handleIngredientInput,
+                        handleIngredientBlur,
+                        selectSuggestion,
+                        scrollVersionTabs,
+                        updateVersionTabScrollButtons,
+                        scrollProductTabs,
+                        updateProductTabScrollButtons,
+                        addMainDoughIngredient,
+                        removeMainDoughIngredient,
+                        addMainDoughProcedureStep,
+                        removeMainDoughProcedureStep,
+                        addOtherIngredient,
+                        removeOtherIngredient,
+                        addOtherProcedureStep,
+                        removeOtherProcedureStep,
+                        addProduct,
+                        deleteProduct,
+                        addSubIngredient,
+                        removeSubIngredient,
+                        addProductProcedureStep,
+                        removeProductProcedureStep,
+                        exportAllJson,
+                        openFile,
+                        saveFile,
+                        updatePreDoughRatio,
+                        sortedMainDoughIngredients,
+                        sortedOtherIngredients,
+                        productsWithSortedMixIns,
+                        getWrapperClass,
+                        totalWaterRatio,
+                        shouldShowWaterTag,
                         calculatedWaterContent,
-                        nameValidationError // 新增的校验属性
+                        nameValidationError, // 新增的校验属性
                     };
                 },
             }).mount('#app');
