@@ -2180,11 +2180,13 @@
                     const getJson = () => {
                         if (!recipes.value.length) return (alert('请先添加配方'), null);
                         try {
-                            const sorted = [...recipes.value].sort(
-                                (a, b) =>
-                                    ({ PRE_DOUGH: 1, EXTRA: 2, MAIN: 3 })[a.type] -
-                                    { PRE_DOUGH: 1, EXTRA: 2, MAIN: 3 }[b.type],
-                            );
+                            const sorted = [...recipes.value].sort((a, b) => {
+                                const order = { PRE_DOUGH: 1, EXTRA: 2, MAIN: 3 };
+                                const typeDiff = order[a.type] - order[b.type];
+                                if (typeDiff !== 0) return typeDiff;
+                                // 加入与后台一致的中文排序规则
+                                return (a.name || '').localeCompare(b.name || '', 'zh-CN');
+                            });
                             return JSON.stringify(
                                 sorted.map((f) => ({
                                     name: f.name,
@@ -2197,11 +2199,34 @@
                                             if (i.waterContent) r.waterContent = i.waterContent;
                                             return r;
                                         };
+
+                                        // 【修改】：加入配方类型和品类判断，还原你的专业排序逻辑
+                                        const formatAndSortIngs = (ings, recipeType, recipeCategory) => {
+                                            const isFlourSort =
+                                                recipeType === 'PRE_DOUGH' ||
+                                                (recipeType === 'MAIN' && recipeCategory === 'BREAD');
+                                            return ings
+                                                .filter((i) => i.name.trim() && i.ratio != null)
+                                                .sort((a, b) => {
+                                                    if (isFlourSort) {
+                                                        if (a.isFlour && !b.isFlour) return -1;
+                                                        if (!a.isFlour && b.isFlour) return 1;
+                                                    }
+                                                    return (b.ratio || 0) - (a.ratio || 0);
+                                                })
+                                                .map(formatIng);
+                                        };
+
                                         if (f.type === 'MAIN') {
                                             const md = v.doughs.find((d) => d.type === 'MAIN_DOUGH');
                                             return {
                                                 notes: v.notes,
-                                                targetTemp: v.targetTemp,
+                                                targetTemp:
+                                                    v.targetTemp !== null &&
+                                                    v.targetTemp !== '' &&
+                                                    v.targetTemp !== undefined
+                                                        ? v.targetTemp
+                                                        : 26,
                                                 lossRatio: toDecimal(md.lossRatio),
                                                 divisionLoss: md.divisionLoss,
                                                 procedure: md.procedure.filter((p) => p.trim()),
@@ -2212,9 +2237,8 @@
                                                             name: d.name,
                                                             flourRatio: toDecimal(d.flourRatioInMainDough),
                                                         })),
-                                                    ...md.ingredients
-                                                        .filter((i) => i.name.trim() && i.ratio != null)
-                                                        .map(formatIng),
+                                                    // 【修改】：传入类型和品类
+                                                    ...formatAndSortIngs(md.ingredients, f.type, f.category),
                                                 ],
                                                 products: v.products.map((p) => ({
                                                     name: p.name,
@@ -2235,14 +2259,12 @@
                                             return {
                                                 notes: v.notes,
                                                 lossRatio: toDecimal(v.lossRatio),
-                                                // 【核心修改点4】：导出时，将 customWaterContent (45) 转为小数 (0.45)
                                                 customWaterContent:
                                                     v.customWaterContent !== null
                                                         ? toDecimal(v.customWaterContent)
                                                         : undefined,
-                                                ingredients: v.ingredients
-                                                    .filter((i) => i.name.trim() && i.ratio != null)
-                                                    .map(formatIng),
+                                                // 【修改】：传入类型和品类
+                                                ingredients: formatAndSortIngs(v.ingredients, f.type, f.category),
                                                 procedure: v.procedure.filter((p) => p.trim()),
                                             };
                                     }),

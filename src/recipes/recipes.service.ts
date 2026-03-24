@@ -684,7 +684,10 @@ export class RecipesService {
         });
 
         const exportableFamilies: BatchImportRecipeDto[] = families.map((family) => {
-            const exportableVersions = family.versions.map((version) => this._exportVersion(version, family.type));
+            // 【修改】：给 _exportVersion 增加 family.category 参数
+            const exportableVersions = family.versions.map((version) =>
+                this._exportVersion(version, family.type, family.category),
+            );
 
             return {
                 name: family.name,
@@ -694,15 +697,49 @@ export class RecipesService {
             };
         });
 
+        // 核心同步逻辑：1. 按配方类型排序(面种->自制->产品) 2. 同类型下按中文名称拼音排序
+        const order: Record<string, number> = { PRE_DOUGH: 1, EXTRA: 2, MAIN: 3 };
+        exportableFamilies.sort((a, b) => {
+            const typeDiff = order[a.type] - order[b.type];
+            if (typeDiff !== 0) return typeDiff;
+            return a.name.localeCompare(b.name, 'zh-CN');
+        });
+
         return exportableFamilies;
     }
 
-    private _exportVersion(version: RecipeVersionForExport, familyType: RecipeType): BatchImportVersionDto {
+    // 【修改】：增加 category 参数
+    private _exportVersion(
+        version: RecipeVersionForExport,
+        familyType: RecipeType,
+        category: string | null | undefined,
+    ): BatchImportVersionDto {
         const toNum = (val: Prisma.Decimal | null | undefined): number | undefined => {
             if (val === null || val === undefined) return undefined;
             return val.toNumber();
         };
 
+        // 【新增】：核心判断规则，面种和面包才把面粉置顶
+        const isFlourSort = familyType === 'PRE_DOUGH' || category === 'BREAD';
+
+        // 过滤空步骤
+        const filterProcedure = (proc: string[]) => proc.filter((p) => p.trim() !== '');
+
+        // 明确返回 BatchComponentIngredientDto 类型，移除 any
+        const formatIng = (
+            ingName: string,
+            ratio?: number,
+            isFlour?: boolean,
+            waterContent?: number,
+        ): BatchComponentIngredientDto => {
+            const r: BatchComponentIngredientDto = { name: ingName };
+            if (ratio !== undefined && ratio !== null) r.ratio = ratio;
+            if (isFlour) r.isFlour = true;
+            if (waterContent && waterContent > 0) r.waterContent = waterContent;
+            return r;
+        };
+
+        // 明确返回 BatchComponentIngredientDto | null，移除 any
         const formatComponentIngredient = (ing: ComponentIngredientForExport): BatchComponentIngredientDto | null => {
             if (ing.linkedPreDough) {
                 return {
@@ -711,23 +748,15 @@ export class RecipesService {
                 };
             }
             if (ing.linkedExtra) {
-                return {
-                    name: ing.linkedExtra.name,
-                    ratio: toNum(ing.ratio),
-                };
+                return formatIng(ing.linkedExtra.name, toNum(ing.ratio));
             }
             if (ing.ingredient) {
-                const result: BatchComponentIngredientDto = {
-                    name: ing.ingredient.name,
-                    ratio: toNum(ing.ratio),
-                };
-                if (ing.ingredient.isFlour) {
-                    result.isFlour = true;
-                }
-                if (ing.ingredient.waterContent.gt(0)) {
-                    result.waterContent = ing.ingredient.waterContent.toNumber();
-                }
-                return result;
+                return formatIng(
+                    ing.ingredient.name,
+                    toNum(ing.ratio),
+                    ing.ingredient.isFlour,
+                    ing.ingredient.waterContent.toNumber(),
+                );
             }
             return null;
         };
@@ -738,28 +767,54 @@ export class RecipesService {
                 return { notes: version.notes || '', ingredients: [], products: [] };
             }
 
-            const finalIngredients = mainComponent.ingredients
+            // 使用类型守卫确保数组内部没有 null，从而消除展开及赋值时的 unsafe 警告
+            const preDoughs = mainComponent.ingredients
+                .filter((i) => !!i.linkedPreDough)
                 .map(formatComponentIngredient)
-                .filter((ing): ing is BatchComponentIngredientDto => !!ing);
+                .filter((ing): ing is BatchComponentIngredientDto => ing !== null);
+
+            const others = mainComponent.ingredients
+                .filter((i) => !i.linkedPreDough && (i.ingredient || i.linkedExtra) && i.ratio !== null)
+                .map(formatComponentIngredient)
+                .filter((ing): ing is BatchComponentIngredientDto => ing !== null)
+                // 【修改】：带业务逻辑的智能排序
+                .sort((a, b) => {
+                    if (isFlourSort) {
+                        if (a.isFlour && !b.isFlour) return -1;
+                        if (!a.isFlour && b.isFlour) return 1;
+                    }
+                    return (b.ratio ?? 0) - (a.ratio ?? 0);
+                });
+
+            const finalIngredients: BatchComponentIngredientDto[] = [...preDoughs, ...others];
 
             return {
                 notes: version.notes || '',
-                targetTemp: toNum(mainComponent.targetTemp),
+                // [新增] 判断如果有值则输出，否则默认输出 26
+                targetTemp:
+                    mainComponent.targetTemp !== null && mainComponent.targetTemp !== undefined
+                        ? toNum(mainComponent.targetTemp)
+                        : 26,
                 lossRatio: toNum(mainComponent.lossRatio),
                 divisionLoss: toNum(mainComponent.divisionLoss),
-                procedure: mainComponent.procedure,
+                procedure: filterProcedure(mainComponent.procedure),
                 ingredients: finalIngredients,
                 products: version.products.map((p) => {
                     return {
                         name: p.name,
                         weight: p.baseDoughWeight.toNumber(),
-                        procedure: p.procedure,
+                        procedure: filterProcedure(p.procedure),
                         mixIn: p.ingredients
                             .filter((i) => i.type === 'MIX_IN' && (i.ingredient || i.linkedExtra))
-                            .map((i) => ({
-                                name: i.ingredient?.name || i.linkedExtra!.name,
-                                ratio: toNum(i.ratio),
-                            })),
+                            .map((i) => {
+                                if (i.linkedExtra) return formatIng(i.linkedExtra.name, toNum(i.ratio));
+                                return formatIng(
+                                    i.ingredient!.name,
+                                    toNum(i.ratio),
+                                    i.ingredient!.isFlour,
+                                    i.ingredient!.waterContent.toNumber(),
+                                );
+                            }),
                         fillings: p.ingredients
                             .filter((i) => i.type === 'FILLING' && (i.ingredient || i.linkedExtra))
                             .map((i) => ({
@@ -778,18 +833,30 @@ export class RecipesService {
         } else {
             const component = version.components[0];
             if (!component) {
-                return { notes: version.notes || '', ingredients: [], products: [] };
+                // 移除 products 字段
+                return { notes: version.notes || '', ingredients: [] } as unknown as BatchImportVersionDto;
             }
 
             return {
                 notes: version.notes || '',
                 lossRatio: toNum(component.lossRatio),
-                procedure: component.procedure,
+                customWaterContent:
+                    component.customWaterContent !== null ? toNum(component.customWaterContent) : undefined,
                 ingredients: component.ingredients
+                    .filter((i) => i.ratio !== null)
                     .map(formatComponentIngredient)
-                    .filter((ing): ing is BatchComponentIngredientDto => !!ing),
-                products: [],
-            };
+                    .filter((ing): ing is BatchComponentIngredientDto => ing !== null)
+                    // 【修改】：非主面团（面种或辅料）同样应用这套智能排序
+                    .sort((a, b) => {
+                        if (isFlourSort) {
+                            if (a.isFlour && !b.isFlour) return -1;
+                            if (!a.isFlour && b.isFlour) return 1;
+                        }
+                        return (b.ratio ?? 0) - (a.ratio ?? 0);
+                    }),
+                procedure: filterProcedure(component.procedure),
+                // 彻底移除 products 字段，直接用 unknown 强转骗过 TS 的类型检查，生成完全干净的 JSON 节点
+            } as unknown as BatchImportVersionDto;
         }
     }
 
