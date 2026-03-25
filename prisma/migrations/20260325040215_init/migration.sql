@@ -237,7 +237,7 @@ CREATE TABLE "ProductionTaskItem" (
     "id" TEXT NOT NULL,
     "taskId" TEXT NOT NULL,
     "productId" TEXT NOT NULL,
-    "quantity" INTEGER NOT NULL,
+    "quantity" DECIMAL(65,30) NOT NULL,
 
     CONSTRAINT "ProductionTaskItem_pkey" PRIMARY KEY ("id")
 );
@@ -259,7 +259,7 @@ CREATE TABLE "ProductionTaskSpoilageLog" (
     "productId" TEXT,
     "productName" TEXT NOT NULL,
     "stage" TEXT NOT NULL,
-    "quantity" INTEGER NOT NULL,
+    "quantity" DECIMAL(65,30) NOT NULL,
     "notes" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -272,7 +272,7 @@ CREATE TABLE "ProductionTaskOverproductionLog" (
     "productionLogId" TEXT NOT NULL,
     "productId" TEXT,
     "productName" TEXT NOT NULL,
-    "quantity" INTEGER NOT NULL,
+    "quantity" DECIMAL(65,30) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "ProductionTaskOverproductionLog_pkey" PRIMARY KEY ("id")

@@ -1160,7 +1160,7 @@ export class ProductionTasksService {
                     items: {
                         create: products.map((p) => ({
                             productId: p.productId,
-                            quantity: p.quantity,
+                            quantity: new Prisma.Decimal(p.quantity),
                         })),
                     },
                 },
@@ -1648,10 +1648,19 @@ export class ProductionTasksService {
 
         const sortedRegularTasks = [...inProgressTasks, ...pendingTasks];
 
+        // [核心修复] 将 Prisma 查询出的 Decimal 类型的 quantity 转换为基础 number 类型
+        const formattedRegularTasks = sortedRegularTasks.map((task) => ({
+            ...task,
+            items: task.items.map((item) => ({
+                ...item,
+                quantity: Number(item.quantity),
+            })),
+        }));
+
         const combinedTasks: (
             | (ProductionTask & { items: { product: { name: string }; quantity: number }[] })
             | (Omit<PrepTask, 'items' | 'billOfMaterials'> & { status: 'PREP' })
-        )[] = [...sortedRegularTasks];
+        )[] = [...formattedRegularTasks];
 
         if (prepTaskSummary) {
             combinedTasks.unshift({ ...prepTaskSummary, status: 'PREP' });
@@ -1792,7 +1801,7 @@ export class ProductionTasksService {
                     if (category === RecipeCategory.OTHER) {
                         return itemSum + 1; // 自制原料任务只算1个单位
                     }
-                    return itemSum + item.quantity; // 普通产品任务算具体数量
+                    return itemSum + item.quantity.toNumber(); // [修复] 将 Decimal 转为 number 再相加
                 }, 0)
             );
         }, 0);
@@ -2204,7 +2213,13 @@ export class ProductionTasksService {
         // 任务数据源*始终*是快照
         const taskDataForCalc = task.recipeSnapshot as unknown as TaskWithDetails;
 
-        const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, task.items);
+        // [修复] 将 item.quantity (Decimal) 转换为 _calculateComponentGroups 需要的 number
+        const mappedOriginalItems = task.items.map((item) => ({
+            quantity: item.quantity.toNumber(),
+            product: { id: item.product.id },
+        }));
+
+        const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, mappedOriginalItems);
         const { stockWarning } = await this._calculateStockWarning(tenantId, taskDataForCalc);
 
         return {
@@ -2216,7 +2231,7 @@ export class ProductionTasksService {
             items: task.items.map((item) => ({
                 id: item.product.id,
                 name: item.product.name,
-                plannedQuantity: item.quantity,
+                plannedQuantity: item.quantity.toNumber(), // [修复] 转为 number 返回给 DTO
             })),
         };
     }
@@ -3158,7 +3173,7 @@ export class ProductionTasksService {
                     items: {
                         create: products.map((p) => ({
                             productId: p.productId,
-                            quantity: p.quantity,
+                            quantity: new Prisma.Decimal(p.quantity),
                         })),
                     },
                 },
@@ -3312,7 +3327,8 @@ export class ProductionTasksService {
             }
         }
 
-        const plannedQuantities = new Map(task.items.map((item) => [item.productId, item.quantity]));
+        // [核心修复] 将 quantity 从 Decimal 转为 number 存入 map
+        const plannedQuantities = new Map(task.items.map((item) => [item.productId, item.quantity.toNumber()]));
 
         return this.prisma.$transaction(async (tx) => {
             // 1. 更新任务状态
@@ -3392,7 +3408,7 @@ export class ProductionTasksService {
                                     productId,
                                     productName: productName,
                                     stage: spoilage.stage,
-                                    quantity: spoilage.quantity,
+                                    quantity: new Prisma.Decimal(spoilage.quantity),
                                     notes: spoilage.notes,
                                 },
                             });
@@ -3438,7 +3454,7 @@ export class ProductionTasksService {
                             productionLogId: productionLog.id,
                             productId,
                             productName: productName,
-                            quantity: calculatedOverproduction,
+                            quantity: new Prisma.Decimal(calculatedOverproduction),
                         },
                     });
                 }

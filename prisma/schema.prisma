@@ -406,7 +406,7 @@ model ProductionTaskItem {
   id        String         @id @default(uuid())
   taskId    String
   productId String
-  quantity  Int
+  quantity  Decimal        // [核心修改] 从 Int 改为 Decimal，支持自制原料等带小数的产出/投入量
   task      ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   product   Product        @relation(fields: [productId], references: [id], onDelete: Restrict) // [核心修改] Cascade -> Restrict
 
@@ -440,7 +440,7 @@ model ProductionTaskSpoilageLog {
   productId       String? // [核心修改] 改为可选
   productName     String // [核心新增] 冗余存储产品名称
   stage           String // e.g., 'kneading', 'fermentation', 'baking'
-  quantity        Int
+  quantity        Decimal       // [核心修改] 从 Int 改为 Decimal，支持自制原料的精确报损
   notes           String?
   createdAt       DateTime      @default(now())
   productionLog   ProductionLog @relation(fields: [productionLogId], references: [id], onDelete: Cascade)
@@ -457,7 +457,7 @@ model ProductionTaskOverproductionLog {
   productId       String?
   // [核心修改] 改为可选
   productName     String // [核心新增] 冗余存储产品名称
-  quantity        Int // 超产数量
+  quantity        Decimal       // [核心修改] 从 Int 改为 Decimal，支持自制原料的精确超产
   createdAt       DateTime      @default(now())
   productionLog   ProductionLog @relation(fields: [productionLogId], references: [id], onDelete: Cascade)
   product         Product?      @relation(fields: [productId], references: [id], onDelete: SetNull) // [核心修改] 改为可选，onDelete: SetNull

@@ -50,7 +50,7 @@ export class StatsService {
                 if (item.productId) {
                     const existing = productStatsMap.get(item.productId);
                     const name = item.product?.name || '未知产品';
-                    const count = (existing?.count || 0) + item.quantity;
+                    const count = (existing?.count || 0) + Number(item.quantity);
                     productStatsMap.set(item.productId, { name, count });
                 }
             }
