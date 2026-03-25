@@ -42,9 +42,11 @@ export class ProductionTasksController {
     }
 
     // [新增] 为前置任务详情页创建专属接口
+    // [修改] 增加 taskIds 参数的接收和处理，将前端传来的逗号分隔字符串转换为数组
     @Get('prep-task-details')
-    getPrepTaskDetails(@GetUser() user: UserPayload, @Query('date') date?: string) {
-        return this.productionTasksService.getPrepTaskDetails(user.tenantId, date);
+    getPrepTaskDetails(@GetUser() user: UserPayload, @Query('date') date?: string, @Query('taskIds') taskIds?: string) {
+        const parsedTaskIds = taskIds ? taskIds.split(',') : undefined;
+        return this.productionTasksService.getPrepTaskDetails(user.tenantId, date, parsedTaskIds);
     }
 
     // [核心修正] 必须放在 :id 之前！防止路由冲突导致 404

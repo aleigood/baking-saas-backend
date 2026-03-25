@@ -26,4 +26,5 @@ export interface PrepTask {
     details: string;
     items: CalculatedRecipeDetails[]; // 需要制作的预制件列表
     billOfMaterials?: BillOfMaterialsResponseDto; // 需要采购的原料清单
+    sourceTasks?: { id: string; name: string }[]; // [新增] 用于前端筛选的任务列表
 }

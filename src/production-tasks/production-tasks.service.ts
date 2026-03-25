@@ -1558,12 +1558,7 @@ export class ProductionTasksService {
         };
     }
 
-    async getPrepTaskDetails(tenantId: string, date?: string): Promise<PrepTask | null> {
-        const summary = await this._getPrepTaskSummary(tenantId, date);
-        if (!summary) {
-            return null;
-        }
-
+    async getPrepTaskDetails(tenantId: string, date?: string, taskIds?: string[]): Promise<PrepTask | null> {
         let targetDate: Date;
         if (date) {
             targetDate = new Date(date);
@@ -1579,6 +1574,7 @@ export class ProductionTasksService {
         const endOfDay = new Date(targetDate);
         endOfDay.setHours(23, 59, 59, 999);
 
+        // 获取当天所有相关的任务，用于生成完整的 sourceTasks 列表供前端筛选
         const tasksStartingToday = await this.prisma.productionTask.findMany({
             where: {
                 tenantId,
@@ -1596,7 +1592,15 @@ export class ProductionTasksService {
                 recipeSnapshot: { not: Prisma.JsonNull },
             },
             select: {
+                id: true,
                 recipeSnapshot: true,
+                items: {
+                    include: {
+                        product: {
+                            select: { name: true },
+                        },
+                    },
+                },
             },
         });
 
@@ -1604,7 +1608,31 @@ export class ProductionTasksService {
             return null;
         }
 
-        const snapshotTasks = tasksStartingToday
+        // 构建用于前端筛选的任务列表，提取包含的产品名作为标识
+        const sourceTasks = tasksStartingToday.map((task) => ({
+            id: task.id,
+            name: `任务#${task.id.substring(0, 4)} (${task.items.map((i) => i.product.name).join('、')})`,
+        }));
+
+        // 根据前端传来的 taskIds 进行过滤
+        let filteredTasks = tasksStartingToday;
+        if (taskIds && taskIds.length > 0) {
+            filteredTasks = tasksStartingToday.filter((task) => taskIds.includes(task.id));
+        }
+
+        // 如果过滤后没有任务，返回空数据但保留筛选列表
+        if (filteredTasks.length === 0) {
+            return {
+                id: 'prep-task-combined',
+                title: '前置准备任务',
+                details: '暂无选中的任务数据',
+                items: [],
+                billOfMaterials: { standardItems: [], nonInventoriedItems: [] },
+                sourceTasks,
+            };
+        }
+
+        const snapshotTasks = filteredTasks
             .map((task) => {
                 if (!task.recipeSnapshot) return null;
                 return task.recipeSnapshot as unknown as TaskWithDetails;
@@ -1612,7 +1640,14 @@ export class ProductionTasksService {
             .filter((t): t is TaskWithDetails => t !== null);
 
         if (snapshotTasks.length === 0) {
-            return null;
+            return {
+                id: 'prep-task-combined',
+                title: '前置准备任务',
+                details: '暂无选中的任务数据',
+                items: [],
+                billOfMaterials: { standardItems: [], nonInventoriedItems: [] },
+                sourceTasks,
+            };
         }
 
         const combinedTaskItems: TaskWithDetails = {
@@ -1625,10 +1660,21 @@ export class ProductionTasksService {
             this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks),
         ]);
 
+        const detailsParts: string[] = [];
+        if (billOfMaterials.standardItems.length > 0 || billOfMaterials.nonInventoriedItems.length > 0) {
+            detailsParts.push('备料清单');
+        }
+        if (prepItems.length > 0) {
+            detailsParts.push(`${prepItems.length}种预制件`);
+        }
+
         return {
-            ...summary,
+            id: 'prep-task-combined',
+            title: '前置准备任务',
+            details: detailsParts.length > 0 ? detailsParts.join('，') : '暂无需要提前准备的原料',
             items: prepItems,
             billOfMaterials,
+            sourceTasks, // 返回给前端供筛选使用
         };
     }
 
