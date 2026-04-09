@@ -1094,7 +1094,7 @@ export class ProductionTasksService {
             const mockProductWithDetails = assembledProduct as unknown as ProductWithDetails;
 
             // [核心] 现在这个调用是安全的，`mockProductWithDetails` 是无限深度的
-            const consumptions = this._getFlattenedIngredientsForBOM(mockProductWithDetails);
+            const consumptions = this._getActualMaterialRequirement(mockProductWithDetails);
 
             // 聚合消耗
             for (const [ingredientId, weight] of consumptions.entries()) {
@@ -1949,7 +1949,7 @@ export class ProductionTasksService {
     /**
      * 此方法基于传入的“产品详情”（来自快照或实时）计算BOM
      */
-    private _getFlattenedIngredientsForBOM(product: ProductWithDetails): Map<string, Prisma.Decimal> {
+    private _getActualMaterialRequirement(product: ProductWithDetails): Map<string, Prisma.Decimal> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>();
         if (!product.recipeVersion || product.deletedAt) {
             return flattenedIngredients;
@@ -2089,7 +2089,7 @@ export class ProductionTasksService {
         for (const task of tasks) {
             for (const item of task.items) {
                 if (item.product.deletedAt) continue;
-                const consumptions = this._getFlattenedIngredientsForBOM(item.product);
+                const consumptions = this._getActualMaterialRequirement(item.product);
 
                 for (const [ingredientId, weight] of consumptions.entries()) {
                     const totalRequiredForItem = weight.mul(item.quantity);
@@ -3008,7 +3008,7 @@ export class ProductionTasksService {
         const totalIngredientsMap = new Map<string, { name: string; totalWeight: number }>();
         for (const item of task.items) {
             if (item.product.deletedAt) continue;
-            const consumptions = this._getFlattenedIngredientsForBOM(item.product);
+            const consumptions = this._getActualMaterialRequirement(item.product);
             for (const [ingredientId, weight] of consumptions.entries()) {
                 const totalWeight = weight.mul(item.quantity);
                 const existing = totalIngredientsMap.get(ingredientId);

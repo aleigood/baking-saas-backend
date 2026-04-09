@@ -468,7 +468,7 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
+        const flatIngredients = this._getTheoreticalConsumption(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
 
@@ -698,7 +698,7 @@ export class CostingService {
         }
 
         // flatIngredients 和 pricePerGramMap 包含了*所有*基础原料 (包括馅料的)
-        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
+        const flatIngredients = this._getTheoreticalConsumption(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
 
@@ -1093,7 +1093,7 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
+        const flatIngredients = this._getTheoreticalConsumption(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
 
@@ -1123,7 +1123,7 @@ export class CostingService {
             throw new NotFoundException('产品或其激活的配方版本不存在');
         }
 
-        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
+        const flatIngredients = this._getTheoreticalConsumption(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         const pricePerGramMap = await this._getPricePerGramMap(tenantId, ingredientIds);
         const ingredients = await this.prisma.ingredient.findMany({ where: { id: { in: ingredientIds } } });
@@ -1511,7 +1511,7 @@ export class CostingService {
      * @param product 完整的产品对象 (来自快照或实时查询)
      * @returns Map<ingredientId, theoreticalWeight>
      */
-    private _getFlattenedIngredientsTheoretical(product: FullProduct): Map<string, Prisma.Decimal> {
+    private _getTheoreticalConsumption(product: FullProduct): Map<string, Prisma.Decimal> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>();
         // 从 product 对象中构建原料 map
         const ingredientMap = this._buildIngredientMapFromProduct(product);
@@ -1559,7 +1559,7 @@ export class CostingService {
     }
 
     /**
-     * 提取 _getFlattenedIngredientsTheoretical 中的递归逻辑，使其可复用
+     * 提取 _getTheoreticalConsumption 中的递归逻辑，使其可复用
      */
     private _flattenComponentTheoretical(
         component: FullRecipeVersion['components'][0],
@@ -1700,7 +1700,7 @@ export class CostingService {
             throw new NotFoundException('产品不存在');
         }
 
-        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
+        const flatIngredients = this._getTheoreticalConsumption(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
 
@@ -1741,7 +1741,7 @@ export class CostingService {
     ): ConsumptionDetail[] {
         const product = snapshotProduct as FullProduct;
 
-        const flatIngredients = this._getFlattenedIngredientsTheoretical(product);
+        const flatIngredients = this._getTheoreticalConsumption(product);
         const ingredientIds = Array.from(flatIngredients.keys());
         if (ingredientIds.length === 0) return [];
 
