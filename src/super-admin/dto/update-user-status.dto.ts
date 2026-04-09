@@ -8,5 +8,5 @@ import { UserStatus } from '@prisma/client';
 export class UpdateUserStatusDto {
     @IsEnum(UserStatus)
     @IsNotEmpty()
-    status: UserStatus;
+    status!: UserStatus;
 }

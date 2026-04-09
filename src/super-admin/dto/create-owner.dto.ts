@@ -7,17 +7,17 @@ import { IsString, IsNotEmpty, IsEmail, IsUUID } from 'class-validator';
 export class CreateOwnerDto {
     @IsEmail()
     @IsNotEmpty()
-    email: string;
+    email!: string;
 
     @IsString()
     @IsNotEmpty()
-    password: string;
+    password!: string;
 
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsUUID()
     @IsNotEmpty()
-    tenantId: string;
+    tenantId!: string;
 }

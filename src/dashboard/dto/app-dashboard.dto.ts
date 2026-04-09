@@ -4,7 +4,7 @@
  */
 export class AppDashboardDto {
     totalTenants?: number; // 店铺总数，可选，仅老板可见
-    totalUsers: number; // 人员总数
-    totalRecipes: number; // 配方总数
-    totalTasks: number; // 生产任务总数
+    totalUsers!: number; // 人员总数
+    totalRecipes!: number; // 配方总数
+    totalTasks!: number; // 生产任务总数
 }

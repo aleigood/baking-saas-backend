@@ -11,9 +11,9 @@ export class CreateSkuDto {
 
     @IsString()
     @IsNotEmpty()
-    specName: string;
+    specName!: string;
 
     @IsNumber()
     @IsPositive()
-    specWeightInGrams: number;
+    specWeightInGrams!: number;
 }

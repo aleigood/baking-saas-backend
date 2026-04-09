@@ -18,7 +18,7 @@ import { RecipeCategory, RecipeType } from '@prisma/client';
 export class BatchProductIngredientDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsNumber()
     @IsOptional()
@@ -33,11 +33,11 @@ export class BatchProductIngredientDto {
 export class BatchProductDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsNumber()
     @IsNotEmpty()
-    weight: number;
+    weight!: number;
 
     @IsArray()
     @ValidateNested({ each: true })
@@ -67,7 +67,7 @@ export class BatchProductDto {
 export class BatchComponentIngredientDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsNumber()
     @IsOptional()
@@ -91,7 +91,7 @@ export class BatchComponentIngredientDto {
 export class BatchImportVersionDto {
     @IsString()
     @IsNotEmpty() // [核心修改] notes 必须有，用于版本去重
-    notes: string;
+    notes!: string;
 
     @IsNumber()
     @IsOptional()
@@ -109,7 +109,7 @@ export class BatchImportVersionDto {
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => BatchComponentIngredientDto)
-    ingredients: BatchComponentIngredientDto[];
+    ingredients!: BatchComponentIngredientDto[];
 
     @IsArray()
     @ValidateNested({ each: true })
@@ -127,27 +127,27 @@ export class BatchImportVersionDto {
 export class BatchImportRecipeDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsEnum(RecipeType)
     @IsNotEmpty()
-    type: RecipeType;
+    type!: RecipeType;
 
     @IsEnum(RecipeCategory)
     @IsNotEmpty()
-    category: RecipeCategory;
+    category!: RecipeCategory;
 
     // [核心修改] 嵌套 BatchImportVersionDto 数组
     // 这将修复 'Property 'versions' does not exist' 错误 [cite: 2, 32, 34]
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => BatchImportVersionDto)
-    versions: BatchImportVersionDto[];
+    versions!: BatchImportVersionDto[];
 }
 
 export class BatchImportResultDto {
-    totalCount: number;
-    importedCount: number;
-    skippedCount: number;
-    skippedRecipes: string[];
+    totalCount!: number;
+    importedCount!: number;
+    skippedCount!: number;
+    skippedRecipes!: string[];
 }

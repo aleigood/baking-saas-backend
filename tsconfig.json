@@ -17,11 +17,9 @@
         "forceConsistentCasingInFileNames": true,
         "noImplicitAny": false,
         "strictBindCallApply": false,
-        "noFallthroughCasesInSwitch": false
+        "noFallthroughCasesInSwitch": false,
+        // [决策约束] 显式忽略 TypeScript 6.0 针对 baseUrl 的废弃警告，以兼容现有项目的模块解析策略，避免重构所有绝对路径引入。
+        "ignoreDeprecations": "6.0"
     },
-    "exclude": [
-        "node_modules",
-        "dist",
-        "prisma"
-    ]
+    "exclude": ["node_modules", "dist", "prisma"]
 }

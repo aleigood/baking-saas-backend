@@ -4,7 +4,7 @@ import { TenantStatus } from '@prisma/client';
 export class TenantDataDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsEnum(TenantStatus)
     @IsOptional()

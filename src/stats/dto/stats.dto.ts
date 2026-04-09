@@ -3,9 +3,9 @@ import { IsDateString, IsNotEmpty } from 'class-validator';
 export class StatsDto {
     @IsDateString()
     @IsNotEmpty()
-    startDate: string;
+    startDate!: string;
 
     @IsDateString()
     @IsNotEmpty()
-    endDate: string;
+    endDate!: string;
 }

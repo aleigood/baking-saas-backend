@@ -19,19 +19,19 @@ import { Type } from 'class-transformer';
 class ProductionTaskItemDto {
     @IsUUID()
     @IsNotEmpty()
-    productId: string;
+    productId!: string;
 
     @IsNumber() // [核心修改] 改为 IsNumber
     @Min(0.001)
     @IsNotEmpty()
-    quantity: number;
+    quantity!: number;
 }
 
 // 定义更新任务详情的 DTO
 export class UpdateTaskDetailsDto {
     @IsDateString()
     @IsNotEmpty()
-    startDate: string;
+    startDate!: string;
 
     @IsDateString()
     @IsOptional()
@@ -44,5 +44,5 @@ export class UpdateTaskDetailsDto {
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => ProductionTaskItemDto)
-    products: ProductionTaskItemDto[];
+    products!: ProductionTaskItemDto[];
 }

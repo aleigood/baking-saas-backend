@@ -17,7 +17,7 @@ import { ProductIngredientType, RecipeCategory, RecipeType } from '@prisma/clien
 export class ProductIngredientDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsEnum(ProductIngredientType)
     @IsOptional()
@@ -52,11 +52,11 @@ export class ProductDto {
 
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsNumber()
     @IsNotEmpty()
-    weight: number;
+    weight!: number;
 
     @IsArray()
     @ValidateNested({ each: true })
@@ -86,7 +86,7 @@ export class ProductDto {
 export class ComponentIngredientDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsNumber()
     @IsOptional()
@@ -113,7 +113,7 @@ export class ComponentIngredientDto {
 export class CreateRecipeDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsEnum(RecipeType)
     @IsOptional()
@@ -153,7 +153,7 @@ export class CreateRecipeDto {
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => ComponentIngredientDto)
-    ingredients: ComponentIngredientDto[];
+    ingredients!: ComponentIngredientDto[];
 
     @IsArray()
     @ValidateNested({ each: true })

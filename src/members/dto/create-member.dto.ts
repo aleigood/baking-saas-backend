@@ -4,18 +4,18 @@ import { Role } from '@prisma/client';
 export class CreateMemberDto {
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @IsString()
     @IsNotEmpty()
-    phone: string;
+    phone!: string;
 
     @IsString()
     @IsNotEmpty()
     @MinLength(3, { message: '密码至少需要3个字符' })
-    password: string;
+    password!: string;
 
     @IsEnum(Role)
     @IsNotEmpty()
-    role: Role; // [核心新增] 新增角色字段
+    role!: Role; // [核心新增] 新增角色字段
 }

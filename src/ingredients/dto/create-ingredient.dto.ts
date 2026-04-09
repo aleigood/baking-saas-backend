@@ -7,7 +7,7 @@ export class CreateIngredientDto {
     @ApiProperty({ description: 'The name of the ingredient', example: 'High-gluten Flour' })
     @IsString()
     @IsNotEmpty()
-    name: string;
+    name!: string;
 
     @ApiProperty({
         description: 'The type of the ingredient',

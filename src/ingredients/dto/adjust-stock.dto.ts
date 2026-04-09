@@ -7,7 +7,7 @@ import { IsNumber, IsNotEmpty, IsString, IsOptional, IsPositive } from 'class-va
 export class AdjustStockDto {
     @IsNumber()
     @IsNotEmpty()
-    changeInGrams: number; // 正数代表盘盈增加, 负数代表损耗减少
+    changeInGrams!: number; // 正数代表盘盈增加, 负数代表损耗减少
 
     @IsString()
     @IsOptional()

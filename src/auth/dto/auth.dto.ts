@@ -7,19 +7,19 @@ import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 export class RegisterDto {
     @IsString()
     @IsNotEmpty()
-    name: string; // [新增] 用户姓名
+    name!: string; // [新增] 用户姓名
 
     @IsString()
     @IsNotEmpty()
-    phone: string;
+    phone!: string;
 
     @IsString()
     @IsNotEmpty()
-    password: string;
+    password!: string;
 
     @IsString()
     @IsNotEmpty()
-    tenantName: string;
+    tenantName!: string;
 }
 
 /**
@@ -28,11 +28,11 @@ export class RegisterDto {
 export class AuthDto {
     @IsString()
     @IsNotEmpty()
-    phone: string;
+    phone!: string;
 
     @IsString()
     @IsNotEmpty()
-    password: string;
+    password!: string;
 }
 
 /**
@@ -41,7 +41,7 @@ export class AuthDto {
 export class WechatLoginDto {
     @IsString()
     @IsNotEmpty()
-    code: string;
+    code!: string;
 
     @IsString()
     @IsOptional()
@@ -52,6 +52,6 @@ export class WechatLoginDto {
  * [核心新增] 定义登录成功后返回给客户端的数据结构。
  */
 export class LoginResponseDto {
-    accessToken: string;
+    accessToken!: string;
     redirectTo?: string; // 可选的重定向路径
 }

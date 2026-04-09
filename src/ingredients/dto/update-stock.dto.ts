@@ -8,5 +8,5 @@ export class UpdateStockDto {
     @IsNumber()
     @IsNotEmpty()
     @IsPositive()
-    currentStockInGrams: number;
+    currentStockInGrams!: number;
 }

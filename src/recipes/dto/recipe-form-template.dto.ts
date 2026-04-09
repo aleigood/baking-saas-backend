@@ -48,11 +48,11 @@ export interface ComponentTemplate {
 }
 
 export class RecipeFormTemplateDto {
-    name: string;
-    type: RecipeType;
+    name!: string;
+    type!: RecipeType;
     category?: RecipeCategory;
-    notes: string;
+    notes!: string;
     targetTemp?: number;
-    components: ComponentTemplate[];
+    components!: ComponentTemplate[];
     products?: ProductTemplate[];
 }

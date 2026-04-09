@@ -15,12 +15,12 @@ import { Type } from 'class-transformer';
 class ProductionTaskItemDto {
     @IsUUID()
     @IsNotEmpty()
-    productId: string;
+    productId!: string;
 
     @IsNumber() // [核心修改] 改为 IsNumber 以支持小数 (原料重量)
     @Min(0.001) // [新增] 确保大于0
     @IsNotEmpty()
-    quantity: number;
+    quantity!: number;
 }
 
 /**
@@ -29,7 +29,7 @@ class ProductionTaskItemDto {
 export class CreateProductionTaskDto {
     @IsDateString()
     @IsNotEmpty()
-    startDate: string;
+    startDate!: string;
 
     @IsDateString()
     @IsOptional()
@@ -42,5 +42,5 @@ export class CreateProductionTaskDto {
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => ProductionTaskItemDto)
-    products: ProductionTaskItemDto[];
+    products!: ProductionTaskItemDto[];
 }

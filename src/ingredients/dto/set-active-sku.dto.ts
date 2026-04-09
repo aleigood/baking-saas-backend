@@ -8,5 +8,5 @@ import { IsNotEmpty, IsString } from 'class-validator';
 export class SetActiveSkuDto {
     @IsString()
     @IsNotEmpty()
-    skuId: string;
+    skuId!: string;
 }

@@ -23,19 +23,19 @@ export enum YeastBrand {
 export class QueryFermentationDto {
     @IsEnum(FermentationType)
     @IsNotEmpty()
-    type: FermentationType;
+    type!: FermentationType;
 
     @IsEnum(YeastBrand)
     @IsNotEmpty()
-    brand: YeastBrand;
+    brand!: YeastBrand;
 
     @IsNumber()
     @IsNotEmpty()
     @Type(() => Number)
-    temperatureC: number; // [核心修改] 将 temperatureF 改为 temperatureC，接收摄氏度
+    temperatureC!: number; // [核心修改] 将 temperatureF 改为 temperatureC，接收摄氏度
 
     @IsNumber()
     @IsNotEmpty()
     @Type(() => Number)
-    time: number; // 时间 (小时)
+    time!: number; // 时间 (小时)
 }

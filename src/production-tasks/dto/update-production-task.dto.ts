@@ -7,5 +7,5 @@ import { ProductionTaskStatus } from '@prisma/client';
 export class UpdateProductionTaskDto {
     @IsEnum(ProductionTaskStatus)
     @IsNotEmpty()
-    status: ProductionTaskStatus;
+    status!: ProductionTaskStatus;
 }
