@@ -3317,13 +3317,16 @@ export class ProductionTasksService {
 
         const { notes, completedItems } = completeDto;
 
+        // [解释决策和约束] 提前声明 plannedQuantities，供下方锁定总投入上限使用，同时供后续事务中的报损和超产计算使用。
+        const plannedQuantities = new Map(task.items.map((item) => [item.productId, item.quantity.toNumber()]));
+
         const totalInputNeeded = new Map<string, { name: string; totalConsumed: number }>();
         for (const item of completedItems) {
-            // [核心] 计算本次任务执行的总投入原料量 (Plans)
-            // 不管成功还是失败，只要投入生产，就应该按配方（含损耗）计算投入量
-            const totalQuantity =
-                item.completedQuantity + (item.spoilageDetails?.reduce((s, d) => s + d.quantity, 0) || 0);
-            if (totalQuantity > 0) {
+            // [解释决策和约束] 将计算总投入消耗的基准从“实际完成数量(含超产)”强制锁定为“计划生产数量”。
+            // 超产是对工艺损耗空间的极限利用，后厨并没有多领料。若按超产数量扣减，会导致库存盘亏。
+            const plannedQuantity = plannedQuantities.get(item.productId) || 0;
+
+            if (plannedQuantity > 0) {
                 const snapshotProduct = snapshotProductMap.get(item.productId);
                 if (!snapshotProduct) {
                     throw new BadRequestException(`快照中未找到产品ID ${item.productId}。`);
@@ -3332,7 +3335,7 @@ export class ProductionTasksService {
                 // calculateProductConsumptionsFromSnapshot 计算的是“含损耗”的总投入量
                 const consumptions = this.costingService.calculateProductConsumptionsFromSnapshot(
                     snapshotProduct,
-                    totalQuantity,
+                    plannedQuantity,
                 );
                 for (const cons of consumptions) {
                     const existing = totalInputNeeded.get(cons.ingredientId);
@@ -3372,9 +3375,6 @@ export class ProductionTasksService {
                 throw new BadRequestException(`操作失败：原料库存不足 (${insufficientIngredients.join(', ')})`);
             }
         }
-
-        // [核心修复] 将 quantity 从 Decimal 转为 number 存入 map
-        const plannedQuantities = new Map(task.items.map((item) => [item.productId, item.quantity.toNumber()]));
 
         return this.prisma.$transaction(async (tx) => {
             // 1. 更新任务状态
@@ -3551,17 +3551,20 @@ export class ProductionTasksService {
                 const outputIngredient = familyWithOutput?.outputIngredient;
 
                 if (outputIngredient) {
-                    // 计算总产出量 (假设所有产品的 quantity 都是重量，单位 g)
-                    // 对于自制原料任务，我们在 create 时会将 Product 的 weight 设为 1，quantity 设为总克重
-                    // 或者 quantity 为份数，product.weight 为每份重量
-                    // 无论哪种，总产出 = sum(completedQuantity * product.baseDoughWeight)
                     let totalProducedWeight = new Prisma.Decimal(0);
                     for (const item of completedItems) {
                         const product = snapshotProductMap.get(item.productId);
                         if (product) {
-                            totalProducedWeight = totalProducedWeight.add(
-                                new Prisma.Decimal(item.completedQuantity).mul(product.baseDoughWeight),
-                            );
+                            // [解释决策和约束] 优先读取前端填写的 actualYieldInGrams 以覆盖熬制蒸发等物理损耗，确保入库库存是精准的物理重量。只有在未填写时才回退使用配方理论重量。
+                            if (item.actualYieldInGrams !== undefined && item.actualYieldInGrams !== null) {
+                                totalProducedWeight = totalProducedWeight.add(
+                                    new Prisma.Decimal(item.actualYieldInGrams),
+                                );
+                            } else {
+                                totalProducedWeight = totalProducedWeight.add(
+                                    new Prisma.Decimal(item.completedQuantity).mul(product.baseDoughWeight),
+                                );
+                            }
                         }
                     }
 

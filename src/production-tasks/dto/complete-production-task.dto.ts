@@ -1,14 +1,5 @@
 import { Type } from 'class-transformer';
-import {
-    IsArray,
-    IsNotEmpty,
-    IsOptional,
-    IsString,
-    IsUUID,
-    ValidateNested,
-    Min,
-    IsNumber, // [修改]
-} from 'class-validator';
+import { IsArray, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateNested, Min, IsNumber } from 'class-validator';
 
 /**
  * [核心新增] 用于定义每个损耗项的详细信息
@@ -16,11 +7,11 @@ import {
 class SpoilageDetailDto {
     @IsString()
     @IsNotEmpty()
-    stage: string;
+    stage!: string;
 
     @IsNumber() // [核心修改] 支持小数损耗 (克重)
     @Min(0)
-    quantity: number;
+    quantity!: number;
 
     @IsString()
     @IsOptional()
@@ -33,18 +24,24 @@ class SpoilageDetailDto {
 class CompletedTaskItemDto {
     @IsUUID()
     @IsNotEmpty()
-    productId: string;
+    productId!: string;
 
     @IsNumber() // [核心修改] 支持小数产出 (克重)
     @Min(0)
     @IsNotEmpty()
-    completedQuantity: number;
+    completedQuantity!: number;
 
     @IsArray()
     @IsOptional()
     @ValidateNested({ each: true })
     @Type(() => SpoilageDetailDto)
     spoilageDetails?: SpoilageDetailDto[];
+
+    // 在表示完成单项的 DTO 中新增：
+    // 实际产出克重，主要用于自制原料（面种/馅料）入库，以修正蒸发损耗
+    @IsOptional()
+    @IsNumber()
+    actualYieldInGrams?: number;
 }
 
 /**
@@ -58,5 +55,5 @@ export class CompleteProductionTaskDto {
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => CompletedTaskItemDto)
-    completedItems: CompletedTaskItemDto[];
+    completedItems!: CompletedTaskItemDto[];
 }
