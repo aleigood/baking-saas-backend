@@ -129,7 +129,7 @@ export class AuthService {
     }
 
     loginByWechat(wechatLoginDto: WechatLoginDto): Promise<{ accessToken: string }> {
-        console.log(wechatLoginDto); // 临时使用一下参数避免lint错误
+        void wechatLoginDto;
         throw new NotImplementedException(
             '微信登录功能需要数据库模型支持 wechatOpenId 字段，并需实现code换取openid的后端逻辑。',
         );

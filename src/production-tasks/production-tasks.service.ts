@@ -288,7 +288,7 @@ const recipeVersionRecursiveBatchInclude = {
             name: true,
             type: true,
             category: true,
-            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } },
+            outputIngredient: { select: { id: true, shelfLife: true } },
         },
     },
     // 包含完整的 components 和 ingredients (这是快照的核心数据)
@@ -305,7 +305,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } },
+                            outputIngredient: { select: { id: true, shelfLife: true } },
                             versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
                         },
                     },
@@ -316,7 +316,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } },
+                            outputIngredient: { select: { id: true, shelfLife: true } },
                             versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
                         },
                     },
@@ -339,7 +339,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            outputIngredient: { select: { id: true, currentStockInGrams: true, shelfLife: true } },
+                            outputIngredient: { select: { id: true, shelfLife: true } },
                             versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
                         },
                     },
@@ -395,7 +395,7 @@ type ComponentWithIngredients = ProductWithDetails['recipeVersion']['components'
 type ComponentWithRecursiveIngredients = ProductWithDetails['recipeVersion']['components'][0];
 
 type PrepItemFamily = RecipeFamily & {
-    outputIngredient?: { id: string; currentStockInGrams: Prisma.Decimal } | null;
+    outputIngredient?: { id: string } | null;
 };
 type RequiredPrepItem = { family: PrepItemFamily; totalWeight: Prisma.Decimal };
 
@@ -405,7 +405,7 @@ type SnapshotRecipeFamilyStub = {
     name: string;
     type: RecipeType;
     category: RecipeCategory;
-    outputIngredient?: { id: string; currentStockInGrams: string | number } | null;
+    outputIngredient?: { id: string } | null;
     versions: {
         id: string;
         notes: string | null;
@@ -417,7 +417,7 @@ type SnapshotRecipeFamilyStub = {
                 ingredient: { id: string; isFlour: boolean } | null;
                 linkedPreDough: {
                     id: string; // family.id
-                    outputIngredient?: { id: string; currentStockInGrams: string | number } | null;
+                    outputIngredient?: { id: string } | null;
                     versions: {
                         id: string; // version.id
                         components: {
@@ -439,7 +439,7 @@ type SnapshotRecipeFamilyStub = {
                 } | null;
                 linkedExtra: {
                     id: string; // family.id
-                    outputIngredient?: { id: string; currentStockInGrams: string | number } | null;
+                    outputIngredient?: { id: string } | null;
                     versions: {
                         id: string; // version.id
                         components: {
@@ -481,7 +481,6 @@ interface RenderTaskItem {
     name: string;
     totalWeight: number;
     targetWeight?: number;
-    stockWeight?: number; // [核心修复] 必须显式定义此字段，修复 TS2339 和 TS2353 错误
     ingredients: {
         name: string;
         isRecipe: boolean;
@@ -795,6 +794,13 @@ export class ProductionTasksService {
         });
     }
 
+    private _formatWeight(grams: number | null | undefined): string {
+        if (grams === null || grams === undefined || Number.isNaN(Number(grams))) return '0.00g';
+        const value = Number(grams);
+        if (Math.abs(value) >= 10000) return `${(value / 1000).toFixed(2)}kg`;
+        return `${value.toFixed(2)}g`;
+    }
+
     private _sanitizeTask(task: TaskWithDetails) {
         return {
             ...task,
@@ -822,12 +828,6 @@ export class ProductionTasksService {
                                     ? {
                                           ...ing.ingredient,
                                           waterContent: new Prisma.Decimal(ing.ingredient.waterContent).toNumber(),
-                                          currentStockInGrams: new Prisma.Decimal(
-                                              ing.ingredient.currentStockInGrams,
-                                          ).toNumber(),
-                                          currentStockValue: new Prisma.Decimal(
-                                              ing.ingredient.currentStockValue,
-                                          ).toNumber(),
                                       }
                                     : null,
                             })),
@@ -930,7 +930,6 @@ export class ProductionTasksService {
             throw new BadRequestException('一次生产任务只能包含同一品类的产品。');
         }
 
-        // 库存检查
         // 获取所有产品“外壳”，用于收集 L1 和 L2 ID
         const productShells = await this.prisma.product.findMany({
             where: { id: { in: productIds }, deletedAt: null },
@@ -1125,30 +1124,6 @@ export class ProductionTasksService {
             }
         }
 
-        // [核心] 后续逻辑保持不变
-        const finalConsumptions = Array.from(allConsumptions.values());
-        let stockWarning: string | null = null;
-        if (finalConsumptions.length > 0) {
-            // ... (库存检查逻辑)
-            const ingredientIds = finalConsumptions.map((c) => c.ingredientId);
-            const ingredients = await this.prisma.ingredient.findMany({
-                where: { id: { in: ingredientIds } },
-                select: { id: true, name: true, currentStockInGrams: true, type: true },
-            });
-            const ingredientsToCheck = ingredients.filter((ing) => ing.type === IngredientType.STANDARD);
-            const ingredientStockMap = new Map(ingredientsToCheck.map((i) => [i.id, i]));
-            const insufficientIngredients: string[] = [];
-            for (const consumption of finalConsumptions) {
-                const ingredient = ingredientStockMap.get(consumption.ingredientId);
-                if (ingredient && new Prisma.Decimal(ingredient.currentStockInGrams).lt(consumption.totalConsumed)) {
-                    insufficientIngredients.push(ingredient.name);
-                }
-            }
-            if (insufficientIngredients.length > 0) {
-                stockWarning = `库存不足: ${insufficientIngredients.join(', ')}`;
-            }
-        }
-
         const createdTask = await this.prisma.$transaction(async (tx) => {
             const task = await tx.productionTask.create({
                 data: {
@@ -1182,7 +1157,7 @@ export class ProductionTasksService {
         });
 
         // _sanitizeTask 现在接收的是我们组装好的对象
-        return { task: this._sanitizeTask(createdTask), warning: stockWarning };
+        return { task: this._sanitizeTask(createdTask), warning: null };
     }
 
     /**
@@ -1373,22 +1348,9 @@ export class ProductionTasksService {
 
         const prepTaskItems: CalculatedRecipeDetails[] = [];
         for (const [, data] of requiredPrepItems.entries()) {
-            // [核心新增] 计算剩余需求量：总需求 - 当前库存
-            let remainingNeed = data.totalWeight;
-            if (data.family.outputIngredient) {
-                const currentStock = new Prisma.Decimal(data.family.outputIngredient.currentStockInGrams);
-                remainingNeed = data.totalWeight.sub(currentStock);
-            }
-
-            // 如果库存充足，不再添加到待制作列表
-            if (remainingNeed.lte(0)) {
-                continue;
-            }
-
-            // 使用剩余需求量计算BOM
             const details = this.costingService.getCalculatedRecipeDetailsFromSnapshot(
                 data.family,
-                remainingNeed.toNumber(),
+                data.totalWeight.toNumber(),
             );
 
             const recipeFamily = data.family as unknown as SnapshotRecipeFamilyStub;
@@ -1461,13 +1423,6 @@ export class ProductionTasksService {
                     }));
                 }
             }
-            let stockUsed = 0;
-            if (data.family.outputIngredient) {
-                const stock = new Prisma.Decimal(data.family.outputIngredient.currentStockInGrams).toNumber();
-                stockUsed = stock > 0 ? stock : 0;
-            }
-
-            (details as CalculatedRecipeDetails & { stockWeight: number }).stockWeight = stockUsed;
             prepTaskItems.push(details);
         }
 
@@ -2112,7 +2067,6 @@ export class ProductionTasksService {
                 id: true,
                 name: true,
                 type: true,
-                currentStockInGrams: true,
                 activeSku: {
                     select: {
                         brand: true,
@@ -2131,13 +2085,10 @@ export class ProductionTasksService {
             const brand = ingredient.activeSku?.brand || null;
 
             if (ingredient.type === IngredientType.STANDARD) {
-                const currentStock = ingredient.currentStockInGrams.toNumber();
-
                 standardItems.push({
                     ingredientId: ingredient.id,
                     ingredientName: ingredient.name,
                     brand,
-                    currentStock,
                     totalRequired: required,
                 });
             } else if (ingredient.type === IngredientType.NON_INVENTORIED) {
@@ -2266,13 +2217,11 @@ export class ProductionTasksService {
         }));
 
         const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, mappedOriginalItems);
-        const { stockWarning } = await this._calculateStockWarning(tenantId, taskDataForCalc);
 
         return {
             id: task.id,
             status: task.status,
             notes: task.notes,
-            stockWarning,
             componentGroups,
             items: task.items.map((item) => ({
                 id: item.product.id,
@@ -2693,6 +2642,9 @@ export class ProductionTasksService {
                     .map((i: TaskItemWithDetails) => {
                         const originalItem = originalItemsMap.get(i.productId);
                         const quantity = originalItem?.quantity ?? 0;
+                        if (data.category === 'OTHER') {
+                            return `${i.product.name} ${this._formatWeight(quantity)}`;
+                        }
                         return `${i.product.name} x${quantity}`;
                     })
                     .join(', '),
@@ -3001,55 +2953,6 @@ export class ProductionTasksService {
         return adjustedDoughWeight.div(totalRatio);
     }
 
-    /**
-     * 此方法现在基于“快照”计算需求，但对比“实时”库存
-     */
-    private async _calculateStockWarning(tenantId: string, task: TaskWithDetails) {
-        const totalIngredientsMap = new Map<string, { name: string; totalWeight: number }>();
-        for (const item of task.items) {
-            if (item.product.deletedAt) continue;
-            const consumptions = this._getActualMaterialRequirement(item.product);
-            for (const [ingredientId, weight] of consumptions.entries()) {
-                const totalWeight = weight.mul(item.quantity);
-                const existing = totalIngredientsMap.get(ingredientId);
-                const ingInfo = this._findIngredientInSnapshot(task, ingredientId);
-
-                if (existing) {
-                    existing.totalWeight += totalWeight.toNumber();
-                } else {
-                    totalIngredientsMap.set(ingredientId, {
-                        name: ingInfo?.name || '未知原料',
-                        totalWeight: totalWeight.toNumber(),
-                    });
-                }
-            }
-        }
-
-        let stockWarning: string | null = null;
-        const ingredientIds = Array.from(totalIngredientsMap.keys());
-        if (ingredientIds.length > 0) {
-            const ingredients = await this.prisma.ingredient.findMany({
-                where: { id: { in: ingredientIds } },
-                select: { id: true, name: true, currentStockInGrams: true, type: true },
-            });
-            const ingredientsToCheck = ingredients.filter((ing) => ing.type === IngredientType.STANDARD);
-            const ingredientStockMap = new Map(ingredientsToCheck.map((i) => [i.id, i]));
-            const insufficientIngredients: string[] = [];
-
-            for (const [ingredientId, data] of totalIngredientsMap.entries()) {
-                const ingredient = ingredientStockMap.get(ingredientId);
-                if (ingredient && new Prisma.Decimal(ingredient.currentStockInGrams).lt(data.totalWeight)) {
-                    insufficientIngredients.push(data.name);
-                }
-            }
-
-            if (insufficientIngredients.length > 0) {
-                stockWarning = `库存不足: ${insufficientIngredients.join(', ')}`;
-            }
-        }
-        return { stockWarning };
-    }
-
     // 辅助函数：从复杂的快照对象中查找原料信息
     private _findIngredientInSnapshot(task: TaskWithDetails, ingredientId: string): Ingredient | null {
         for (const item of task.items) {
@@ -3285,7 +3188,7 @@ export class ProductionTasksService {
         });
     }
 
-    async complete(tenantId: string, userId: string, id: string, completeDto: CompleteProductionTaskDto) {
+    async complete(tenantId: string, id: string, completeDto: CompleteProductionTaskDto) {
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
             select: {
@@ -3323,7 +3226,7 @@ export class ProductionTasksService {
         const totalInputNeeded = new Map<string, { name: string; totalConsumed: number }>();
         for (const item of completedItems) {
             // [解释决策和约束] 将计算总投入消耗的基准从“实际完成数量(含超产)”强制锁定为“计划生产数量”。
-            // 超产是对工艺损耗空间的极限利用，后厨并没有多领料。若按超产数量扣减，会导致库存盘亏。
+            // 超产是对工艺损耗空间的极限利用，后厨并没有多领料。
             const plannedQuantity = plannedQuantities.get(item.productId) || 0;
 
             if (plannedQuantity > 0) {
@@ -3351,31 +3254,6 @@ export class ProductionTasksService {
             }
         }
 
-        const neededIngredientIds = Array.from(totalInputNeeded.keys());
-        if (neededIngredientIds.length > 0) {
-            // 库存检查 (仅检查 STANDARD)
-            const ingredientsInStock = await this.prisma.ingredient.findMany({
-                where: { id: { in: neededIngredientIds }, type: IngredientType.STANDARD },
-                select: { id: true, name: true, currentStockInGrams: true },
-            });
-
-            const insufficientIngredients: string[] = [];
-
-            for (const ingredient of ingredientsInStock) {
-                const needed = totalInputNeeded.get(ingredient.id);
-                if (!needed) continue;
-
-                const currentStock = new Prisma.Decimal(ingredient.currentStockInGrams);
-                if (currentStock.lt(needed.totalConsumed)) {
-                    insufficientIngredients.push(ingredient.name);
-                }
-            }
-
-            if (insufficientIngredients.length > 0) {
-                throw new BadRequestException(`操作失败：原料库存不足 (${insufficientIngredients.join(', ')})`);
-            }
-        }
-
         return this.prisma.$transaction(async (tx) => {
             // 1. 更新任务状态
             await tx.productionTask.update({
@@ -3394,7 +3272,6 @@ export class ProductionTasksService {
             // 累计变量，用于计算工艺损耗和总成本
             const totalTheoreticalConsumption = new Map<string, Prisma.Decimal>(); // 成功品消耗
             const totalSpoiledConsumption = new Map<string, Prisma.Decimal>(); // 报损品消耗
-            let totalTaskCost = new Prisma.Decimal(0); // 累计本任务消耗的总成本
 
             // 3. 处理每个产品的提交结果
             for (const completedItem of completedItems) {
@@ -3430,14 +3307,6 @@ export class ProductionTasksService {
                                 quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
                             },
                         });
-
-                        // 扣减库存 (Step 1b)
-                        const costReduced = await this._deductStockAndCalculateCost(
-                            tx,
-                            cons.ingredientId,
-                            new Prisma.Decimal(cons.totalConsumed),
-                        );
-                        totalTaskCost = totalTaskCost.add(costReduced);
                     }
                 }
 
@@ -3472,23 +3341,14 @@ export class ProductionTasksService {
                         const current = totalSpoiledConsumption.get(cons.ingredientId) || new Prisma.Decimal(0);
                         totalSpoiledConsumption.set(cons.ingredientId, current.add(cons.totalConsumed));
 
-                        // 记录库存调整 (Step 2a)
-                        await tx.ingredientStockAdjustment.create({
+                        await tx.ingredientConsumptionLog.create({
                             data: {
+                                productionLogId: productionLog.id,
                                 ingredientId: cons.ingredientId,
-                                userId: userId,
-                                changeInGrams: new Prisma.Decimal(-cons.totalConsumed),
-                                reason: `生产报损: ${productName}`,
+                                skuId: cons.activeSkuId,
+                                quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
                             },
                         });
-
-                        // 扣减库存 (Step 2b)
-                        const costReduced = await this._deductStockAndCalculateCost(
-                            tx,
-                            cons.ingredientId,
-                            new Prisma.Decimal(cons.totalConsumed),
-                        );
-                        totalTaskCost = totalTaskCost.add(costReduced);
                     }
                 }
 
@@ -3515,125 +3375,18 @@ export class ProductionTasksService {
                 const processLoss = new Prisma.Decimal(inputData.totalConsumed).sub(theoretical).sub(spoiled);
 
                 if (processLoss.gt(0.01)) {
-                    // 记录库存调整 (Step 3a)
-                    await tx.ingredientStockAdjustment.create({
+                    await tx.ingredientConsumptionLog.create({
                         data: {
+                            productionLogId: productionLog.id,
                             ingredientId: ingId,
-                            userId: userId,
-                            changeInGrams: processLoss.negated(), // 负数表示减少
-                            reason: `工艺损耗: 任务 #${task.id.substring(0, 8)}`,
+                            quantityInGrams: processLoss,
                         },
                     });
-
-                    // 扣减库存 (Step 3b)
-                    const costReduced = await this._deductStockAndCalculateCost(tx, ingId, processLoss);
-                    totalTaskCost = totalTaskCost.add(costReduced);
-                }
-            }
-
-            // --- 步骤四：【自制原料入库】 ---
-            // 检查任务的第一个产品是否属于 PRE_DOUGH 或 EXTRA 配方
-            const firstProduct = snapshot.items[0]?.product;
-            const recipeFamily = firstProduct?.recipeVersion.family;
-
-            if (
-                recipeFamily &&
-                (recipeFamily.type === RecipeType.PRE_DOUGH || recipeFamily.type === RecipeType.EXTRA)
-            ) {
-                // 查找该配方关联的 Output Ingredient
-                // 注意：snapshot 中可能没有 outputIngredient 字段 (因为是旧快照)
-                // 所以我们实时查询一次
-                const familyWithOutput = await tx.recipeFamily.findUnique({
-                    where: { id: recipeFamily.id },
-                    include: { outputIngredient: true },
-                });
-
-                const outputIngredient = familyWithOutput?.outputIngredient;
-
-                if (outputIngredient) {
-                    let totalProducedWeight = new Prisma.Decimal(0);
-                    for (const item of completedItems) {
-                        const product = snapshotProductMap.get(item.productId);
-                        if (product) {
-                            // [解释决策和约束] 优先读取前端填写的 actualYieldInGrams 以覆盖熬制蒸发等物理损耗，确保入库库存是精准的物理重量。只有在未填写时才回退使用配方理论重量。
-                            if (item.actualYieldInGrams !== undefined && item.actualYieldInGrams !== null) {
-                                totalProducedWeight = totalProducedWeight.add(
-                                    new Prisma.Decimal(item.actualYieldInGrams),
-                                );
-                            } else {
-                                totalProducedWeight = totalProducedWeight.add(
-                                    new Prisma.Decimal(item.completedQuantity).mul(product.baseDoughWeight),
-                                );
-                            }
-                        }
-                    }
-
-                    if (totalProducedWeight.gt(0)) {
-                        // 更新库存和成本
-                        // 新库存 = 旧库存 + 产出
-                        // 新总价值 = 旧总价值 + 本次任务总成本
-                        await tx.ingredient.update({
-                            where: { id: outputIngredient.id },
-                            data: {
-                                currentStockInGrams: { increment: totalProducedWeight },
-                                currentStockValue: { increment: totalTaskCost },
-                            },
-                        });
-
-                        // 记录入库流水 (可选，复用 ADJUSTMENT 或新增 PRODUCTION_IN)
-                        await tx.ingredientStockAdjustment.create({
-                            data: {
-                                ingredientId: outputIngredient.id,
-                                userId: userId,
-                                changeInGrams: totalProducedWeight,
-                                reason: `生产入库: 任务 #${task.id.substring(0, 8)}`,
-                            },
-                        });
-                    }
                 }
             }
 
             return this.findOne(tenantId, id, {});
         });
-    }
-
-    // 辅助函数：扣减库存并返回扣减的成本价值
-    private async _deductStockAndCalculateCost(
-        tx: Prisma.TransactionClient,
-        ingredientId: string,
-        amount: Prisma.Decimal,
-    ): Promise<Prisma.Decimal> {
-        const ingredient = await tx.ingredient.findUnique({ where: { id: ingredientId } });
-        if (!ingredient) return new Prisma.Decimal(0);
-
-        let valueToDecrement = new Prisma.Decimal(0);
-
-        // 如果是 STANDARD 或 SELF_MADE，需要计算成本
-        if (
-            ingredient.type === IngredientType.STANDARD ||
-            ingredient.type === IngredientType.SELF_MADE ||
-            ingredient.type === IngredientType.NON_INVENTORIED
-        ) {
-            // 计算加权平均成本
-            if (ingredient.currentStockInGrams.gt(0)) {
-                const avgPricePerGram = ingredient.currentStockValue.div(ingredient.currentStockInGrams);
-                valueToDecrement = avgPricePerGram.mul(amount);
-            } else {
-                // 如果库存 <= 0，无法准确计算成本，暂按 0 处理或使用上次采购价 (这里简化为 0)
-                valueToDecrement = new Prisma.Decimal(0);
-            }
-        }
-
-        // 执行扣减
-        await tx.ingredient.update({
-            where: { id: ingredientId },
-            data: {
-                currentStockInGrams: { decrement: amount },
-                currentStockValue: { decrement: valueToDecrement },
-            },
-        });
-
-        return valueToDecrement;
     }
 
     // [新增] PDF 生成核心逻辑
@@ -3695,14 +3448,6 @@ export class ProductionTasksService {
         };
         content.push(infoTable);
         content.push({ text: '\n' });
-
-        if (taskDetail.stockWarning) {
-            content.push({
-                text: `[警] ${taskDetail.stockWarning}`,
-                style: 'warningBox',
-                margin: [0, 0, 0, 10],
-            });
-        }
 
         // --- 循环配方组 ---
         taskDetail.componentGroups.forEach((group, index) => {
@@ -4055,7 +3800,6 @@ export class ProductionTasksService {
                 bomBody.push([
                     { text: '原料名称', style: 'tableHeader' },
                     { text: '品牌', style: 'tableHeader' },
-                    { text: '库存', style: 'tableHeader', alignment: 'right' },
                     { text: '总需求量', style: 'tableHeader', alignment: 'right' },
                 ]);
 
@@ -4064,7 +3808,6 @@ export class ProductionTasksService {
                     bomBody.push([
                         { text: item.ingredientName, style: 'text' },
                         { text: item.brand || '-', style: 'smallText' },
-                        { text: formatWeight(item.currentStock), style: 'smallText', alignment: 'right' },
                         { text: formatWeight(item.totalRequired), style: 'weightNumber', alignment: 'right' },
                     ]);
                 });
@@ -4074,7 +3817,6 @@ export class ProductionTasksService {
                     bomBody.push([
                         { text: item.ingredientName, style: 'text' },
                         { text: item.brand || '-', style: 'smallText' },
-                        { text: '即时采购', style: 'smallText', alignment: 'right', color: '#d4a373' },
                         { text: formatWeight(item.totalRequired), style: 'weightNumber', alignment: 'right' },
                     ]);
                 });
@@ -4083,7 +3825,7 @@ export class ProductionTasksService {
                     table: {
                         headerRows: 1,
                         keepWithHeaderRows: 1,
-                        widths: ['35%', '25%', '20%', '20%'],
+                        widths: ['45%', '30%', '25%'],
                         body: bomBody,
                         dontBreakRows: true,
                     },
@@ -4146,10 +3888,9 @@ export class ProductionTasksService {
                 });
 
                 // 3. 汇总信息栏 (靠右对齐)
-                const stock = item.stockWeight || 0;
                 const total = item.totalWeight;
                 const target = item.targetWeight;
-                const totalNeed = (target || total) + stock;
+                const totalNeed = target || total;
 
                 const createSummaryItem = (label: string, value: string, valueStyle = 'summaryValue') => ({
                     stack: [
@@ -4166,7 +3907,6 @@ export class ProductionTasksService {
                 summaryColumns.push({ text: '', width: '*' });
 
                 summaryColumns.push(createSummaryItem('需求总量', formatWeight(totalNeed)));
-                summaryColumns.push(createSummaryItem('库存抵扣', formatWeight(stock)));
 
                 if (target != null) {
                     summaryColumns.push(createSummaryItem('目标产出', formatWeight(target), 'highlightValue'));
@@ -4196,17 +3936,11 @@ export class ProductionTasksService {
         };
 
         if (prepTask.items && prepTask.items.length > 0) {
-            // [核心修复] 使用交叉类型断言代替 'as any'，修复 unsafe-member-access 错误
             const mapToRenderItem = (item: CalculatedRecipeDetails): RenderTaskItem => {
-                // 安全地断言 item 包含 stockWeight 属性
-                const itemWithStock = item as CalculatedRecipeDetails & { stockWeight?: number };
-
                 return {
                     name: item.name,
                     totalWeight: item.totalWeight,
                     targetWeight: item.targetWeight,
-                    // [核心修复] 安全访问
-                    stockWeight: itemWithStock.stockWeight || 0,
                     ingredients: item.ingredients.map((ing) => ({
                         name: ing.name,
                         isRecipe: ing.isRecipe,

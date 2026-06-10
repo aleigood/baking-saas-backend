@@ -1,4 +1,4 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { CostingService } from './costing.service';
 // [FIX] 修复守卫的使用方式，与项目中其他控制器（如 members.controller.ts）保持一致
 import { AuthGuard } from '@nestjs/passport';
@@ -74,7 +74,11 @@ export class CostingController {
      * @returns 用量历史数据点数组
      */
     @Get('ingredients/:ingredientId/usage-history')
-    async getIngredientUsageHistory(@GetUser() user: UserPayload, @Param('ingredientId') ingredientId: string) {
-        return this.costingService.getIngredientUsageHistory(user.tenantId, ingredientId);
+    async getIngredientUsageHistory(
+        @GetUser() user: UserPayload,
+        @Param('ingredientId') ingredientId: string,
+        @Query('period') period: 'day' | 'month' = 'day',
+    ) {
+        return this.costingService.getIngredientUsageHistory(user.tenantId, ingredientId, period);
     }
 }

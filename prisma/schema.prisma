@@ -61,9 +61,9 @@ enum ProductionTaskStatus {
 }
 
 enum IngredientType {
-  STANDARD // 标准原料，需要追踪库存和成本
+  STANDARD // 标准原料，计入成本
   UNTRACKED // 非追踪原料，如水、盐等低价值或难计量的
-  NON_INVENTORIED // 免盘点原料，需要计算成本但不追踪库存，如生鲜类原料
+  NON_INVENTORIED // 即时采购原料，计入成本但不做数量追踪，如生鲜类原料
   SELF_MADE // [新增] 自制原料，由 PRE_DOUGH 或 EXTRA 配方生产
 }
 
@@ -107,9 +107,7 @@ model User {
   createdAt          DateTime                    @default(now())
   updatedAt          DateTime                    @updatedAt
   tenants            TenantUser[] // User can belong to multiple tenants
-  stockAdjustments   IngredientStockAdjustment[]
-  // [核心新增] 新增与采购记录的关联
-  procurementRecords ProcurementRecord[]
+  priceRecords       PriceRecord[]
   createdTasks       ProductionTask[] // [核心新增] 关联到该用户创建的生产任务
 }
 
@@ -292,7 +290,7 @@ model ProductIngredient {
 }
 
 // ================================================================= //
-//                  INGREDIENTS & STOCK                      //
+//                  INGREDIENTS & PRICING                    //
 // ================================================================= //
 
 // 原料品类模型
@@ -304,8 +302,6 @@ model Ingredient {
   isFlour             Boolean        @default(false)
   waterContent        Decimal        @default(0) // [核心修改] 含水量
   activeSkuId         String?
-  currentStockInGrams Decimal        @default(0) // [核心修改] 当前库存克重
-  currentStockValue   Decimal        @default(0)
 
   // [新增] 保质期 (小时)，默认为 0 表示不管理或长期有效
   shelfLife Int @default(0)
@@ -323,7 +319,6 @@ model Ingredient {
   activeSku            IngredientSKU?              @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   componentIngredients ComponentIngredient[] // [核心重命名] doughIngredients -> componentIngredients
   productIngredients   ProductIngredient[]
-  stockAdjustments     IngredientStockAdjustment[]
 
   @@unique([tenantId, name, deletedAt])
 }
@@ -339,39 +334,24 @@ model IngredientSKU {
   createdAt            DateTime                   @default(now())
   updatedAt            DateTime                   @updatedAt
   ingredient           Ingredient                 @relation(fields: [ingredientId], references: [id])
-  procurementRecords   ProcurementRecord[]
+  priceRecords         PriceRecord[]
   consumptionLogs      IngredientConsumptionLog[]
   activeForIngredients Ingredient[]               @relation("ActiveSKU")
 }
 
-// 采购记录模型
-model ProcurementRecord {
+// 价格记录模型：用于记录规格价格并计算配方成本
+model PriceRecord {
   id                String        @id @default(uuid())
   skuId             String
-  packagesPurchased Int
+  packageCount      Int           @map("packagesPurchased")
   pricePerPackage   Decimal
-  purchaseDate      DateTime      @default(now())
+  recordedAt        DateTime      @default(now()) @map("purchaseDate")
   userId            String
   user              User          @relation(fields: [userId], references: [id])
   sku               IngredientSKU @relation(fields: [skuId], references: [id])
 
   @@index([userId])
-}
-
-// 库存调整日志模型
-model IngredientStockAdjustment {
-  id            String     @id @default(uuid())
-  ingredientId  String
-  userId        String // 操作人ID
-  changeInGrams Decimal // [核心修改] 变化量
-  reason        String?
-  // 调整原因, 如 "月度盘点", "过期损耗", "报溢" 等
-  createdAt     DateTime   @default(now())
-  ingredient    Ingredient @relation(fields: [ingredientId], references: [id])
-  user          User       @relation(fields: [userId], references: [id])
-
-  @@index([ingredientId])
-  @@index([userId])
+  @@map("ProcurementRecord")
 }
 
 // ================================================================= //

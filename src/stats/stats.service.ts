@@ -35,7 +35,21 @@ export class StatsService {
             include: {
                 items: {
                     include: {
-                        product: { select: { id: true, name: true } },
+                        product: {
+                            select: {
+                                id: true,
+                                name: true,
+                                recipeVersion: {
+                                    select: {
+                                        family: {
+                                            select: {
+                                                type: true,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                     },
                 },
                 log: true,
@@ -47,7 +61,7 @@ export class StatsService {
         const productStatsMap = new Map<string, { name: string; count: number }>();
         for (const task of completedTasks) {
             for (const item of task.items) {
-                if (item.productId) {
+                if (item.productId && item.product?.recipeVersion.family.type === 'MAIN') {
                     const existing = productStatsMap.get(item.productId);
                     const name = item.product?.name || '未知产品';
                     const count = (existing?.count || 0) + Number(item.quantity);

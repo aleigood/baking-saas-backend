@@ -124,7 +124,7 @@ export class ProductionTasksController {
         @Param('id', ParseUUIDPipe) id: string,
         @Body() completeProductionTaskDto: CompleteProductionTaskDto,
     ) {
-        return this.productionTasksService.complete(user.tenantId, user.sub, id, completeProductionTaskDto);
+        return this.productionTasksService.complete(user.tenantId, id, completeProductionTaskDto);
     }
 
     @Get(':id/pdf')

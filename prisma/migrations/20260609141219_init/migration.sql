@@ -166,8 +166,6 @@ CREATE TABLE "Ingredient" (
     "isFlour" BOOLEAN NOT NULL DEFAULT false,
     "waterContent" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "activeSkuId" TEXT,
-    "currentStockInGrams" DECIMAL(65,30) NOT NULL DEFAULT 0,
-    "currentStockValue" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "shelfLife" INTEGER NOT NULL DEFAULT 0,
     "recipeFamilyId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -201,18 +199,6 @@ CREATE TABLE "ProcurementRecord" (
     "userId" TEXT NOT NULL,
 
     CONSTRAINT "ProcurementRecord_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "IngredientStockAdjustment" (
-    "id" TEXT NOT NULL,
-    "ingredientId" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "changeInGrams" DECIMAL(65,30) NOT NULL,
-    "reason" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "IngredientStockAdjustment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -347,12 +333,6 @@ CREATE UNIQUE INDEX "Ingredient_tenantId_name_deletedAt_key" ON "Ingredient"("te
 CREATE INDEX "ProcurementRecord_userId_idx" ON "ProcurementRecord"("userId");
 
 -- CreateIndex
-CREATE INDEX "IngredientStockAdjustment_ingredientId_idx" ON "IngredientStockAdjustment"("ingredientId");
-
--- CreateIndex
-CREATE INDEX "IngredientStockAdjustment_userId_idx" ON "IngredientStockAdjustment"("userId");
-
--- CreateIndex
 CREATE INDEX "ProductionTask_tenantId_idx" ON "ProductionTask"("tenantId");
 
 -- CreateIndex
@@ -450,12 +430,6 @@ ALTER TABLE "ProcurementRecord" ADD CONSTRAINT "ProcurementRecord_userId_fkey" F
 
 -- AddForeignKey
 ALTER TABLE "ProcurementRecord" ADD CONSTRAINT "ProcurementRecord_skuId_fkey" FOREIGN KEY ("skuId") REFERENCES "IngredientSKU"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "IngredientStockAdjustment" ADD CONSTRAINT "IngredientStockAdjustment_ingredientId_fkey" FOREIGN KEY ("ingredientId") REFERENCES "Ingredient"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "IngredientStockAdjustment" ADD CONSTRAINT "IngredientStockAdjustment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductionTask" ADD CONSTRAINT "ProductionTask_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

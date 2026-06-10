@@ -18,15 +18,13 @@ import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { UserPayload } from 'src/auth/interfaces/user-payload.interface';
 import { AuthGuard } from '@nestjs/passport';
 import { CreateSkuDto } from './dto/create-sku.dto';
-import { CreateProcurementDto } from './dto/create-procurement.dto';
+import { CreatePriceRecordDto } from './dto/create-price-record.dto';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
-import { UpdateProcurementDto } from './dto/update-procurement.dto';
-import { AdjustStockDto } from './dto/adjust-stock.dto';
+import { UpdatePriceRecordDto } from './dto/update-price-record.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-// [核心新增] 导入分页查询 DTO
-import { QueryLedgerDto } from './dto/query-ledger.dto';
 // [新增] 导入 UpdateSkuDto
 import { UpdateSkuDto } from './dto/update-sku.dto';
+import { QueryConsumptionLedgerDto } from './dto/query-consumption-ledger.dto';
 
 @ApiTags('Ingredients')
 @ApiBearerAuth()
@@ -62,33 +60,20 @@ export class IngredientsController {
         return this.ingredientsService.update(user.tenantId, id, updateIngredientDto);
     }
 
-    @Patch(':id/stock')
-    @ApiOperation({ summary: 'Adjust ingredient stock' })
-    adjustStock(@GetUser() user: UserPayload, @Param('id') id: string, @Body() adjustStockDto: AdjustStockDto) {
-        return this.ingredientsService.adjustStock(user.tenantId, id, user.sub, adjustStockDto);
-    }
-
     @Delete(':id')
     @ApiOperation({ summary: 'Delete an ingredient' })
     remove(@GetUser() user: UserPayload, @Param('id') id: string) {
         return this.ingredientsService.remove(user.tenantId, id);
     }
 
-    /**
-     * [修改] 获取单个原料的库存流水 (支持分页)
-     * @param user 当前用户
-     * @param id 原料ID
-     * @param queryDto 分页参数
-     */
-    @Get(':id/ledger')
-    @ApiOperation({ summary: "Get an ingredient's stock ledger" })
-    getIngredientLedger(
+    @Get(':id/consumption-ledger')
+    @ApiOperation({ summary: "Get an ingredient's consumption ledger" })
+    getConsumptionLedger(
         @GetUser() user: UserPayload,
         @Param('id') id: string,
-        // [核心修改] 应用 ValidationPipe 以便转换查询参数
-        @Query(new ValidationPipe({ transform: true })) queryDto: QueryLedgerDto,
+        @Query(new ValidationPipe({ transform: true })) queryDto: QueryConsumptionLedgerDto,
     ) {
-        return this.ingredientsService.getIngredientLedger(user.tenantId, id, queryDto);
+        return this.ingredientsService.getConsumptionLedger(user.tenantId, id, queryDto);
     }
 
     @Post(':ingredientId/skus')
@@ -125,24 +110,24 @@ export class IngredientsController {
         return this.ingredientsService.setActiveSku(user.tenantId, ingredientId, setActiveSkuDto);
     }
 
-    @Post('skus/:skuId/procurements')
-    @ApiOperation({ summary: 'Create a procurement record for a SKU' })
-    createProcurement(
+    @Post('skus/:skuId/price-records')
+    @ApiOperation({ summary: 'Create a price record for a SKU' })
+    createPriceRecord(
         @GetUser() user: UserPayload, // [核心修改] 注入当前用户信息
         @Param('skuId') skuId: string,
-        @Body() createProcurementDto: CreateProcurementDto,
+        @Body() createPriceRecordDto: CreatePriceRecordDto,
     ) {
         // [核心修改] 将 tenantId 和 userId 传递给 service 层
-        return this.ingredientsService.createProcurement(user.tenantId, user.sub, skuId, createProcurementDto);
+        return this.ingredientsService.createPriceRecord(user.tenantId, user.sub, skuId, createPriceRecordDto);
     }
 
-    @Patch('procurements/:id')
-    @ApiOperation({ summary: 'Update a procurement record' })
-    updateProcurement(
+    @Patch('price-records/:id')
+    @ApiOperation({ summary: 'Update a price record' })
+    updatePriceRecord(
         @GetUser() user: UserPayload,
         @Param('id') id: string,
-        @Body() updateProcurementDto: UpdateProcurementDto,
+        @Body() updatePriceRecordDto: UpdatePriceRecordDto,
     ) {
-        return this.ingredientsService.updateProcurement(user.tenantId, id, updateProcurementDto);
+        return this.ingredientsService.updatePriceRecord(user.tenantId, id, updatePriceRecordDto);
     }
 }

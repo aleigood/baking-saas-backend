@@ -1,19 +1,14 @@
-/**
- * 文件路径: src/ingredients/ingredients.service.ts
- * 文件描述: (已优化) 移除库存预警预测逻辑(daysOfSupply)，仅保留总消耗量统计。
- */
-import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { CreateSkuDto } from './dto/create-sku.dto';
-import { CreateProcurementDto } from './dto/create-procurement.dto';
+import { CreatePriceRecordDto } from './dto/create-price-record.dto';
 import { SkuStatus, Prisma, IngredientType } from '@prisma/client';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
-import { UpdateProcurementDto } from './dto/update-procurement.dto';
+import { UpdatePriceRecordDto } from './dto/update-price-record.dto';
 import { UpdateSkuDto } from './dto/update-sku.dto';
-import { AdjustStockDto } from './dto/adjust-stock.dto';
-import { QueryLedgerDto, LedgerEntryType, LedgerEntry } from './dto/query-ledger.dto';
+import { QueryConsumptionLedgerDto } from './dto/query-consumption-ledger.dto';
 
 @Injectable()
 export class IngredientsService {
@@ -64,8 +59,6 @@ export class IngredientsService {
         if (ingredients.length === 0) {
             return {
                 allIngredients: [],
-                // [核心修改] 移除 lowStockIngredients
-                // lowStockIngredients: [],
             };
         }
 
@@ -73,7 +66,7 @@ export class IngredientsService {
         const priceMap = new Map<string, Prisma.Decimal>();
 
         if (activeSkuIds.length > 0) {
-            const latestProcurements: { skuId: string; pricePerPackage: Prisma.Decimal }[] = await this.prisma
+            const latestPriceRecords: { skuId: string; pricePerPackage: Prisma.Decimal }[] = await this.prisma
                 .$queryRaw`
                 SELECT p."skuId", p."pricePerPackage"
                 FROM "ProcurementRecord" p
@@ -84,10 +77,12 @@ export class IngredientsService {
                     GROUP BY "skuId"
                 ) lp ON p."skuId" = lp."skuId" AND p."purchaseDate" = lp.max_date
             `;
-            latestProcurements.forEach((p) => priceMap.set(p.skuId, p.pricePerPackage));
+            latestPriceRecords.forEach((p) => priceMap.set(p.skuId, p.pricePerPackage));
         }
 
         const ingredientIds = ingredients.map((i) => i.id);
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
         // [核心修改] 简化 SQL，只查询 total (总消耗量)，移除了 taskCount, firstDate, lastDate
         const consumptionStats: {
@@ -106,25 +101,43 @@ export class IngredientsService {
                     icl."ingredientId"
             `,
         );
+        const monthlyConsumptionStats: {
+            ingredientId: string;
+            total: number;
+        }[] = await this.prisma.$queryRaw(
+            Prisma.sql`
+                SELECT
+                    icl."ingredientId",
+                    SUM(icl."quantityInGrams")::float AS total
+                FROM
+                    "IngredientConsumptionLog" AS icl
+                INNER JOIN
+                    "ProductionLog" AS pl ON pl."id" = icl."productionLogId"
+                WHERE
+                    icl."ingredientId" IN (${Prisma.join(ingredientIds)})
+                    AND pl."completedAt" >= ${monthStart}
+                GROUP BY
+                    icl."ingredientId"
+            `,
+        );
 
         const statsMap = new Map(consumptionStats.map((stat) => [stat.ingredientId, stat.total]));
+        const monthlyStatsMap = new Map(monthlyConsumptionStats.map((stat) => [stat.ingredientId, stat.total]));
 
         const processedIngredients = ingredients.map((ingredient) => {
             const totalConsumptionInGrams = statsMap.get(ingredient.id) || 0;
+            const monthlyConsumptionInGrams = monthlyStatsMap.get(ingredient.id) || 0;
 
             const currentPricePerPackage = ingredient.activeSkuId
                 ? priceMap.get(ingredient.activeSkuId) || new Prisma.Decimal(0)
                 : new Prisma.Decimal(0);
 
-            // [核心修改] 移除 daysOfSupply, avgDailyConsumption, avgConsumptionPerTask 计算逻辑
-            // 直接返回精简后的对象
             return {
                 ...ingredient,
                 currentPricePerPackage: currentPricePerPackage.toNumber(),
-                currentStockInGrams: ingredient.currentStockInGrams.toNumber(),
-                currentStockValue: ingredient.currentStockValue.toNumber(),
                 waterContent: ingredient.waterContent.toNumber(),
                 totalConsumptionInGrams,
+                monthlyConsumptionInGrams,
             };
         });
 
@@ -132,7 +145,6 @@ export class IngredientsService {
             (a, b) => b.totalConsumptionInGrams - a.totalConsumptionInGrams,
         );
 
-        // [核心修改] 不再计算和返回 lowStockIngredients
         return {
             allIngredients: allIngredients,
         };
@@ -149,9 +161,9 @@ export class IngredientsService {
                 activeSku: true,
                 skus: {
                     include: {
-                        procurementRecords: {
+                        priceRecords: {
                             orderBy: {
-                                purchaseDate: 'desc',
+                                recordedAt: 'desc',
                             },
                         },
                     },
@@ -187,33 +199,61 @@ export class IngredientsService {
 
         let currentPricePerPackage = new Prisma.Decimal(0);
         if (ingredient.activeSkuId) {
-            const latestProcurement = await this.prisma.procurementRecord.findFirst({
+            const latestPriceRecord = await this.prisma.priceRecord.findFirst({
                 where: {
                     skuId: ingredient.activeSkuId,
                 },
                 orderBy: {
-                    purchaseDate: 'desc',
+                    recordedAt: 'desc',
                 },
             });
-            if (latestProcurement) {
-                currentPricePerPackage = latestProcurement.pricePerPackage;
+            if (latestPriceRecord) {
+                currentPricePerPackage = latestPriceRecord.pricePerPackage;
             }
         }
+        const totalConsumption = await this.prisma.ingredientConsumptionLog.aggregate({
+            where: {
+                ingredientId: ingredient.id,
+            },
+            _sum: {
+                quantityInGrams: true,
+            },
+        });
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthlyConsumption = await this.prisma.ingredientConsumptionLog.aggregate({
+            where: {
+                ingredientId: ingredient.id,
+                productionLog: {
+                    completedAt: {
+                        gte: monthStart,
+                    },
+                },
+            },
+            _sum: {
+                quantityInGrams: true,
+            },
+        });
 
         return {
             ...ingredient,
             currentPricePerPackage: currentPricePerPackage.toNumber(),
-            currentStockInGrams: ingredient.currentStockInGrams.toNumber(),
-            currentStockValue: ingredient.currentStockValue.toNumber(),
             waterContent: ingredient.waterContent.toNumber(),
-            skus: ingredient.skus.map((sku) => ({
-                ...sku,
-                specWeightInGrams: sku.specWeightInGrams.toNumber(),
-                procurementRecords: sku.procurementRecords.map((rec) => ({
-                    ...rec,
-                    pricePerPackage: rec.pricePerPackage.toNumber(),
-                })),
-            })),
+            totalConsumptionInGrams: totalConsumption._sum.quantityInGrams?.toNumber() || 0,
+            monthlyConsumptionInGrams: monthlyConsumption._sum.quantityInGrams?.toNumber() || 0,
+            skus: ingredient.skus.map((sku) => {
+                const { priceRecords, ...skuData } = sku;
+                return {
+                    ...skuData,
+                    specWeightInGrams: sku.specWeightInGrams.toNumber(),
+                    priceRecords: priceRecords.map((rec) => ({
+                        id: rec.id,
+                        packageCount: rec.packageCount,
+                        pricePerPackage: rec.pricePerPackage.toNumber(),
+                        recordedAt: rec.recordedAt,
+                    })),
+                };
+            }),
         };
     }
 
@@ -228,87 +268,6 @@ export class IngredientsService {
         return this.prisma.ingredient.update({
             where: { id },
             data: data,
-        });
-    }
-
-    async adjustStock(tenantId: string, id: string, userId: string, adjustStockDto: AdjustStockDto) {
-        const member = await this.prisma.tenantUser.findUnique({
-            where: { userId_tenantId: { userId, tenantId } },
-        });
-
-        if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) {
-            throw new ForbiddenException('您没有权限调整库存。');
-        }
-
-        return this.prisma.$transaction(async (tx) => {
-            const ingredient = await tx.ingredient.findFirst({
-                where: { id, tenantId },
-            });
-
-            if (!ingredient) {
-                throw new NotFoundException('原料不存在');
-            }
-
-            const { changeInGrams, reason, initialCostPerKg } = adjustStockDto;
-
-            if (!reason || reason.trim() === '') {
-                throw new BadRequestException('必须提供一个有效的库存调整原因。');
-            }
-
-            await tx.ingredientStockAdjustment.create({
-                data: {
-                    ingredientId: id,
-                    userId,
-                    changeInGrams: new Prisma.Decimal(changeInGrams),
-                    reason,
-                },
-            });
-
-            const oldStock = new Prisma.Decimal(ingredient.currentStockInGrams);
-            const oldStockValue = new Prisma.Decimal(ingredient.currentStockValue);
-            let valueChange = new Prisma.Decimal(0);
-
-            if (reason === '初次录入') {
-                if (!oldStock.isZero()) {
-                    throw new BadRequestException('只有库存为0的原料才能进行“初次录入”操作。');
-                }
-                if (!initialCostPerKg || initialCostPerKg <= 0) {
-                    throw new BadRequestException('“初次录入”必须提供一个有效的初期单价(元/kg)。');
-                }
-                valueChange = new Prisma.Decimal(initialCostPerKg).mul(changeInGrams).div(1000);
-            } else if (!oldStock.isZero()) {
-                const avgCostPerGram = oldStockValue.div(oldStock);
-                valueChange = avgCostPerGram.mul(changeInGrams);
-            } else {
-                valueChange = new Prisma.Decimal(0);
-            }
-
-            const newStockValue = oldStockValue.add(valueChange);
-            if (newStockValue.isNegative()) {
-                await tx.ingredient.update({
-                    where: { id },
-                    data: {
-                        currentStockValue: 0,
-                        currentStockInGrams: {
-                            increment: changeInGrams,
-                        },
-                    },
-                });
-            } else {
-                await tx.ingredient.update({
-                    where: { id },
-                    data: {
-                        currentStockInGrams: {
-                            increment: changeInGrams,
-                        },
-                        currentStockValue: {
-                            increment: valueChange,
-                        },
-                    },
-                });
-            }
-
-            return tx.ingredient.findUnique({ where: { id } });
         });
     }
 
@@ -349,137 +308,126 @@ export class IngredientsService {
         });
     }
 
-    async getIngredientLedger(tenantId: string, ingredientId: string, query: QueryLedgerDto) {
+    async getConsumptionLedger(tenantId: string, ingredientId: string, query: QueryConsumptionLedgerDto) {
         await this.findOne(tenantId, ingredientId);
-        const { page = 1, limit = 10, type, userId, startDate, endDate, keyword } = query;
-        const pageNum = Number(page);
-        const limitNum = Number(limit);
+
+        const { page = '1', limit = '20', startDate, endDate, keyword } = query;
+        const pageNum = Math.max(1, Number(page) || 1);
+        const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
         const skip = (pageNum - 1) * limitNum;
 
-        const dateFilter: { gte?: Date; lte?: Date } = {};
+        const completedAtFilter: { gte?: Date; lte?: Date } = {};
         if (startDate) {
             const start = new Date(startDate);
             start.setHours(0, 0, 0, 0);
-            dateFilter.gte = start;
+            completedAtFilter.gte = start;
         }
         if (endDate) {
             const end = new Date(endDate);
             end.setHours(23, 59, 59, 999);
-            dateFilter.lte = end;
-        }
-        const hasDateFilter = startDate || endDate;
-
-        const ledger: LedgerEntry[] = [];
-
-        if (!type || type === LedgerEntryType.PROCUREMENT) {
-            const procurements = await this.prisma.procurementRecord.findMany({
-                where: {
-                    sku: { ingredientId: ingredientId },
-                    ...(userId && { userId: userId }),
-                    ...(hasDateFilter && { purchaseDate: dateFilter }),
-                    ...(keyword && {
-                        OR: [
-                            { sku: { brand: { contains: keyword, mode: 'insensitive' } } },
-                            { sku: { specName: { contains: keyword, mode: 'insensitive' } } },
-                            { user: { name: { contains: keyword, mode: 'insensitive' } } },
-                        ],
-                    }),
-                },
-                include: { sku: true, user: { select: { name: true, phone: true } } },
-            });
-            const procurementLedger: LedgerEntry[] = procurements.map((p) => ({
-                date: p.purchaseDate,
-                type: '采购入库',
-                change: new Prisma.Decimal(p.packagesPurchased).mul(p.sku.specWeightInGrams).toNumber(),
-                details: `采购 ${p.sku.brand || ''} ${p.sku.specName} × ${p.packagesPurchased}`,
-                operator: p.user.name || p.user.phone,
-            }));
-            ledger.push(...procurementLedger);
+            completedAtFilter.lte = end;
         }
 
-        if ((!type || type === LedgerEntryType.CONSUMPTION) && !userId) {
-            const consumptions = await this.prisma.ingredientConsumptionLog.findMany({
-                where: {
-                    ingredientId: ingredientId,
-                    ...(hasDateFilter && { productionLog: { completedAt: dateFilter } }),
-                    ...(keyword && {
-                        productionLog: {
-                            task: { id: { contains: keyword, mode: 'insensitive' } },
-                        },
-                    }),
-                },
-                include: {
+        const where: Prisma.IngredientConsumptionLogWhereInput = {
+            ingredientId,
+            ingredient: {
+                tenantId,
+                deletedAt: null,
+            },
+            ...(startDate || endDate
+                ? {
+                      productionLog: {
+                          completedAt: completedAtFilter,
+                      },
+                  }
+                : {}),
+            ...(keyword
+                ? {
+                      OR: [
+                          {
+                              productionLog: {
+                                  task: {
+                                      id: { contains: keyword, mode: 'insensitive' },
+                                  },
+                              },
+                          },
+                          {
+                              productionLog: {
+                                  task: {
+                                      items: {
+                                          some: {
+                                              product: {
+                                                  name: { contains: keyword, mode: 'insensitive' },
+                                              },
+                                          },
+                                      },
+                                  },
+                              },
+                          },
+                      ],
+                  }
+                : {}),
+        };
+
+        const [total, logs] = await this.prisma.$transaction([
+            this.prisma.ingredientConsumptionLog.count({ where }),
+            this.prisma.ingredientConsumptionLog.findMany({
+                where,
+                orderBy: {
                     productionLog: {
-                        include: {
+                        completedAt: 'desc',
+                    },
+                },
+                skip,
+                take: limitNum,
+                include: {
+                    sku: {
+                        select: {
+                            brand: true,
+                            specName: true,
+                        },
+                    },
+                    productionLog: {
+                        select: {
+                            completedAt: true,
                             task: {
-                                select: { id: true },
+                                select: {
+                                    id: true,
+                                    items: {
+                                        select: {
+                                            quantity: true,
+                                            product: {
+                                                select: {
+                                                    name: true,
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
                             },
                         },
                     },
                 },
-            });
-            const consumptionLedger: LedgerEntry[] = consumptions.map((c) => ({
-                date: c.productionLog.completedAt,
-                type: '生产消耗',
-                change: -c.quantityInGrams.toNumber(),
-                details: `生产任务 #${c.productionLog.task.id.slice(0, 8)}`,
-                operator: '系统',
-            }));
-            ledger.push(...consumptionLedger);
-        }
-
-        if (!type || type === LedgerEntryType.ADJUSTMENT || type === LedgerEntryType.SPOILAGE) {
-            const adjustments = await this.prisma.ingredientStockAdjustment.findMany({
-                where: {
-                    ingredientId: ingredientId,
-                    ...(userId && { userId: userId }),
-                    ...(hasDateFilter && { createdAt: dateFilter }),
-                    ...(keyword && {
-                        OR: [
-                            { reason: { contains: keyword, mode: 'insensitive' } },
-                            { user: { name: { contains: keyword, mode: 'insensitive' } } },
-                        ],
-                    }),
-                },
-                include: { user: { select: { name: true, phone: true } } },
-            });
-
-            let adjustmentLedger: LedgerEntry[] = adjustments.map((a) => {
-                // [核心修改] 增加对“生产入库”的识别
-                let typeStr = '库存调整';
-                if (a.reason?.startsWith('生产报损') || a.reason?.startsWith('工艺损耗')) {
-                    typeStr = '生产损耗';
-                } else if (a.reason?.startsWith('生产入库')) {
-                    typeStr = '生产入库';
-                }
-
-                return {
-                    date: a.createdAt,
-                    type: typeStr,
-                    change: a.changeInGrams.toNumber(),
-                    details: a.reason || '无原因',
-                    operator: a.user.name || a.user.phone,
-                };
-            });
-
-            if (type === LedgerEntryType.ADJUSTMENT) {
-                // 对于只选“库存调整”的情况，我们需要包含“生产入库”，因为这本质上也是一种正向调整
-                adjustmentLedger = adjustmentLedger.filter((a) => a.type === '库存调整' || a.type === '生产入库');
-            }
-            if (type === LedgerEntryType.SPOILAGE) {
-                adjustmentLedger = adjustmentLedger.filter((a) => a.type === '生产损耗');
-            }
-
-            ledger.push(...adjustmentLedger);
-        }
-
-        ledger.sort((a, b) => b.date.getTime() - a.date.getTime());
-
-        const total = ledger.length;
-        const paginatedData = ledger.slice(skip, skip + limitNum);
+            }),
+        ]);
 
         return {
-            data: paginatedData,
+            data: logs.map((log) => ({
+                id: log.id,
+                date: log.productionLog.completedAt,
+                taskId: log.productionLog.task.id,
+                taskProducts: log.productionLog.task.items.map((item) => ({
+                    name: item.product.name,
+                    quantity: item.quantity.toNumber(),
+                })),
+                quantityInGrams: log.quantityInGrams.toNumber(),
+                sku: log.sku
+                    ? {
+                          brand: log.sku.brand,
+                          specName: log.sku.specName,
+                      }
+                    : null,
+            })),
             meta: {
                 total,
                 page: pageNum,
@@ -511,7 +459,7 @@ export class IngredientsService {
             },
             include: {
                 _count: {
-                    select: { procurementRecords: true },
+                    select: { priceRecords: true },
                 },
             },
         });
@@ -521,14 +469,14 @@ export class IngredientsService {
         }
 
         const { specWeightInGrams } = updateSkuDto;
-        const hasProcurementRecords = skuToUpdate._count.procurementRecords > 0;
+        const hasPriceRecords = skuToUpdate._count.priceRecords > 0;
 
         if (
             specWeightInGrams !== undefined &&
             !new Prisma.Decimal(specWeightInGrams).equals(skuToUpdate.specWeightInGrams)
         ) {
-            if (hasProcurementRecords) {
-                throw new BadRequestException('该SKU已有采购记录，无法修改其规格重量。');
+            if (hasPriceRecords) {
+                throw new BadRequestException('该SKU已有价格记录，无法修改其规格重量。');
             }
         }
 
@@ -559,7 +507,7 @@ export class IngredientsService {
             },
             include: {
                 _count: {
-                    select: { procurementRecords: true },
+                    select: { priceRecords: true },
                 },
             },
         });
@@ -572,9 +520,9 @@ export class IngredientsService {
             throw new BadRequestException('不能删除当前激活的SKU，请先激活其他SKU。');
         }
 
-        const hasProcurementRecords = skuToDelete._count.procurementRecords > 0;
-        if (hasProcurementRecords) {
-            throw new BadRequestException('该SKU存在采购记录，无法删除。');
+        const hasPriceRecords = skuToDelete._count.priceRecords > 0;
+        if (hasPriceRecords) {
+            throw new BadRequestException('该SKU存在价格记录，无法删除。');
         }
 
         return this.prisma.ingredientSKU.delete({
@@ -623,11 +571,11 @@ export class IngredientsService {
         });
     }
 
-    async createProcurement(
+    async createPriceRecord(
         tenantId: string,
         userId: string,
         skuId: string,
-        createProcurementDto: CreateProcurementDto,
+        createPriceRecordDto: CreatePriceRecordDto,
     ) {
         return this.prisma.$transaction(async (tx) => {
             const sku = await tx.ingredientSKU.findFirst({
@@ -643,73 +591,41 @@ export class IngredientsService {
                 throw new NotFoundException('SKU不存在');
             }
 
-            const procurement = await tx.procurementRecord.create({
+            const priceRecord = await tx.priceRecord.create({
                 data: {
                     skuId,
-                    packagesPurchased: createProcurementDto.packagesPurchased,
-                    pricePerPackage: new Prisma.Decimal(createProcurementDto.pricePerPackage),
-                    purchaseDate: new Date(),
+                    packageCount: createPriceRecordDto.packageCount,
+                    pricePerPackage: new Prisma.Decimal(createPriceRecordDto.pricePerPackage),
+                    recordedAt: new Date(),
                     userId: userId,
                 },
             });
 
-            const purchaseValue = new Prisma.Decimal(createProcurementDto.pricePerPackage).mul(
-                createProcurementDto.packagesPurchased,
-            );
-
-            await tx.ingredient.update({
-                where: { id: sku.ingredientId },
-                data: {
-                    currentStockInGrams: {
-                        increment: new Prisma.Decimal(createProcurementDto.packagesPurchased).mul(
-                            sku.specWeightInGrams,
-                        ),
-                    },
-                    currentStockValue: {
-                        increment: purchaseValue,
-                    },
-                },
-            });
-
-            return procurement;
+            return priceRecord;
         });
     }
 
-    async updateProcurement(tenantId: string, procurementId: string, updateProcurementDto: UpdateProcurementDto) {
+    async updatePriceRecord(tenantId: string, priceRecordId: string, updatePriceRecordDto: UpdatePriceRecordDto) {
         return this.prisma.$transaction(async (tx) => {
-            const procurement = await tx.procurementRecord.findFirst({
+            const priceRecord = await tx.priceRecord.findFirst({
                 where: {
-                    id: procurementId,
+                    id: priceRecordId,
                     sku: {
                         ingredient: {
                             tenantId: tenantId,
                         },
                     },
                 },
-                include: {
-                    sku: true,
-                },
             });
 
-            if (!procurement) {
-                throw new NotFoundException('采购记录不存在');
+            if (!priceRecord) {
+                throw new NotFoundException('价格记录不存在');
             }
 
-            const oldPrice = new Prisma.Decimal(procurement.pricePerPackage.toString());
-            const newPrice = new Prisma.Decimal(updateProcurementDto.pricePerPackage);
-            const priceDifference = newPrice.sub(oldPrice).mul(procurement.packagesPurchased);
+            const newPrice = new Prisma.Decimal(updatePriceRecordDto.pricePerPackage);
 
-            await tx.ingredient.update({
-                where: { id: procurement.sku.ingredientId },
-                data: {
-                    currentStockValue: {
-                        increment: priceDifference,
-                    },
-                },
-            });
-
-            return tx.procurementRecord.update({
-                where: { id: procurementId },
+            return tx.priceRecord.update({
+                where: { id: priceRecordId },
                 data: {
                     pricePerPackage: newPrice,
                 },

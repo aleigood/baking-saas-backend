@@ -75,8 +75,6 @@ export interface DisplayIngredient {
     category?: RecipeCategory;
     isFlour: boolean;
     waterContent: number;
-    currentStockInGrams: number;
-    currentStockValue: number;
     activeSkuId: string | null;
     createdAt: Date;
     updatedAt: Date;
@@ -299,9 +297,6 @@ export class RecipesService {
                                 displayIngredient = {
                                     ...ingWithExtra,
                                     waterContent: ingWithExtra.waterContent.toNumber(),
-                                    currentStockInGrams: ingWithExtra.currentStockInGrams.toNumber(),
-                                    currentStockValue: ingWithExtra.currentStockValue.toNumber(),
-                                    // 标准原料无 recipeFamilyId
                                     recipeFamilyId: null,
                                     shelfLife: ingWithExtra.shelfLife,
                                 };
@@ -313,8 +308,6 @@ export class RecipesService {
                                     extraInfo: preDoughWithLink.extraInfo,
                                     // [核心修复] 获取 outputIngredient 的含水量，如果不存在则默认为0
                                     waterContent: preDoughWithLink.outputIngredient?.waterContent.toNumber() ?? 0,
-                                    currentStockInGrams: 0,
-                                    currentStockValue: 0,
                                     isFlour: false,
                                     activeSkuId: null,
                                     shelfLife: preDoughWithLink.outputIngredient?.shelfLife ?? 0,
@@ -328,8 +321,6 @@ export class RecipesService {
                                     extraInfo: extraWithLink.extraInfo,
                                     // [核心修复] 获取 outputIngredient 的含水量
                                     waterContent: extraWithLink.outputIngredient?.waterContent.toNumber() ?? 0,
-                                    currentStockInGrams: 0,
-                                    currentStockValue: 0,
                                     isFlour: false,
                                     activeSkuId: null,
                                     shelfLife: extraWithLink.outputIngredient?.shelfLife ?? 0,
@@ -344,8 +335,6 @@ export class RecipesService {
                                     isFlour: false,
                                     waterContent: 0,
                                     activeSkuId: null,
-                                    currentStockInGrams: 0,
-                                    currentStockValue: 0,
                                     createdAt: new Date(),
                                     updatedAt: new Date(),
                                     deletedAt: null,
@@ -375,8 +364,6 @@ export class RecipesService {
                             displayProductIngredient = {
                                 ...productIngredient.ingredient,
                                 waterContent: productIngredient.ingredient.waterContent.toNumber(),
-                                currentStockInGrams: productIngredient.ingredient.currentStockInGrams.toNumber(),
-                                currentStockValue: productIngredient.ingredient.currentStockValue.toNumber(),
                                 shelfLife: productIngredient.ingredient.shelfLife,
                                 recipeFamilyId: null,
                             };
@@ -385,8 +372,6 @@ export class RecipesService {
                             displayProductIngredient = {
                                 ...productIngredient.linkedExtra,
                                 waterContent: 0,
-                                currentStockInGrams: 0,
-                                currentStockValue: 0,
                                 isFlour: false,
                                 activeSkuId: null,
                                 shelfLife: 0, // 暂不 fetch
@@ -400,8 +385,6 @@ export class RecipesService {
                                 isFlour: false,
                                 waterContent: 0,
                                 activeSkuId: null,
-                                currentStockInGrams: 0,
-                                currentStockValue: 0,
                                 createdAt: new Date(),
                                 updatedAt: new Date(),
                                 deletedAt: null,
@@ -1699,8 +1682,8 @@ export class RecipesService {
                                 shelfLife: 0,
                             },
                         });
-                    } catch (e) {
-                        console.warn('Auto-create ingredient failed (likely exists):', e);
+                    } catch {
+                        // 可能已由并发请求创建，忽略并继续使用配方数据。
                     }
                 }
 

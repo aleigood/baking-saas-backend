@@ -10,7 +10,6 @@ export interface BillOfMaterialsItem {
     ingredientName: string;
     brand: string | null; // [修改] 新增品牌字段
     totalRequired: number; // 总需求量 (g)
-    currentStock?: number; // 当前库存 (g)，仅标准原料有
 }
 
 // 备料清单接口的完整响应体

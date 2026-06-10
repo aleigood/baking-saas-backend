@@ -483,11 +483,11 @@ export class CostingService {
             return [{ cost: Number(currentCostResult.totalCost), date: new Date().toISOString().split('T')[0] }];
         }
 
-        const distinctDates = await this.prisma.procurementRecord.findMany({
+        const distinctDates = await this.prisma.priceRecord.findMany({
             where: { skuId: { in: allSkuIds } },
-            orderBy: { purchaseDate: 'desc' },
-            select: { purchaseDate: true },
-            distinct: ['purchaseDate'],
+            orderBy: { recordedAt: 'desc' },
+            select: { recordedAt: true },
+            distinct: ['recordedAt'],
             take: 9,
         });
 
@@ -496,7 +496,7 @@ export class CostingService {
             return [{ cost: Number(currentCostResult.totalCost), date: new Date().toISOString().split('T')[0] }];
         }
 
-        const costChangeDates = distinctDates.map((p) => p.purchaseDate).sort((a, b) => a.getTime() - b.getTime());
+        const costChangeDates = distinctDates.map((p) => p.recordedAt).sort((a, b) => a.getTime() - b.getTime());
 
         const costHistory: { cost: number; date: string }[] = [];
 
@@ -507,18 +507,18 @@ export class CostingService {
                 if (!ingredientInfo || ingredientInfo.skus.length === 0) continue;
 
                 const skuIds = ingredientInfo.skus.map((s) => s.id);
-                const latestProcurement = await this.prisma.procurementRecord.findFirst({
+                const latestPriceRecord = await this.prisma.priceRecord.findFirst({
                     where: {
                         skuId: { in: skuIds },
-                        purchaseDate: { lte: date },
+                        recordedAt: { lte: date },
                     },
-                    orderBy: { purchaseDate: 'desc' },
+                    orderBy: { recordedAt: 'desc' },
                     include: { sku: { select: { specWeightInGrams: true } } },
                 });
 
-                if (latestProcurement) {
-                    const pricePerGram = new Prisma.Decimal(latestProcurement.pricePerPackage).div(
-                        latestProcurement.sku.specWeightInGrams,
+                if (latestPriceRecord) {
+                    const pricePerGram = new Prisma.Decimal(latestPriceRecord.pricePerPackage).div(
+                        latestPriceRecord.sku.specWeightInGrams,
                     );
                     snapshotTotalCost = snapshotTotalCost.add(pricePerGram.mul(weight));
                 }
@@ -559,18 +559,18 @@ export class CostingService {
             return [];
         }
 
-        const procurementRecords = await this.prisma.procurementRecord.findMany({
+        const priceRecords = await this.prisma.priceRecord.findMany({
             where: { skuId: { in: skuIds } },
             include: { sku: true },
-            orderBy: { purchaseDate: 'desc' },
+            orderBy: { recordedAt: 'desc' },
             take: 10,
         });
 
-        if (procurementRecords.length === 0) {
+        if (priceRecords.length === 0) {
             return [];
         }
 
-        const costHistory = procurementRecords.map((record) => {
+        const costHistory = priceRecords.map((record) => {
             const pricePerPackage = new Prisma.Decimal(record.pricePerPackage);
             const specWeightInGrams = new Prisma.Decimal(record.sku.specWeightInGrams);
             if (specWeightInGrams.isZero()) {
@@ -585,7 +585,7 @@ export class CostingService {
         return costHistory.reverse();
     }
 
-    async getIngredientUsageHistory(tenantId: string, ingredientId: string) {
+    async getIngredientUsageHistory(tenantId: string, ingredientId: string, period: 'day' | 'month' = 'day') {
         const ingredientExists = await this.prisma.ingredient.findFirst({
             where: { id: ingredientId, tenantId },
         });
@@ -593,22 +593,36 @@ export class CostingService {
             throw new NotFoundException('原料不存在');
         }
 
-        const consumptionLogs = await this.prisma.ingredientConsumptionLog.findMany({
-            where: {
-                ingredientId: ingredientId,
-            },
-            orderBy: {
-                productionLog: {
-                    completedAt: 'desc',
-                },
-            },
-            take: 10,
-            select: {
-                quantityInGrams: true,
-            },
-        });
+        const truncUnit = period === 'month' ? 'month' : 'day';
+        const limit = period === 'month' ? 12 : 30;
+        const rows: { label: Date; total: number }[] = await this.prisma.$queryRaw(
+            Prisma.sql`
+                SELECT
+                    date_trunc(${truncUnit}, pl."completedAt") AS label,
+                    SUM(icl."quantityInGrams")::float AS total
+                FROM
+                    "IngredientConsumptionLog" icl
+                INNER JOIN
+                    "ProductionLog" pl ON pl."id" = icl."productionLogId"
+                WHERE
+                    icl."ingredientId" = ${ingredientId}
+                GROUP BY
+                    label
+                ORDER BY
+                    label DESC
+                LIMIT ${limit}
+            `,
+        );
 
-        return consumptionLogs.map((log) => ({ cost: log.quantityInGrams.toNumber() })).reverse();
+        return rows
+            .map((row) => ({
+                cost: row.total,
+                label:
+                    period === 'month'
+                        ? `${row.label.getFullYear()}-${String(row.label.getMonth() + 1).padStart(2, '0')}`
+                        : row.label.toISOString(),
+            }))
+            .reverse();
     }
 
     // 排序辅助函数
@@ -1687,8 +1701,7 @@ export class CostingService {
     }
 
     /**
-     * 计算生产指定数量产品的**理论原料消耗**清单 (不含损耗)。
-     * 用于【任务完成】时的库存核销。(实时查询)
+     * 计算生产指定数量产品的理论原料消耗清单 (不含损耗)。
      */
     async calculateTheoreticalProductConsumptions(
         tenantId: string,
@@ -1832,20 +1845,18 @@ export class CostingService {
             select: {
                 id: true,
                 type: true,
-                currentStockInGrams: true,
-                currentStockValue: true,
                 activeSkuId: true,
             },
         });
 
         const priceMap = new Map<string, Prisma.Decimal>();
-        const nonInventoriedIngredients = ingredients.filter((i) => i.type === IngredientType.NON_INVENTORIED);
+        const pricedIngredients = ingredients.filter((i) => i.type !== IngredientType.UNTRACKED);
 
-        if (nonInventoriedIngredients.length > 0) {
-            const activeSkuIds = nonInventoriedIngredients.map((i) => i.activeSkuId).filter(Boolean) as string[];
+        if (pricedIngredients.length > 0) {
+            const activeSkuIds = pricedIngredients.map((i) => i.activeSkuId).filter(Boolean) as string[];
 
             if (activeSkuIds.length > 0) {
-                const latestProcurements: {
+                const latestPriceRecords: {
                     skuId: string;
                     pricePerPackage: Prisma.Decimal;
                     specWeightInGrams: Prisma.Decimal;
@@ -1861,12 +1872,12 @@ export class CostingService {
                     ) lp ON p."skuId" = lp."skuId" AND p."purchaseDate" = lp.max_date
                 `;
 
-                const latestPriceMap = new Map(latestProcurements.map((p) => [p.skuId, p]));
-                for (const ingredient of nonInventoriedIngredients) {
-                    const procurement = latestPriceMap.get(ingredient.activeSkuId || '');
-                    if (procurement && new Prisma.Decimal(procurement.specWeightInGrams).gt(0)) {
-                        const pricePerGram = new Prisma.Decimal(procurement.pricePerPackage).div(
-                            procurement.specWeightInGrams,
+                const latestPriceMap = new Map(latestPriceRecords.map((p) => [p.skuId, p]));
+                for (const ingredient of pricedIngredients) {
+                    const priceRecord = latestPriceMap.get(ingredient.activeSkuId || '');
+                    if (priceRecord && new Prisma.Decimal(priceRecord.specWeightInGrams).gt(0)) {
+                        const pricePerGram = new Prisma.Decimal(priceRecord.pricePerPackage).div(
+                            priceRecord.specWeightInGrams,
                         );
                         priceMap.set(ingredient.id, pricePerGram);
                     } else {
@@ -1882,17 +1893,6 @@ export class CostingService {
             }
 
             switch (ingredient.type) {
-                case IngredientType.STANDARD: {
-                    const stockInGrams = new Prisma.Decimal(ingredient.currentStockInGrams);
-                    const stockValue = new Prisma.Decimal(ingredient.currentStockValue);
-                    if (stockInGrams.gt(0) && stockValue.gt(0)) {
-                        const pricePerGram = stockValue.div(stockInGrams);
-                        priceMap.set(ingredient.id, pricePerGram);
-                    } else {
-                        priceMap.set(ingredient.id, new Prisma.Decimal(0));
-                    }
-                    break;
-                }
                 case IngredientType.UNTRACKED: {
                     priceMap.set(ingredient.id, new Prisma.Decimal(0));
                     break;

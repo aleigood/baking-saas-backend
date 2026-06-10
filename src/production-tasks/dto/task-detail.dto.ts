@@ -69,9 +69,6 @@ export interface TaskDetailResponseDto {
     id: string;
     status: ProductionTaskStatus;
     notes: string | null;
-    stockWarning: string | null;
-    // [G-Code-Note] [需求修改] 移除 prepTask 字段
-    // prepTask: PrepTask | null;
     componentGroups: ComponentGroup[]; // [核心重命名] doughGroups -> componentGroups
     items: TaskCompletionItem[];
 }
