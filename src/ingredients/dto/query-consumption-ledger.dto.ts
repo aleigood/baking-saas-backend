@@ -20,4 +20,8 @@ export class QueryConsumptionLedgerDto {
     @IsString()
     @IsOptional()
     keyword?: string;
+
+    @IsString()
+    @IsOptional()
+    userId?: string;
 }

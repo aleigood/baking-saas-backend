@@ -311,7 +311,7 @@ export class IngredientsService {
     async getConsumptionLedger(tenantId: string, ingredientId: string, query: QueryConsumptionLedgerDto) {
         await this.findOne(tenantId, ingredientId);
 
-        const { page = '1', limit = '20', startDate, endDate, keyword } = query;
+        const { page = '1', limit = '20', startDate, endDate, keyword, userId } = query;
         const pageNum = Math.max(1, Number(page) || 1);
         const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
         const skip = (pageNum - 1) * limitNum;
@@ -328,16 +328,25 @@ export class IngredientsService {
             completedAtFilter.lte = end;
         }
 
-        const where: Prisma.IngredientConsumptionLogWhereInput = {
-            ingredientId,
-            ingredient: {
-                tenantId,
-                deletedAt: null,
+        const where: Prisma.ProductionLogWhereInput = {
+            consumptionLogs: {
+                some: {
+                    ingredientId,
+                    ingredient: {
+                        tenantId,
+                        deletedAt: null,
+                    },
+                },
             },
             ...(startDate || endDate
                 ? {
-                      productionLog: {
-                          completedAt: completedAtFilter,
+                      completedAt: completedAtFilter,
+                  }
+                : {}),
+            ...(userId
+                ? {
+                      task: {
+                          createdById: userId,
                       },
                   }
                 : {}),
@@ -345,20 +354,16 @@ export class IngredientsService {
                 ? {
                       OR: [
                           {
-                              productionLog: {
-                                  task: {
-                                      id: { contains: keyword, mode: 'insensitive' },
-                                  },
+                              task: {
+                                  id: { contains: keyword, mode: 'insensitive' },
                               },
                           },
                           {
-                              productionLog: {
-                                  task: {
-                                      items: {
-                                          some: {
-                                              product: {
-                                                  name: { contains: keyword, mode: 'insensitive' },
-                                              },
+                              task: {
+                                  items: {
+                                      some: {
+                                          product: {
+                                              name: { contains: keyword, mode: 'insensitive' },
                                           },
                                       },
                                   },
@@ -370,41 +375,41 @@ export class IngredientsService {
         };
 
         const [total, logs] = await this.prisma.$transaction([
-            this.prisma.ingredientConsumptionLog.count({ where }),
-            this.prisma.ingredientConsumptionLog.findMany({
+            this.prisma.productionLog.count({ where }),
+            this.prisma.productionLog.findMany({
                 where,
                 orderBy: {
-                    productionLog: {
-                        completedAt: 'desc',
-                    },
+                    completedAt: 'desc',
                 },
                 skip,
                 take: limitNum,
                 include: {
-                    sku: {
+                    task: {
                         select: {
-                            brand: true,
-                            specName: true,
-                        },
-                    },
-                    productionLog: {
-                        select: {
-                            completedAt: true,
-                            task: {
+                            id: true,
+                            createdBy: {
                                 select: {
-                                    id: true,
-                                    items: {
+                                    name: true,
+                                },
+                            },
+                            items: {
+                                select: {
+                                    quantity: true,
+                                    product: {
                                         select: {
-                                            quantity: true,
-                                            product: {
-                                                select: {
-                                                    name: true,
-                                                },
-                                            },
+                                            name: true,
                                         },
                                     },
                                 },
                             },
+                        },
+                    },
+                    consumptionLogs: {
+                        where: {
+                            ingredientId,
+                        },
+                        select: {
+                            quantityInGrams: true,
                         },
                     },
                 },
@@ -412,22 +417,28 @@ export class IngredientsService {
         ]);
 
         return {
-            data: logs.map((log) => ({
-                id: log.id,
-                date: log.productionLog.completedAt,
-                taskId: log.productionLog.task.id,
-                taskProducts: log.productionLog.task.items.map((item) => ({
-                    name: item.product.name,
-                    quantity: item.quantity.toNumber(),
-                })),
-                quantityInGrams: log.quantityInGrams.toNumber(),
-                sku: log.sku
-                    ? {
-                          brand: log.sku.brand,
-                          specName: log.sku.specName,
-                      }
-                    : null,
-            })),
+            data: logs.map((log) => {
+                const totalQuantity = log.consumptionLogs.reduce(
+                    (sum, item) => sum + item.quantityInGrams.toNumber(),
+                    0,
+                );
+                const operatorName = log.task.createdBy?.name || '未知';
+                const taskNameFormatted = `任务#${log.task.id.substring(0, 4)} (${log.task.items.map((i) => i.product.name).join('、')})`;
+
+                return {
+                    id: log.id,
+                    date: log.completedAt,
+                    taskId: log.task.id,
+                    operator: operatorName,
+                    taskName: taskNameFormatted,
+                    quantityInGrams: totalQuantity,
+                    sku: null,
+                    taskProducts: log.task.items.map((item) => ({
+                        name: item.product.name,
+                        quantity: item.quantity.toNumber(),
+                    })),
+                };
+            }),
             meta: {
                 total,
                 page: pageNum,
