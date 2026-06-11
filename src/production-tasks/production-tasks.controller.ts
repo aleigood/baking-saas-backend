@@ -25,6 +25,7 @@ import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { QueryProductionTaskDto } from './dto/query-production-task.dto';
 import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
+import { TogglePrepItemDto } from './dto/toggle-prep-item.dto';
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('production-tasks')
@@ -47,6 +48,14 @@ export class ProductionTasksController {
     getPrepTaskDetails(@GetUser() user: UserPayload, @Query('date') date?: string, @Query('taskIds') taskIds?: string) {
         const parsedTaskIds = taskIds ? taskIds.split(',') : undefined;
         return this.productionTasksService.getPrepTaskDetails(user.tenantId, date, parsedTaskIds);
+    }
+
+    @Post('prep-item/toggle')
+    togglePrepItem(
+        @GetUser() user: UserPayload,
+        @Body(new ValidationPipe({ transform: true })) togglePrepItemDto: TogglePrepItemDto,
+    ) {
+        return this.productionTasksService.togglePrepItem(user.tenantId, togglePrepItemDto);
     }
 
     // [核心修正] 必须放在 :id 之前！防止路由冲突导致 404

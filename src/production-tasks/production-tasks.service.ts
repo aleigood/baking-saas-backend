@@ -16,6 +16,7 @@ import {
     RecipeCategory,
     RecipeFamily,
     RecipeType,
+    TaskItemRole,
 } from '@prisma/client';
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
@@ -23,6 +24,7 @@ import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
 import { ComponentGroup, ProductDetails, TaskDetailResponseDto, TaskIngredientDetail } from './dto/task-detail.dto';
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 import { BillOfMaterialsResponseDto, BillOfMaterialsItem, PrepTask } from './dto/preparation.dto';
+import { TogglePrepItemDto } from './dto/toggle-prep-item.dto';
 import * as path from 'path';
 
 // [核心修复] 禁用 require 和 unsafe-assignment 检查
@@ -288,7 +290,7 @@ const recipeVersionRecursiveBatchInclude = {
             name: true,
             type: true,
             category: true,
-            outputIngredient: { select: { id: true, shelfLife: true } },
+            outputIngredient: { select: { id: true } },
         },
     },
     // 包含完整的 components 和 ingredients (这是快照的核心数据)
@@ -305,7 +307,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            outputIngredient: { select: { id: true, shelfLife: true } },
+                            outputIngredient: { select: { id: true } },
                             versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
                         },
                     },
@@ -316,7 +318,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            outputIngredient: { select: { id: true, shelfLife: true } },
+                            outputIngredient: { select: { id: true } },
                             versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
                         },
                     },
@@ -339,7 +341,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            outputIngredient: { select: { id: true, shelfLife: true } },
+                            outputIngredient: { select: { id: true } },
                             versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
                         },
                     },
@@ -356,6 +358,9 @@ type FetchedRecipeVersion = Prisma.RecipeVersionGetPayload<{
 // 任务列表 include
 const taskListItemsInclude = {
     items: {
+        where: {
+            role: { not: TaskItemRole.PREP_INGREDIENT },
+        },
         select: {
             quantity: true,
             product: {
@@ -566,6 +571,9 @@ export class ProductionTasksService {
         // Query 1 (L1)：获取“浅层”的任务信息
         const shallowTaskInclude = {
             items: {
+                where: {
+                    role: { not: TaskItemRole.PREP_INGREDIENT },
+                },
                 include: {
                     product: {
                         // [核心] 只 select 顶层产品和 L1 的 RecipeVersion ID
@@ -1452,7 +1460,13 @@ export class ProductionTasksService {
             where: {
                 tenantId,
                 deletedAt: null,
-                status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
+                status: {
+                    in: [
+                        ProductionTaskStatus.PENDING,
+                        ProductionTaskStatus.IN_PROGRESS,
+                        ProductionTaskStatus.COMPLETED,
+                    ],
+                },
                 startDate: {
                     gte: startOfDay,
                     lte: endOfDay,
@@ -1534,7 +1548,13 @@ export class ProductionTasksService {
             where: {
                 tenantId,
                 deletedAt: null,
-                status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
+                status: {
+                    in: [
+                        ProductionTaskStatus.PENDING,
+                        ProductionTaskStatus.IN_PROGRESS,
+                        ProductionTaskStatus.COMPLETED,
+                    ],
+                },
                 startDate: {
                     gte: startOfDay,
                     lte: endOfDay,
@@ -1550,6 +1570,9 @@ export class ProductionTasksService {
                 id: true,
                 recipeSnapshot: true,
                 items: {
+                    where: {
+                        role: { not: TaskItemRole.PREP_INGREDIENT },
+                    },
                     include: {
                         product: {
                             select: { name: true },
@@ -1610,10 +1633,40 @@ export class ProductionTasksService {
             items: snapshotTasks.flatMap((task) => task.items),
         };
 
-        const [prepItems, billOfMaterials] = await Promise.all([
+        const [prepItems, billOfMaterials, existingPrepTaskItems] = await Promise.all([
             this._getPrepItemsForTask(tenantId, combinedTaskItems), // 同步函数
             this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks),
+            this.prisma.productionTaskItem.findMany({
+                where: {
+                    role: TaskItemRole.PREP_INGREDIENT,
+                    taskId: { in: filteredTasks.map((t) => t.id) },
+                    product: {
+                        deletedAt: null,
+                    },
+                },
+                select: {
+                    product: {
+                        select: {
+                            recipeVersion: {
+                                select: {
+                                    familyId: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            }),
         ]);
+
+        const completedFamilyIds = new Set(
+            existingPrepTaskItems
+                .map((item) => item.product?.recipeVersion?.familyId)
+                .filter((id): id is string => !!id),
+        );
+
+        for (const item of prepItems) {
+            item.isCompleted = completedFamilyIds.has(item.id);
+        }
 
         const detailsParts: string[] = [];
         if (billOfMaterials.standardItems.length > 0 || billOfMaterials.nonInventoriedItems.length > 0) {
@@ -1633,6 +1686,109 @@ export class ProductionTasksService {
         };
     }
 
+    async togglePrepItem(tenantId: string, dto: TogglePrepItemDto) {
+        const targetDate = new Date(dto.date);
+        const startOfDay = new Date(targetDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(targetDate);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        // 获取当天相关的生产任务
+        const tasks = await this.prisma.productionTask.findMany({
+            where: {
+                tenantId,
+                deletedAt: null,
+                id: dto.taskIds && dto.taskIds.length > 0 ? { in: dto.taskIds } : undefined,
+                startDate: {
+                    gte: startOfDay,
+                    lte: endOfDay,
+                },
+                status: {
+                    in: [
+                        ProductionTaskStatus.PENDING,
+                        ProductionTaskStatus.IN_PROGRESS,
+                        ProductionTaskStatus.COMPLETED,
+                    ],
+                },
+            },
+            select: {
+                id: true,
+                recipeSnapshot: true,
+            },
+        });
+
+        if (tasks.length === 0) {
+            throw new BadRequestException('该日期下没有找到关联的生产任务');
+        }
+
+        // 查找该自制原料配方默认的 Product ID
+        const defaultProduct = await this.prisma.product.findFirst({
+            where: {
+                recipeVersion: {
+                    familyId: dto.recipeFamilyId,
+                },
+                deletedAt: null,
+            },
+            select: { id: true },
+        });
+
+        if (!defaultProduct) {
+            throw new BadRequestException('未找到该自制原料对应的系统产品');
+        }
+
+        return this.prisma.$transaction(async (tx) => {
+            if (dto.completed) {
+                // 遍历每个任务，如果该任务需要这个自制原料，则创建对应的 ProductionTaskItem
+                for (const task of tasks) {
+                    if (!task.recipeSnapshot) continue;
+                    const snapshot = task.recipeSnapshot as unknown as TaskWithDetails;
+                    const prepItems = this._getPrepItemsForTask(tenantId, snapshot);
+                    const prepItem = prepItems.find((item) => item.id === dto.recipeFamilyId);
+
+                    if (prepItem) {
+                        const existing = await tx.productionTaskItem.findFirst({
+                            where: {
+                                taskId: task.id,
+                                productId: defaultProduct.id,
+                                role: TaskItemRole.PREP_INGREDIENT,
+                            },
+                        });
+
+                        if (!existing) {
+                            await tx.productionTaskItem.create({
+                                data: {
+                                    taskId: task.id,
+                                    productId: defaultProduct.id,
+                                    quantity: new Prisma.Decimal(prepItem.targetWeight),
+                                    role: TaskItemRole.PREP_INGREDIENT,
+                                },
+                            });
+                        } else {
+                            // 更新重量以确保精确性
+                            await tx.productionTaskItem.update({
+                                where: { id: existing.id },
+                                data: {
+                                    quantity: new Prisma.Decimal(prepItem.targetWeight),
+                                },
+                            });
+                        }
+                    }
+                }
+            } else {
+                // 删除当天相关任务下的该自制原料的所有 PREP_INGREDIENT 记录
+                await tx.productionTaskItem.deleteMany({
+                    where: {
+                        taskId: { in: tasks.map((t) => t.id) },
+                        productId: defaultProduct.id,
+                        role: TaskItemRole.PREP_INGREDIENT,
+                    },
+                });
+            }
+
+            return { success: true };
+        });
+    }
+
     async findActive(tenantId: string, date?: string) {
         const [tasksForDate, dateStats] = await Promise.all([
             this.findTasksForDate(tenantId, date),
@@ -1643,11 +1799,13 @@ export class ProductionTasksService {
 
         const inProgressTasks = tasksForDate.filter((task) => task.status === 'IN_PROGRESS');
         const pendingTasks = tasksForDate.filter((task) => task.status === 'PENDING');
+        const completedTasks = tasksForDate.filter((task) => task.status === 'COMPLETED');
 
         inProgressTasks.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
         pendingTasks.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+        completedTasks.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
 
-        const sortedRegularTasks = [...inProgressTasks, ...pendingTasks];
+        const sortedRegularTasks = [...inProgressTasks, ...pendingTasks, ...completedTasks];
 
         // [核心修复] 将 Prisma 查询出的 Decimal 类型的 quantity 转换为基础 number 类型
         const formattedRegularTasks = sortedRegularTasks.map((task) => ({
@@ -1693,7 +1851,9 @@ export class ProductionTasksService {
         const where: Prisma.ProductionTaskWhereInput = {
             tenantId,
             deletedAt: null,
-            status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
+            status: {
+                in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS, ProductionTaskStatus.COMPLETED],
+            },
             startDate: {
                 lte: endOfDay,
             },
@@ -1800,7 +1960,7 @@ export class ProductionTasksService {
                 task.items.reduce((itemSum, item) => {
                     const category = item.product?.recipeVersion?.family?.category;
                     if (category === RecipeCategory.OTHER) {
-                        return itemSum + 1; // 自制原料任务只算1个单位
+                        return itemSum; // 自制原料任务不计入待完成总数
                     }
                     return itemSum + item.quantity.toNumber(); // [修复] 将 Decimal 转为 number 再相加
                 }, 0)
@@ -1818,7 +1978,11 @@ export class ProductionTasksService {
                 tenantId,
                 deletedAt: null,
                 status: {
-                    in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS],
+                    in: [
+                        ProductionTaskStatus.PENDING,
+                        ProductionTaskStatus.IN_PROGRESS,
+                        ProductionTaskStatus.COMPLETED,
+                    ],
                 },
                 items: {
                     some: {
@@ -1829,10 +1993,13 @@ export class ProductionTasksService {
             select: {
                 startDate: true,
                 endDate: true,
+                status: true,
             },
         });
 
-        const dates = new Set<string>();
+        const activeDates = new Set<string>();
+        const completedDates = new Set<string>();
+
         tasks.forEach((task) => {
             const current = new Date(task.startDate);
             const end = task.endDate ? new Date(task.endDate) : new Date(task.startDate);
@@ -1840,13 +2007,27 @@ export class ProductionTasksService {
             current.setUTCHours(0, 0, 0, 0);
             end.setUTCHours(0, 0, 0, 0);
 
+            const isActive =
+                task.status === ProductionTaskStatus.PENDING || task.status === ProductionTaskStatus.IN_PROGRESS;
+
             while (current <= end) {
-                dates.add(current.toISOString().split('T')[0]);
+                const dateStr = current.toISOString().split('T')[0];
+                if (isActive) {
+                    activeDates.add(dateStr);
+                } else if (task.status === ProductionTaskStatus.COMPLETED) {
+                    completedDates.add(dateStr);
+                }
                 current.setDate(current.getDate() + 1);
             }
         });
 
-        return Array.from(dates);
+        // 移除在 activeDates 中出现过的 completedDates，确保一个日期如果既有完成又有未完成，显示为未完成
+        activeDates.forEach((d) => completedDates.delete(d));
+
+        return {
+            activeDates: Array.from(activeDates),
+            completedDates: Array.from(completedDates),
+        };
     }
 
     getSpoilageStages() {
@@ -2141,7 +2322,13 @@ export class ProductionTasksService {
             where: {
                 tenantId,
                 deletedAt: null,
-                status: { in: [ProductionTaskStatus.PENDING, ProductionTaskStatus.IN_PROGRESS] },
+                status: {
+                    in: [
+                        ProductionTaskStatus.PENDING,
+                        ProductionTaskStatus.IN_PROGRESS,
+                        ProductionTaskStatus.COMPLETED,
+                    ],
+                },
                 startDate: {
                     gte: startOfDay,
                     lte: endOfDay,
@@ -2180,6 +2367,9 @@ export class ProductionTasksService {
                 status: true,
                 notes: true,
                 items: {
+                    where: {
+                        role: { not: TaskItemRole.PREP_INGREDIENT },
+                    },
                     select: {
                         quantity: true,
                         product: {

@@ -76,6 +76,7 @@ export interface CalculatedRecipeDetails {
     targetWeight: number;
     procedure: string[];
     ingredients: CalculatedRecipeIngredient[];
+    isCompleted?: boolean;
 }
 
 interface ConsumptionDetail {
@@ -359,6 +360,162 @@ export class CostingService {
         };
 
         return response;
+    }
+
+    async calculateRecipeCost(tenantId: string, recipeFamilyId: string, targetWeight: number): Promise<number> {
+        const recipeFamily = await this.prisma.recipeFamily.findFirst({
+            where: { id: recipeFamilyId, tenantId },
+            include: {
+                versions: {
+                    where: { isActive: true },
+                    include: {
+                        components: {
+                            include: {
+                                ingredients: {
+                                    include: {
+                                        ingredient: {
+                                            include: {
+                                                activeSku: true,
+                                            },
+                                        },
+                                        linkedPreDough: {
+                                            include: {
+                                                versions: {
+                                                    where: { isActive: true },
+                                                    include: {
+                                                        components: {
+                                                            include: {
+                                                                ingredients: {
+                                                                    include: {
+                                                                        ingredient: {
+                                                                            include: {
+                                                                                activeSku: true,
+                                                                            },
+                                                                        },
+                                                                    },
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                        linkedExtra: {
+                                            include: {
+                                                versions: {
+                                                    where: { isActive: true },
+                                                    include: {
+                                                        components: {
+                                                            include: {
+                                                                ingredients: {
+                                                                    include: {
+                                                                        ingredient: {
+                                                                            include: {
+                                                                                activeSku: true,
+                                                                            },
+                                                                        },
+                                                                    },
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!recipeFamily || !recipeFamily.versions[0]?.components[0]) {
+            return 0;
+        }
+
+        const ingredients = await this.prisma.ingredient.findMany({
+            where: { tenantId, deletedAt: null },
+            include: {
+                activeSku: {
+                    include: {
+                        priceRecords: {
+                            orderBy: { recordedAt: 'desc' },
+                            take: 1,
+                        },
+                    },
+                },
+            },
+        });
+
+        const pricePerGramMap = new Map<string, Prisma.Decimal>();
+        for (const ing of ingredients) {
+            if (ing.activeSku && ing.activeSku.priceRecords[0] && ing.activeSku.specWeightInGrams) {
+                const pricePerPackage = ing.activeSku.priceRecords[0].pricePerPackage;
+                const pricePerGram = pricePerPackage.div(ing.activeSku.specWeightInGrams);
+                pricePerGramMap.set(ing.id, pricePerGram);
+            }
+        }
+
+        const activeVersion = recipeFamily.versions[0];
+        const mainComponent = activeVersion.components[0];
+
+        const lossRatio = new Prisma.Decimal(mainComponent.lossRatio ? String(mainComponent.lossRatio) : '0');
+        const divisor = new Prisma.Decimal(1).sub(lossRatio);
+        const requiredInputWeight = divisor.isZero()
+            ? new Prisma.Decimal(targetWeight)
+            : new Prisma.Decimal(targetWeight).div(divisor);
+
+        interface CostCalcRecipeFamily {
+            versions?: {
+                components?: CostCalcComponent[];
+            }[];
+        }
+
+        interface CostCalcIngredient {
+            ratio: Prisma.Decimal | number | string | null;
+            linkedPreDough?: CostCalcRecipeFamily | null;
+            linkedExtra?: CostCalcRecipeFamily | null;
+            ingredientId?: string | null;
+        }
+
+        interface CostCalcComponent {
+            lossRatio: Prisma.Decimal | number | string | null;
+            ingredients: CostCalcIngredient[];
+        }
+
+        const getComponentCost = (comp: CostCalcComponent, outputWeight: Prisma.Decimal): Prisma.Decimal => {
+            const totalRatio = comp.ingredients.reduce(
+                (sum: Prisma.Decimal, i: CostCalcIngredient) =>
+                    sum.add(new Prisma.Decimal(i.ratio ? String(i.ratio) : '0')),
+                new Prisma.Decimal(0),
+            );
+            if (totalRatio.isZero()) return new Prisma.Decimal(0);
+
+            const weightPerRatioPoint = outputWeight.div(totalRatio);
+            let costSum = new Prisma.Decimal(0);
+
+            for (const ing of comp.ingredients) {
+                const ingWeight = weightPerRatioPoint.mul(new Prisma.Decimal(ing.ratio ? String(ing.ratio) : '0'));
+                const linkedRecipe = ing.linkedPreDough || ing.linkedExtra;
+                if (linkedRecipe) {
+                    const subComponent = linkedRecipe.versions?.[0]?.components?.[0];
+                    if (subComponent) {
+                        costSum = costSum.add(getComponentCost(subComponent, ingWeight));
+                    }
+                } else if (ing.ingredientId) {
+                    const pricePerGram = pricePerGramMap.get(ing.ingredientId);
+                    if (pricePerGram) {
+                        costSum = costSum.add(pricePerGram.mul(ingWeight));
+                    }
+                }
+            }
+
+            return costSum;
+        };
+
+        return getComponentCost(mainComponent as unknown as CostCalcComponent, requiredInputWeight).toNumber();
     }
 
     /**

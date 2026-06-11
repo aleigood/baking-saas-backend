@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CostingService } from 'src/costing/costing.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { CreateSkuDto } from './dto/create-sku.dto';
@@ -12,7 +13,10 @@ import { QueryConsumptionLedgerDto } from './dto/query-consumption-ledger.dto';
 
 @Injectable()
 export class IngredientsService {
-    constructor(private readonly prisma: PrismaService) {}
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly costingService: CostingService,
+    ) {}
 
     async create(tenantId: string, createIngredientDto: CreateIngredientDto) {
         const { name } = createIngredientDto;
@@ -124,22 +128,115 @@ export class IngredientsService {
         const statsMap = new Map(consumptionStats.map((stat) => [stat.ingredientId, stat.total]));
         const monthlyStatsMap = new Map(monthlyConsumptionStats.map((stat) => [stat.ingredientId, stat.total]));
 
-        const processedIngredients = ingredients.map((ingredient) => {
-            const totalConsumptionInGrams = statsMap.get(ingredient.id) || 0;
-            const monthlyConsumptionInGrams = monthlyStatsMap.get(ingredient.id) || 0;
+        // 针对自制原料，批量统计已完成的前置准备任务（role === 'PREP_INGREDIENT'）作为消耗量
+        const selfMadeFamilyIds = ingredients
+            .filter((i) => i.type === IngredientType.SELF_MADE && i.recipeFamilyId)
+            .map((i) => i.recipeFamilyId)
+            .filter((id): id is string => !!id);
 
-            const currentPricePerPackage = ingredient.activeSkuId
-                ? priceMap.get(ingredient.activeSkuId) || new Prisma.Decimal(0)
-                : new Prisma.Decimal(0);
+        const selfMadeTotalMap = new Map<string, number>();
+        const selfMadeMonthlyMap = new Map<string, number>();
 
-            return {
-                ...ingredient,
-                currentPricePerPackage: currentPricePerPackage.toNumber(),
-                waterContent: ingredient.waterContent.toNumber(),
-                totalConsumptionInGrams,
-                monthlyConsumptionInGrams,
-            };
-        });
+        if (selfMadeFamilyIds.length > 0) {
+            const selfMadeConsumptions = await this.prisma.productionTaskItem.findMany({
+                where: {
+                    role: 'PREP_INGREDIENT',
+                    product: {
+                        recipeVersion: {
+                            familyId: { in: selfMadeFamilyIds },
+                        },
+                    },
+                    task: {
+                        status: 'COMPLETED',
+                    },
+                },
+                select: {
+                    quantity: true,
+                    product: {
+                        select: {
+                            recipeVersion: {
+                                select: {
+                                    familyId: true,
+                                },
+                            },
+                        },
+                    },
+                    task: {
+                        select: {
+                            startDate: true,
+                            log: {
+                                select: {
+                                    completedAt: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            selfMadeConsumptions.forEach((item) => {
+                const familyId = item.product?.recipeVersion?.familyId;
+                if (!familyId) return;
+                const ing = ingredients.find((i) => i.recipeFamilyId === familyId);
+                if (!ing) return;
+
+                const quantity = item.quantity.toNumber();
+                const completedAt = item.task.log?.completedAt;
+                const recordDate = completedAt || item.task.startDate;
+
+                selfMadeTotalMap.set(ing.id, (selfMadeTotalMap.get(ing.id) || 0) + quantity);
+                if (recordDate && recordDate >= monthStart) {
+                    selfMadeMonthlyMap.set(ing.id, (selfMadeMonthlyMap.get(ing.id) || 0) + quantity);
+                }
+            });
+        }
+
+        const processedIngredients = await Promise.all(
+            ingredients.map(async (ingredient) => {
+                let totalConsumptionInGrams = 0;
+                let monthlyConsumptionInGrams = 0;
+
+                if (ingredient.type === IngredientType.SELF_MADE) {
+                    totalConsumptionInGrams = selfMadeTotalMap.get(ingredient.id) || 0;
+                    monthlyConsumptionInGrams = selfMadeMonthlyMap.get(ingredient.id) || 0;
+                } else {
+                    totalConsumptionInGrams = statsMap.get(ingredient.id) || 0;
+                    monthlyConsumptionInGrams = monthlyStatsMap.get(ingredient.id) || 0;
+                }
+
+                const currentPricePerPackage = ingredient.activeSkuId
+                    ? priceMap.get(ingredient.activeSkuId) || new Prisma.Decimal(0)
+                    : new Prisma.Decimal(0);
+
+                let unitPricePerGram = 0;
+                if (ingredient.type === IngredientType.SELF_MADE && ingredient.recipeFamilyId) {
+                    try {
+                        const recipeCost = await this.costingService.calculateRecipeCost(
+                            tenantId,
+                            ingredient.recipeFamilyId,
+                            1000,
+                        );
+                        unitPricePerGram = recipeCost / 1000;
+                    } catch {
+                        unitPricePerGram = 0;
+                    }
+                } else if (ingredient.activeSkuId) {
+                    const activeSku = ingredient.skus.find((s) => s.id === ingredient.activeSkuId);
+                    if (activeSku && activeSku.specWeightInGrams.toNumber() > 0) {
+                        unitPricePerGram = currentPricePerPackage.toNumber() / activeSku.specWeightInGrams.toNumber();
+                    }
+                }
+
+                return {
+                    ...ingredient,
+                    currentPricePerPackage: currentPricePerPackage.toNumber(),
+                    unitPricePerGram,
+                    waterContent: ingredient.waterContent.toNumber(),
+                    totalConsumptionInGrams,
+                    monthlyConsumptionInGrams,
+                };
+            }),
+        );
 
         const allIngredients = [...processedIngredients].sort(
             (a, b) => b.totalConsumptionInGrams - a.totalConsumptionInGrams,
@@ -211,36 +308,150 @@ export class IngredientsService {
                 currentPricePerPackage = latestPriceRecord.pricePerPackage;
             }
         }
-        const totalConsumption = await this.prisma.ingredientConsumptionLog.aggregate({
-            where: {
-                ingredientId: ingredient.id,
-            },
-            _sum: {
-                quantityInGrams: true,
-            },
-        });
         const now = new Date();
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const monthlyConsumption = await this.prisma.ingredientConsumptionLog.aggregate({
-            where: {
-                ingredientId: ingredient.id,
-                productionLog: {
-                    completedAt: {
-                        gte: monthStart,
+
+        let totalConsumptionInGrams = 0;
+        let monthlyConsumptionInGrams = 0;
+
+        let unitPricePerGram = 0;
+        if (ingredient.type === IngredientType.SELF_MADE && ingredient.recipeFamilyId) {
+            try {
+                const recipeCost = await this.costingService.calculateRecipeCost(
+                    tenantId,
+                    ingredient.recipeFamilyId,
+                    1000,
+                );
+                unitPricePerGram = recipeCost / 1000;
+            } catch {
+                unitPricePerGram = 0;
+            }
+        } else if (ingredient.activeSkuId) {
+            const activeSku = ingredient.skus.find((s) => s.id === ingredient.activeSkuId);
+            if (activeSku && activeSku.specWeightInGrams.toNumber() > 0) {
+                unitPricePerGram = currentPricePerPackage.toNumber() / activeSku.specWeightInGrams.toNumber();
+            }
+        }
+
+        // Fetch production records if it's SELF_MADE
+        let productionRecords: {
+            id: string;
+            date: Date;
+            details: string;
+            change: number;
+            operator: string;
+        }[] = [];
+        let monthlyProductionCount = 0;
+        let monthlyProductionInGrams = 0;
+        if (ingredient.type === IngredientType.SELF_MADE && ingredient.recipeFamilyId) {
+            const taskItems = await this.prisma.productionTaskItem.findMany({
+                where: {
+                    product: {
+                        recipeVersion: {
+                            familyId: ingredient.recipeFamilyId,
+                        },
+                    },
+                    task: {
+                        status: 'COMPLETED',
                     },
                 },
-            },
-            _sum: {
-                quantityInGrams: true,
-            },
-        });
+                include: {
+                    task: {
+                        select: {
+                            id: true,
+                            startDate: true,
+                            createdBy: {
+                                select: {
+                                    name: true,
+                                },
+                            },
+                            log: {
+                                select: {
+                                    completedAt: true,
+                                },
+                            },
+                        },
+                    },
+                },
+                orderBy: {
+                    task: {
+                        startDate: 'desc',
+                    },
+                },
+            });
+
+            const uniqueDates = new Set<string>();
+            productionRecords = taskItems.map((item) => {
+                const quantityGrams = item.quantity.toNumber();
+                const completedAt = item.task.log?.completedAt;
+                const recordDate = completedAt || item.task.startDate;
+
+                if (recordDate && recordDate >= monthStart) {
+                    monthlyProductionInGrams += quantityGrams;
+                    const dateStr = new Date(recordDate).toISOString().split('T')[0];
+                    uniqueDates.add(dateStr);
+                }
+                const isAuto = item.role === 'PREP_INGREDIENT';
+                return {
+                    id: item.id,
+                    date: recordDate,
+                    details: isAuto ? '前置准备自动创建' : `手动创建 (任务#${item.task.id.substring(0, 4)})`,
+                    change: quantityGrams,
+                    operator: isAuto ? '系统' : item.task.createdBy?.name || '系统',
+                };
+            });
+            monthlyProductionCount = uniqueDates.size;
+
+            // 针对自制原料，汇总其所有的 PREP_INGREDIENT 任务项克重作为消耗量
+            taskItems.forEach((item) => {
+                if (item.role === 'PREP_INGREDIENT') {
+                    const quantityGrams = item.quantity.toNumber();
+                    totalConsumptionInGrams += quantityGrams;
+                    const completedAt = item.task.log?.completedAt;
+                    const recordDate = completedAt || item.task.startDate;
+                    if (recordDate && recordDate >= monthStart) {
+                        monthlyConsumptionInGrams += quantityGrams;
+                    }
+                }
+            });
+        }
+
+        if (ingredient.type !== IngredientType.SELF_MADE) {
+            const totalConsumption = await this.prisma.ingredientConsumptionLog.aggregate({
+                where: {
+                    ingredientId: ingredient.id,
+                },
+                _sum: {
+                    quantityInGrams: true,
+                },
+            });
+            const monthlyConsumption = await this.prisma.ingredientConsumptionLog.aggregate({
+                where: {
+                    ingredientId: ingredient.id,
+                    productionLog: {
+                        completedAt: {
+                            gte: monthStart,
+                        },
+                    },
+                },
+                _sum: {
+                    quantityInGrams: true,
+                },
+            });
+            totalConsumptionInGrams = totalConsumption._sum.quantityInGrams?.toNumber() || 0;
+            monthlyConsumptionInGrams = monthlyConsumption._sum.quantityInGrams?.toNumber() || 0;
+        }
 
         return {
             ...ingredient,
             currentPricePerPackage: currentPricePerPackage.toNumber(),
+            unitPricePerGram,
+            productionRecords,
+            monthlyProductionCount,
+            monthlyProductionInGrams,
             waterContent: ingredient.waterContent.toNumber(),
-            totalConsumptionInGrams: totalConsumption._sum.quantityInGrams?.toNumber() || 0,
-            monthlyConsumptionInGrams: monthlyConsumption._sum.quantityInGrams?.toNumber() || 0,
+            totalConsumptionInGrams,
+            monthlyConsumptionInGrams,
             skus: ingredient.skus.map((sku) => {
                 const { priceRecords, ...skuData } = sku;
                 return {
@@ -258,7 +469,11 @@ export class IngredientsService {
     }
 
     async update(tenantId: string, id: string, updateIngredientDto: UpdateIngredientDto) {
-        await this.findOne(tenantId, id);
+        const original = await this.findOne(tenantId, id);
+
+        if (updateIngredientDto.type === 'SELF_MADE' && original.type !== 'SELF_MADE') {
+            throw new BadRequestException('不能将普通原料修改为自制原料');
+        }
 
         const data: Prisma.IngredientUpdateInput = { ...updateIngredientDto };
         if (updateIngredientDto.waterContent !== undefined) {

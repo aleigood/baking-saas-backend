@@ -2,6 +2,7 @@
 // 路径: src/recipes/recipes.controller.ts
 // [核心修改] 修复 Prettier 格式问题，并将 'exportRecipes' 的权限检查移至 Service
 
+import 'multer';
 import {
     Controller,
     Get,

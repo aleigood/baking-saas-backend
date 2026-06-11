@@ -89,6 +89,11 @@ enum SkuStatus {
   INACTIVE // 未启用
 }
 
+enum TaskItemRole {
+  FINAL_PRODUCT     // 最终产品（主任务的产物，如面包、蛋糕）
+  PREP_INGREDIENT   // 前置备料（前置准备任务制作的自制原料，如卡仕达酱、波兰种）
+}
+
 // ================================================================= //
 //                         CORE AUTH & TENANCY                       //
 // ================================================================= //
@@ -387,6 +392,7 @@ model ProductionTaskItem {
   taskId    String
   productId String
   quantity  Decimal        // [核心修改] 从 Int 改为 Decimal，支持自制原料等带小数的产出/投入量
+  role      TaskItemRole   @default(FINAL_PRODUCT) // 新增字段：表示在任务中的角色
   task      ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   product   Product        @relation(fields: [productId], references: [id], onDelete: Restrict) // [核心修改] Cascade -> Restrict
 

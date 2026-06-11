@@ -28,6 +28,9 @@ CREATE TYPE "ProductIngredientType" AS ENUM ('MIX_IN', 'FILLING', 'TOPPING');
 -- CreateEnum
 CREATE TYPE "SkuStatus" AS ENUM ('ACTIVE', 'INACTIVE');
 
+-- CreateEnum
+CREATE TYPE "TaskItemRole" AS ENUM ('FINAL_PRODUCT', 'PREP_INGREDIENT');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
@@ -224,6 +227,7 @@ CREATE TABLE "ProductionTaskItem" (
     "taskId" TEXT NOT NULL,
     "productId" TEXT NOT NULL,
     "quantity" DECIMAL(65,30) NOT NULL,
+    "role" "TaskItemRole" NOT NULL DEFAULT 'FINAL_PRODUCT',
 
     CONSTRAINT "ProductionTaskItem_pkey" PRIMARY KEY ("id")
 );

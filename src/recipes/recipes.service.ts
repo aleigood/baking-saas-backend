@@ -81,7 +81,6 @@ export interface DisplayIngredient {
     deletedAt: Date | null;
     extraInfo?: string;
     // [核心新增]
-    shelfLife: number;
     recipeFamilyId?: string | null;
 }
 
@@ -163,7 +162,6 @@ export class RecipesService {
         name: string,
         type: RecipeType,
         waterContent: number,
-        shelfLife: number, // [核心新增] 保质期参数
     ) {
         // 主配方不产生原料
         if (type === 'MAIN') return;
@@ -174,18 +172,13 @@ export class RecipesService {
         });
 
         if (existing) {
-            // 如果名称、含水量或保质期有变化，则更新
-            if (
-                existing.name !== name ||
-                existing.waterContent.toNumber() !== waterContent ||
-                existing.shelfLife !== shelfLife
-            ) {
+            // 如果名称或含水量有变化，则更新
+            if (existing.name !== name || existing.waterContent.toNumber() !== waterContent) {
                 await tx.ingredient.update({
                     where: { id: existing.id },
                     data: {
                         name,
                         waterContent: new Prisma.Decimal(waterContent),
-                        shelfLife: shelfLife,
                     },
                 });
             }
@@ -199,7 +192,6 @@ export class RecipesService {
                     recipeFamilyId: familyId,
                     isFlour: false,
                     waterContent: new Prisma.Decimal(waterContent),
-                    shelfLife: shelfLife,
                 },
             });
         }
@@ -298,7 +290,6 @@ export class RecipesService {
                                     ...ingWithExtra,
                                     waterContent: ingWithExtra.waterContent.toNumber(),
                                     recipeFamilyId: null,
-                                    shelfLife: ingWithExtra.shelfLife,
                                 };
                             } else if (componentIngredient.linkedPreDough) {
                                 // 2. 面种配方
@@ -310,7 +301,6 @@ export class RecipesService {
                                     waterContent: preDoughWithLink.outputIngredient?.waterContent.toNumber() ?? 0,
                                     isFlour: false,
                                     activeSkuId: null,
-                                    shelfLife: preDoughWithLink.outputIngredient?.shelfLife ?? 0,
                                     recipeFamilyId: preDoughWithLink.id,
                                 };
                             } else if (componentIngredient.linkedExtra) {
@@ -323,7 +313,6 @@ export class RecipesService {
                                     waterContent: extraWithLink.outputIngredient?.waterContent.toNumber() ?? 0,
                                     isFlour: false,
                                     activeSkuId: null,
-                                    shelfLife: extraWithLink.outputIngredient?.shelfLife ?? 0,
                                     recipeFamilyId: extraWithLink.id,
                                 };
                             } else {
@@ -339,7 +328,6 @@ export class RecipesService {
                                     updatedAt: new Date(),
                                     deletedAt: null,
                                     tenantId: family.tenantId,
-                                    shelfLife: 0,
                                     recipeFamilyId: null,
                                 };
                             }
@@ -364,7 +352,6 @@ export class RecipesService {
                             displayProductIngredient = {
                                 ...productIngredient.ingredient,
                                 waterContent: productIngredient.ingredient.waterContent.toNumber(),
-                                shelfLife: productIngredient.ingredient.shelfLife,
                                 recipeFamilyId: null,
                             };
                         } else if (productIngredient.linkedExtra) {
@@ -374,7 +361,6 @@ export class RecipesService {
                                 waterContent: 0,
                                 isFlour: false,
                                 activeSkuId: null,
-                                shelfLife: 0, // 暂不 fetch
                                 recipeFamilyId: productIngredient.linkedExtra.id,
                             };
                         } else {
@@ -389,7 +375,6 @@ export class RecipesService {
                                 updatedAt: new Date(),
                                 deletedAt: null,
                                 tenantId: family.tenantId,
-                                shelfLife: 0,
                                 recipeFamilyId: null,
                             };
                         }
@@ -903,7 +888,6 @@ export class RecipesService {
                 name,
                 type = 'MAIN',
                 category,
-                shelfLife = 0, // [核心新增] 接收 shelfLife 参数，默认0
             } = updateRecipeDto;
 
             await tx.componentIngredient.deleteMany({
@@ -951,7 +935,7 @@ export class RecipesService {
 
                 if (!ingredientId && !preDoughId && !extraId) {
                     throw new BadRequestException(
-                        `原料 "${ingredientDto.name}" 无法被识别，它既不是标准原料，也不是一个有效的 PRE_DOUGH 或 EXTRA 配方。`,
+                        `原料 "${ingredientDto.name}" 无法被识别，它既不是基础原料，也不是一个有效的 PRE_DOUGH 或 EXTRA 配方。`,
                     );
                 }
 
@@ -991,7 +975,7 @@ export class RecipesService {
 
             // [核心新增] 同步更新自制原料的含水量、名称和保质期
             const waterContent = this._calculateWaterContent(updatedFamily as unknown as WaterCalcFamily);
-            await this._syncSelfMadeIngredient(tx, tenantId, familyId, name, type, waterContent, shelfLife);
+            await this._syncSelfMadeIngredient(tx, tenantId, familyId, name, type, waterContent);
 
             // [核心新增] 同步更新默认产品
             await this._syncDefaultProduct(tx, versionId, name, type);
@@ -1111,7 +1095,7 @@ export class RecipesService {
     }
 
     private async createVersionInternal(tenantId: string, familyId: string | null, createRecipeDto: CreateRecipeDto) {
-        const { name, type = 'MAIN', category, shelfLife = 0 } = createRecipeDto;
+        const { name, type = 'MAIN', category } = createRecipeDto;
 
         const finalCategory = type === 'MAIN' ? category : 'OTHER';
         if (type === 'MAIN' && !finalCategory) {
@@ -1203,8 +1187,8 @@ export class RecipesService {
                 const finalFamily = await this.createVersionContents(tenantId, recipeVersion.id, createRecipeDto, tx);
 
                 const waterContent = this._calculateWaterContent(finalFamily as unknown as WaterCalcFamily);
-                // [核心新增] 同步自制原料 (传入 shelfLife)
-                await this._syncSelfMadeIngredient(tx, tenantId, recipeFamily.id, name, type, waterContent, shelfLife);
+                // [核心新增] 同步自制原料
+                await this._syncSelfMadeIngredient(tx, tenantId, recipeFamily.id, name, type, waterContent);
 
                 await this._syncDefaultProduct(tx, recipeVersion.id, name, type);
 
@@ -1299,7 +1283,7 @@ export class RecipesService {
 
             if (!ingredientId && !preDoughId && !extraId) {
                 throw new BadRequestException(
-                    `原料 "${ingredientDto.name}" 无法被识别，它既不是标准原料，也不是一个有效的 PRE_DOUGH 或 EXTRA 配方。`,
+                    `原料 "${ingredientDto.name}" 无法被识别，它既不是基础原料，也不是一个有效的 PRE_DOUGH 或 EXTRA 配方。`,
                 );
             }
 
@@ -1522,10 +1506,6 @@ export class RecipesService {
                     (family._count?.usedInComponentsAsExtra || 0) +
                     (family._count?.usedInProducts || 0);
 
-                if (family.type !== 'MAIN') {
-                    return { ...family, ingredientCount, usageCount, productionTaskCount: 0, productCount };
-                }
-
                 if (!activeVersion || activeVersion.products.length === 0) {
                     return { ...family, productCount, ingredientCount, productionTaskCount: 0, usageCount };
                 }
@@ -1679,7 +1659,6 @@ export class RecipesService {
                                 recipeFamilyId: family.id,
                                 isFlour: false,
                                 waterContent: new Prisma.Decimal(waterContent),
-                                shelfLife: 0,
                             },
                         });
                     } catch {
@@ -1729,15 +1708,30 @@ export class RecipesService {
                 id: familyId,
                 deletedAt: null,
             },
-            include: recipeFamilyWithDetailsInclude,
+            include: {
+                ...recipeFamilyWithDetailsInclude,
+                _count: {
+                    select: {
+                        usedInComponentsAsPreDough: true,
+                        usedInComponentsAsExtra: true,
+                        usedInProducts: true,
+                    },
+                },
+            },
         });
 
         if (!family) {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
+        const usageCount =
+            (family._count?.usedInComponentsAsPreDough || 0) +
+            (family._count?.usedInComponentsAsExtra || 0) +
+            (family._count?.usedInProducts || 0);
+
         const processedFamily = {
             ...family,
+            usageCount,
             versions: family.versions.map((version) => {
                 return {
                     ...version,
@@ -2369,7 +2363,7 @@ export class RecipesService {
             const linkedFamily = linkedFamilies.get(ing.name);
             if (!linkedFamily) {
                 if (ing.flourRatio !== undefined && ing.flourRatio !== null) {
-                    throw new BadRequestException(`原料 "${ing.name}" 是一个标准原料，不能使用面粉比例(flourRatio)。`);
+                    throw new BadRequestException(`原料 "${ing.name}" 是一个基础原料，不能使用面粉比例(flourRatio)。`);
                 }
                 continue;
             }
