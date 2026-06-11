@@ -25,6 +25,7 @@ import { ComponentGroup, ProductDetails, TaskDetailResponseDto, TaskIngredientDe
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 import { BillOfMaterialsResponseDto, BillOfMaterialsItem, PrepTask } from './dto/preparation.dto';
 import { TogglePrepItemDto } from './dto/toggle-prep-item.dto';
+import { getUtcDayBounds } from '../common/utils/timezone.util';
 import * as path from 'path';
 
 // [核心修复] 禁用 require 和 unsafe-assignment 检查
@@ -1441,20 +1442,7 @@ export class ProductionTasksService {
         tenantId: string,
         date?: string,
     ): Promise<Omit<PrepTask, 'items' | 'billOfMaterials'> | null> {
-        let targetDate: Date;
-        if (date) {
-            targetDate = new Date(date);
-            if (isNaN(targetDate.getTime())) {
-                targetDate = new Date();
-            }
-        } else {
-            targetDate = new Date();
-        }
-
-        const startOfDay = new Date(targetDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(targetDate);
-        endOfDay.setHours(23, 59, 59, 999);
+        const { start: startOfDay, end: endOfDay } = getUtcDayBounds(date);
 
         const tasksStartingToday = await this.prisma.productionTask.findMany({
             where: {
@@ -1528,20 +1516,7 @@ export class ProductionTasksService {
     }
 
     async getPrepTaskDetails(tenantId: string, date?: string, taskIds?: string[]): Promise<PrepTask | null> {
-        let targetDate: Date;
-        if (date) {
-            targetDate = new Date(date);
-            if (isNaN(targetDate.getTime())) {
-                targetDate = new Date();
-            }
-        } else {
-            targetDate = new Date();
-        }
-
-        const startOfDay = new Date(targetDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(targetDate);
-        endOfDay.setHours(23, 59, 59, 999);
+        const { start: startOfDay, end: endOfDay } = getUtcDayBounds(date);
 
         // 获取当天所有相关的任务，用于生成完整的 sourceTasks 列表供前端筛选
         const tasksStartingToday = await this.prisma.productionTask.findMany({
@@ -1687,11 +1662,7 @@ export class ProductionTasksService {
     }
 
     async togglePrepItem(tenantId: string, dto: TogglePrepItemDto) {
-        const targetDate = new Date(dto.date);
-        const startOfDay = new Date(targetDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(targetDate);
-        endOfDay.setHours(23, 59, 59, 999);
+        const { start: startOfDay, end: endOfDay } = getUtcDayBounds(dto.date);
 
         // 获取当天相关的生产任务
         const tasks = await this.prisma.productionTask.findMany({
@@ -1789,6 +1760,52 @@ export class ProductionTasksService {
         });
     }
 
+    private async _getIngredientActiveSkuUnitPricePerGram(
+        ingredientId: string,
+        tx: Prisma.TransactionClient,
+    ): Promise<{ skuId: string | null; unitPrice: Prisma.Decimal | null }> {
+        const ingredient = await tx.ingredient.findFirst({
+            where: { id: ingredientId },
+            select: { activeSkuId: true },
+        });
+
+        if (!ingredient || !ingredient.activeSkuId) {
+            return { skuId: null, unitPrice: null };
+        }
+
+        const sku = await tx.ingredientSKU.findFirst({
+            where: { id: ingredient.activeSkuId },
+            select: {
+                specWeightInGrams: true,
+            },
+        });
+
+        if (!sku || sku.specWeightInGrams.isZero()) {
+            return { skuId: ingredient.activeSkuId, unitPrice: null };
+        }
+
+        const latestPriceRecord = await tx.priceRecord.findFirst({
+            where: {
+                skuId: ingredient.activeSkuId,
+            },
+            orderBy: {
+                recordedAt: 'desc',
+            },
+            select: {
+                pricePerPackage: true,
+            },
+        });
+
+        if (!latestPriceRecord) {
+            return { skuId: ingredient.activeSkuId, unitPrice: null };
+        }
+
+        return {
+            skuId: ingredient.activeSkuId,
+            unitPrice: latestPriceRecord.pricePerPackage.div(sku.specWeightInGrams),
+        };
+    }
+
     async findActive(tenantId: string, date?: string) {
         const [tasksForDate, dateStats] = await Promise.all([
             this.findTasksForDate(tenantId, date),
@@ -1833,20 +1850,7 @@ export class ProductionTasksService {
     }
 
     private async findTasksForDate(tenantId: string, date?: string) {
-        let targetDate: Date;
-        if (date) {
-            targetDate = new Date(date);
-            if (isNaN(targetDate.getTime())) {
-                targetDate = new Date();
-            }
-        } else {
-            targetDate = new Date();
-        }
-
-        const startOfDay = new Date(targetDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(targetDate);
-        endOfDay.setHours(23, 59, 59, 999);
+        const { start: startOfDay, end: endOfDay } = getUtcDayBounds(date);
 
         const where: Prisma.ProductionTaskWhereInput = {
             tenantId,
@@ -2303,20 +2307,7 @@ export class ProductionTasksService {
     }
 
     async getBillOfMaterialsForDate(tenantId: string, date?: string): Promise<BillOfMaterialsResponseDto> {
-        let targetDate: Date;
-        if (date) {
-            targetDate = new Date(date);
-            if (isNaN(targetDate.getTime())) {
-                targetDate = new Date();
-            }
-        } else {
-            targetDate = new Date();
-        }
-
-        const startOfDay = new Date(targetDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(targetDate);
-        endOfDay.setHours(23, 59, 59, 999);
+        const { start: startOfDay, end: endOfDay } = getUtcDayBounds(date);
 
         const tasksStartingToday = await this.prisma.productionTask.findMany({
             where: {
@@ -3342,9 +3333,20 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
+        const data: Prisma.ProductionTaskUpdateInput = { ...updateProductionTaskDto };
+
+        // 状态由 PENDING 变更为 IN_PROGRESS 时重新生成配方快照
+        if (
+            task.status === ProductionTaskStatus.PENDING &&
+            updateProductionTaskDto.status === ProductionTaskStatus.IN_PROGRESS
+        ) {
+            const snapshot = await this._fetchAndSerializeSnapshot(id);
+            data.recipeSnapshot = snapshot;
+        }
+
         return this.prisma.productionTask.update({
             where: { id },
-            data: updateProductionTaskDto,
+            data,
         });
     }
 
@@ -3489,12 +3491,14 @@ export class ProductionTasksService {
                         totalTheoreticalConsumption.set(cons.ingredientId, current.add(cons.totalConsumed));
 
                         // 记录消耗日志 (Step 1a)
+                        const priceInfo = await this._getIngredientActiveSkuUnitPricePerGram(cons.ingredientId, tx);
                         await tx.ingredientConsumptionLog.create({
                             data: {
                                 productionLogId: productionLog.id,
                                 ingredientId: cons.ingredientId,
-                                skuId: cons.activeSkuId,
+                                skuId: priceInfo.skuId || cons.activeSkuId,
                                 quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
+                                unitPrice: priceInfo.unitPrice,
                             },
                         });
                     }
@@ -3531,12 +3535,14 @@ export class ProductionTasksService {
                         const current = totalSpoiledConsumption.get(cons.ingredientId) || new Prisma.Decimal(0);
                         totalSpoiledConsumption.set(cons.ingredientId, current.add(cons.totalConsumed));
 
+                        const priceInfo = await this._getIngredientActiveSkuUnitPricePerGram(cons.ingredientId, tx);
                         await tx.ingredientConsumptionLog.create({
                             data: {
                                 productionLogId: productionLog.id,
                                 ingredientId: cons.ingredientId,
-                                skuId: cons.activeSkuId,
+                                skuId: priceInfo.skuId || cons.activeSkuId,
                                 quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
+                                unitPrice: priceInfo.unitPrice,
                             },
                         });
                     }
@@ -3565,11 +3571,14 @@ export class ProductionTasksService {
                 const processLoss = new Prisma.Decimal(inputData.totalConsumed).sub(theoretical).sub(spoiled);
 
                 if (processLoss.gt(0.01)) {
+                    const priceInfo = await this._getIngredientActiveSkuUnitPricePerGram(ingId, tx);
                     await tx.ingredientConsumptionLog.create({
                         data: {
                             productionLogId: productionLog.id,
                             ingredientId: ingId,
+                            skuId: priceInfo.skuId,
                             quantityInGrams: processLoss,
+                            unitPrice: priceInfo.unitPrice,
                         },
                     });
                 }

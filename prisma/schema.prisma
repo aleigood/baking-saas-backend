@@ -459,6 +459,7 @@ model IngredientConsumptionLog {
   ingredientId    String
   skuId           String?
   quantityInGrams Decimal // [核心修改] 消耗克重
+  unitPrice       Decimal? // [核心新增] 消耗时该原料的每克单价
   productionLog   ProductionLog  @relation(fields: [productionLogId], references: [id])
   ingredient      Ingredient     @relation(fields: [ingredientId], references: [id])
   sku             IngredientSKU? @relation(fields: [skuId], references: [id])

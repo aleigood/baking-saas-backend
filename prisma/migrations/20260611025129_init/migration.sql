@@ -275,6 +275,7 @@ CREATE TABLE "IngredientConsumptionLog" (
     "ingredientId" TEXT NOT NULL,
     "skuId" TEXT,
     "quantityInGrams" DECIMAL(65,30) NOT NULL,
+    "unitPrice" DECIMAL(65,30),
 
     CONSTRAINT "IngredientConsumptionLog_pkey" PRIMARY KEY ("id")
 );

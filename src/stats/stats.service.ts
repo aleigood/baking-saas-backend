@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatsDto } from './dto/stats.dto';
+import { getUtcDayBounds } from 'src/common/utils/timezone.util';
 // [核心修改] ProductionTasksService 的导入已移除，因为它不再被使用
 
 @Injectable()
@@ -16,10 +17,8 @@ export class StatsService {
     async getProductionStats(tenantId: string, dto: StatsDto) {
         const { startDate, endDate } = dto;
 
-        const startOfDay = new Date(startDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(endDate);
-        endOfDay.setHours(23, 59, 59, 999);
+        const { start: startOfDay } = getUtcDayBounds(startDate);
+        const { end: endOfDay } = getUtcDayBounds(endDate);
 
         const completedTasks = await this.prisma.productionTask.findMany({
             where: {

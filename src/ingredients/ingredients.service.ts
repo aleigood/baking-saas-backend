@@ -10,6 +10,7 @@ import { SetActiveSkuDto } from './dto/set-active-sku.dto';
 import { UpdatePriceRecordDto } from './dto/update-price-record.dto';
 import { UpdateSkuDto } from './dto/update-sku.dto';
 import { QueryConsumptionLedgerDto } from './dto/query-consumption-ledger.dto';
+import { getUtcDayBounds } from 'src/common/utils/timezone.util';
 
 @Injectable()
 export class IngredientsService {
@@ -533,13 +534,11 @@ export class IngredientsService {
 
         const completedAtFilter: { gte?: Date; lte?: Date } = {};
         if (startDate) {
-            const start = new Date(startDate);
-            start.setHours(0, 0, 0, 0);
+            const { start } = getUtcDayBounds(startDate);
             completedAtFilter.gte = start;
         }
         if (endDate) {
-            const end = new Date(endDate);
-            end.setHours(23, 59, 59, 999);
+            const { end } = getUtcDayBounds(endDate);
             completedAtFilter.lte = end;
         }
 
