@@ -3446,6 +3446,37 @@ export class ProductionTasksService {
             }
         }
 
+        const uniqueIngredientIds = new Set<string>();
+        for (const completedItem of completedItems) {
+            const { productId, completedQuantity, spoilageDetails } = completedItem;
+            const snapshotProduct = snapshotProductMap.get(productId);
+            if (!snapshotProduct) continue;
+
+            if (completedQuantity > 0) {
+                const successConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                    snapshotProduct,
+                    completedQuantity,
+                );
+                for (const cons of successConsumptions) {
+                    uniqueIngredientIds.add(cons.ingredientId);
+                }
+            }
+
+            const calculatedSpoilage = spoilageDetails?.reduce((sum, s) => sum + s.quantity, 0) || 0;
+            if (calculatedSpoilage > 0) {
+                const spoiledConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                    snapshotProduct,
+                    calculatedSpoilage,
+                );
+                for (const cons of spoiledConsumptions) {
+                    uniqueIngredientIds.add(cons.ingredientId);
+                }
+            }
+        }
+        for (const [ingId] of totalInputNeeded.entries()) {
+            uniqueIngredientIds.add(ingId);
+        }
+
         return this.prisma.$transaction(async (tx) => {
             // 1. 更新任务状态
             await tx.productionTask.update({
@@ -3460,6 +3491,63 @@ export class ProductionTasksService {
                     notes,
                 },
             });
+
+            // 批量获取原料的价格信息
+            const ingredientsData = await tx.ingredient.findMany({
+                where: {
+                    id: { in: Array.from(uniqueIngredientIds) },
+                    tenantId,
+                    deletedAt: null,
+                },
+                select: {
+                    id: true,
+                    activeSkuId: true,
+                    activeSku: {
+                        select: {
+                            id: true,
+                            specWeightInGrams: true,
+                            priceRecords: {
+                                orderBy: { recordedAt: 'desc' },
+                                take: 1,
+                                select: {
+                                    pricePerPackage: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            const priceInfoMap = new Map<string, { skuId: string | null; unitPrice: Prisma.Decimal | null }>();
+            for (const ing of ingredientsData) {
+                if (!ing.activeSkuId || !ing.activeSku) {
+                    priceInfoMap.set(ing.id, { skuId: null, unitPrice: null });
+                    continue;
+                }
+                const sku = ing.activeSku;
+                if (sku.specWeightInGrams.isZero()) {
+                    priceInfoMap.set(ing.id, { skuId: ing.activeSkuId, unitPrice: null });
+                    continue;
+                }
+                const latestPriceRecord = sku.priceRecords[0];
+                if (!latestPriceRecord) {
+                    priceInfoMap.set(ing.id, { skuId: ing.activeSkuId, unitPrice: null });
+                    continue;
+                }
+                priceInfoMap.set(ing.id, {
+                    skuId: ing.activeSkuId,
+                    unitPrice: latestPriceRecord.pricePerPackage.div(sku.specWeightInGrams),
+                });
+            }
+
+            const getPriceInfo = (ingredientId: string) => {
+                return priceInfoMap.get(ingredientId) || { skuId: null, unitPrice: null };
+            };
+
+            // 收集批量插入的数据
+            const consumptionLogsData: Prisma.IngredientConsumptionLogCreateManyInput[] = [];
+            const spoilageLogsData: Prisma.ProductionTaskSpoilageLogCreateManyInput[] = [];
+            const overproductionLogsData: Prisma.ProductionTaskOverproductionLogCreateManyInput[] = [];
 
             // 累计变量，用于计算工艺损耗和总成本
             const totalTheoreticalConsumption = new Map<string, Prisma.Decimal>(); // 成功品消耗
@@ -3490,16 +3578,14 @@ export class ProductionTasksService {
                         const current = totalTheoreticalConsumption.get(cons.ingredientId) || new Prisma.Decimal(0);
                         totalTheoreticalConsumption.set(cons.ingredientId, current.add(cons.totalConsumed));
 
-                        // 记录消耗日志 (Step 1a)
-                        const priceInfo = await this._getIngredientActiveSkuUnitPricePerGram(cons.ingredientId, tx);
-                        await tx.ingredientConsumptionLog.create({
-                            data: {
-                                productionLogId: productionLog.id,
-                                ingredientId: cons.ingredientId,
-                                skuId: priceInfo.skuId || cons.activeSkuId,
-                                quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
-                                unitPrice: priceInfo.unitPrice,
-                            },
+                        // 收集消耗日志
+                        const priceInfo = getPriceInfo(cons.ingredientId);
+                        consumptionLogsData.push({
+                            productionLogId: productionLog.id,
+                            ingredientId: cons.ingredientId,
+                            skuId: priceInfo.skuId || cons.activeSkuId,
+                            quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
+                            unitPrice: priceInfo.unitPrice,
                         });
                     }
                 }
@@ -3508,18 +3594,16 @@ export class ProductionTasksService {
                 const calculatedSpoilage = spoilageDetails?.reduce((sum, s) => sum + s.quantity, 0) || 0;
 
                 if (calculatedSpoilage > 0) {
-                    // 记录报损详情
+                    // 收集报损详情
                     if (spoilageDetails) {
                         for (const spoilage of spoilageDetails) {
-                            await tx.productionTaskSpoilageLog.create({
-                                data: {
-                                    productionLogId: productionLog.id,
-                                    productId,
-                                    productName: productName,
-                                    stage: spoilage.stage,
-                                    quantity: new Prisma.Decimal(spoilage.quantity),
-                                    notes: spoilage.notes,
-                                },
+                            spoilageLogsData.push({
+                                productionLogId: productionLog.id,
+                                productId,
+                                productName: productName,
+                                stage: spoilage.stage,
+                                quantity: new Prisma.Decimal(spoilage.quantity),
+                                notes: spoilage.notes,
                             });
                         }
                     }
@@ -3535,29 +3619,25 @@ export class ProductionTasksService {
                         const current = totalSpoiledConsumption.get(cons.ingredientId) || new Prisma.Decimal(0);
                         totalSpoiledConsumption.set(cons.ingredientId, current.add(cons.totalConsumed));
 
-                        const priceInfo = await this._getIngredientActiveSkuUnitPricePerGram(cons.ingredientId, tx);
-                        await tx.ingredientConsumptionLog.create({
-                            data: {
-                                productionLogId: productionLog.id,
-                                ingredientId: cons.ingredientId,
-                                skuId: priceInfo.skuId || cons.activeSkuId,
-                                quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
-                                unitPrice: priceInfo.unitPrice,
-                            },
+                        const priceInfo = getPriceInfo(cons.ingredientId);
+                        consumptionLogsData.push({
+                            productionLogId: productionLog.id,
+                            ingredientId: cons.ingredientId,
+                            skuId: priceInfo.skuId || cons.activeSkuId,
+                            quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
+                            unitPrice: priceInfo.unitPrice,
                         });
                     }
                 }
 
-                // 记录超产
+                // 收集超产
                 const calculatedOverproduction = Math.max(0, completedQuantity - (plannedQuantity || 0));
                 if (calculatedOverproduction > 0) {
-                    await tx.productionTaskOverproductionLog.create({
-                        data: {
-                            productionLogId: productionLog.id,
-                            productId,
-                            productName: productName,
-                            quantity: new Prisma.Decimal(calculatedOverproduction),
-                        },
+                    overproductionLogsData.push({
+                        productionLogId: productionLog.id,
+                        productId,
+                        productName: productName,
+                        quantity: new Prisma.Decimal(calculatedOverproduction),
                     });
                 }
             }
@@ -3571,17 +3651,32 @@ export class ProductionTasksService {
                 const processLoss = new Prisma.Decimal(inputData.totalConsumed).sub(theoretical).sub(spoiled);
 
                 if (processLoss.gt(0.01)) {
-                    const priceInfo = await this._getIngredientActiveSkuUnitPricePerGram(ingId, tx);
-                    await tx.ingredientConsumptionLog.create({
-                        data: {
-                            productionLogId: productionLog.id,
-                            ingredientId: ingId,
-                            skuId: priceInfo.skuId,
-                            quantityInGrams: processLoss,
-                            unitPrice: priceInfo.unitPrice,
-                        },
+                    const priceInfo = getPriceInfo(ingId);
+                    consumptionLogsData.push({
+                        productionLogId: productionLog.id,
+                        ingredientId: ingId,
+                        skuId: priceInfo.skuId,
+                        quantityInGrams: processLoss,
+                        unitPrice: priceInfo.unitPrice,
                     });
                 }
+            }
+
+            // 批量执行数据库插入
+            if (consumptionLogsData.length > 0) {
+                await tx.ingredientConsumptionLog.createMany({
+                    data: consumptionLogsData,
+                });
+            }
+            if (spoilageLogsData.length > 0) {
+                await tx.productionTaskSpoilageLog.createMany({
+                    data: spoilageLogsData,
+                });
+            }
+            if (overproductionLogsData.length > 0) {
+                await tx.productionTaskOverproductionLog.createMany({
+                    data: overproductionLogsData,
+                });
             }
 
             return this.findOne(tenantId, id, {});

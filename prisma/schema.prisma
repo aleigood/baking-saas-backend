@@ -356,6 +356,7 @@ model PriceRecord {
   sku               IngredientSKU @relation(fields: [skuId], references: [id])
 
   @@index([userId])
+  @@index([skuId, recordedAt(sort: Desc)])
   @@map("ProcurementRecord")
 }
 
