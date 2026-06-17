@@ -164,6 +164,8 @@ export class AuthService {
                 phone: true,
                 name: true, // [修改] 查询姓名
                 avatarUrl: true, // [核心新增] 查询头像
+                wechatOpenId: true,
+                wechatUnionId: true,
                 role: true,
                 status: true,
                 createdAt: true,
@@ -187,6 +189,11 @@ export class AuthService {
             throw new NotFoundException('用户不存在');
         }
 
-        return user;
+        const { wechatOpenId, wechatUnionId, ...profile } = user;
+
+        return {
+            ...profile,
+            hasWechatBinding: Boolean(wechatOpenId || wechatUnionId),
+        };
     }
 }

@@ -1,9 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { Prisma, Role } from '@prisma/client';
+import { PaymentOrderStatus, Prisma, Role, SubscriptionStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { QueryDto } from './dto/query.dto';
 // [G-Code-Note] [核心修改] 导入批量导入 DTO
@@ -13,6 +13,9 @@ import { RecipesService } from '../recipes/recipes.service';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpdateTenantStatusDto } from './dto/update-tenant-status.dto';
+import { UpsertSubscriptionPlanDto } from './dto/upsert-subscription-plan.dto';
+import { CreateTenantSubscriptionDto } from './dto/create-tenant-subscription.dto';
+import { UpdateTenantSubscriptionDto } from './dto/update-tenant-subscription.dto';
 
 @Injectable()
 export class SuperAdminService {
@@ -23,18 +26,256 @@ export class SuperAdminService {
 
     // --- Dashboard ---
     async getDashboardStats() {
-        const totalTenants = await this.prisma.tenant.count();
-        const totalUsers = await this.prisma.user.count({
-            where: { role: { not: Role.SUPER_ADMIN } },
-        });
-        const totalRecipes = await this.prisma.recipeFamily.count({
-            where: { deletedAt: null },
-        });
-        const totalTasks = await this.prisma.productionTask.count({
-            where: { deletedAt: null },
-        });
+        const [totalTenants, totalUsers, totalRecipes, totalTasks, activeSubscriptions, paidOrdersAggregate] =
+            await Promise.all([
+                this.prisma.tenant.count(),
+                this.prisma.user.count({
+                    where: { role: { not: Role.SUPER_ADMIN } },
+                }),
+                this.prisma.recipeFamily.count({
+                    where: { deletedAt: null },
+                }),
+                this.prisma.productionTask.count({
+                    where: { deletedAt: null },
+                }),
+                this.prisma.tenantSubscription.count({
+                    where: {
+                        status: SubscriptionStatus.ACTIVE,
+                        expiresAt: { gt: new Date() },
+                    },
+                }),
+                this.prisma.paymentOrder.aggregate({
+                    where: { status: PaymentOrderStatus.PAID },
+                    _sum: { amountInCents: true },
+                }),
+            ]);
 
-        return { totalTenants, totalUsers, totalRecipes, totalTasks };
+        return {
+            totalTenants,
+            totalUsers,
+            totalRecipes,
+            totalTasks,
+            activeSubscriptions,
+            paidAmountInCents: paidOrdersAggregate._sum.amountInCents ?? 0,
+        };
+    }
+
+    // --- Subscription Plan Management ---
+    async findAllSubscriptionPlans() {
+        return this.prisma.subscriptionPlan.findMany({
+            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        });
+    }
+
+    async createSubscriptionPlan(dto: UpsertSubscriptionPlanDto) {
+        return this.prisma.subscriptionPlan.create({
+            data: {
+                code: dto.code,
+                name: dto.name,
+                durationDays: dto.durationDays,
+                priceInCents: dto.priceInCents,
+                originalPriceInCents: dto.originalPriceInCents,
+                isActive: dto.isActive ?? true,
+                sortOrder: dto.sortOrder ?? 0,
+            },
+        });
+    }
+
+    async updateSubscriptionPlan(id: string, dto: UpsertSubscriptionPlanDto) {
+        return this.prisma.subscriptionPlan.update({
+            where: { id },
+            data: {
+                code: dto.code,
+                name: dto.name,
+                durationDays: dto.durationDays,
+                priceInCents: dto.priceInCents,
+                originalPriceInCents: dto.originalPriceInCents,
+                isActive: dto.isActive,
+                sortOrder: dto.sortOrder,
+            },
+        });
+    }
+
+    // --- Subscription Management ---
+    async findAllSubscriptions(queryDto: QueryDto) {
+        const { search, page = '1', limit = '10', sortBy = 'createdAt', order = 'desc' } = queryDto;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+
+        const where: Prisma.TenantSubscriptionWhereInput = search
+            ? {
+                  OR: [
+                      { tenant: { name: { contains: search, mode: 'insensitive' } } },
+                      { plan: { name: { contains: search, mode: 'insensitive' } } },
+                  ],
+              }
+            : {};
+
+        const [subscriptions, total] = await Promise.all([
+            this.prisma.tenantSubscription.findMany({
+                where,
+                include: {
+                    tenant: {
+                        include: {
+                            members: {
+                                where: { role: Role.OWNER },
+                                include: {
+                                    user: {
+                                        select: {
+                                            id: true,
+                                            phone: true,
+                                            name: true,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    plan: true,
+                },
+                orderBy: { [sortBy]: order },
+                skip: (pageNum - 1) * limitNum,
+                take: limitNum,
+            }),
+            this.prisma.tenantSubscription.count({ where }),
+        ]);
+
+        return {
+            data: subscriptions,
+            meta: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                lastPage: Math.ceil(total / limitNum),
+            },
+        };
+    }
+
+    async createTenantSubscription(dto: CreateTenantSubscriptionDto) {
+        const [tenant, plan] = await Promise.all([
+            this.prisma.tenant.findUnique({ where: { id: dto.tenantId } }),
+            this.prisma.subscriptionPlan.findUnique({ where: { id: dto.planId } }),
+        ]);
+
+        if (!tenant) {
+            throw new NotFoundException(`ID为 ${dto.tenantId} 的店铺不存在`);
+        }
+        if (!plan) {
+            throw new NotFoundException(`ID为 ${dto.planId} 的套餐不存在`);
+        }
+
+        const startsAt = dto.startsAt ? new Date(dto.startsAt) : new Date();
+        const expiresAt = this.addDays(startsAt, plan.durationDays);
+
+        return this.prisma.tenantSubscription.create({
+            data: {
+                tenantId: tenant.id,
+                planId: plan.id,
+                status: SubscriptionStatus.ACTIVE,
+                startsAt,
+                expiresAt,
+                source: dto.source ?? 'manual',
+                notes: dto.notes,
+            },
+            include: {
+                tenant: true,
+                plan: true,
+            },
+        });
+    }
+
+    async updateTenantSubscription(id: string, dto: UpdateTenantSubscriptionDto) {
+        const current = await this.prisma.tenantSubscription.findUnique({
+            where: { id },
+            include: { plan: true },
+        });
+        if (!current) {
+            throw new NotFoundException(`ID为 ${id} 的订阅不存在`);
+        }
+
+        const plan = dto.planId
+            ? await this.prisma.subscriptionPlan.findUnique({ where: { id: dto.planId } })
+            : current.plan;
+
+        if (!plan) {
+            throw new NotFoundException(`ID为 ${dto.planId} 的套餐不存在`);
+        }
+
+        const startsAt = dto.startsAt ? new Date(dto.startsAt) : current.startsAt;
+        const expiresAt = dto.expiresAt
+            ? new Date(dto.expiresAt)
+            : dto.planId
+              ? this.addDays(startsAt, plan.durationDays)
+              : undefined;
+
+        if (expiresAt && expiresAt <= startsAt) {
+            throw new BadRequestException('订阅到期时间必须晚于开始时间');
+        }
+
+        return this.prisma.tenantSubscription.update({
+            where: { id },
+            data: {
+                planId: dto.planId,
+                status: dto.status,
+                startsAt: dto.startsAt ? startsAt : undefined,
+                expiresAt,
+                notes: dto.notes,
+            },
+            include: {
+                tenant: true,
+                plan: true,
+            },
+        });
+    }
+
+    // --- Payment Order Management ---
+    async findAllPaymentOrders(queryDto: QueryDto) {
+        const { search, page = '1', limit = '10', sortBy = 'createdAt', order = 'desc' } = queryDto;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+
+        const where: Prisma.PaymentOrderWhereInput = search
+            ? {
+                  OR: [
+                      { orderNo: { contains: search, mode: 'insensitive' } },
+                      { transactionId: { contains: search, mode: 'insensitive' } },
+                      { tenant: { name: { contains: search, mode: 'insensitive' } } },
+                      { user: { phone: { contains: search } } },
+                  ],
+              }
+            : {};
+
+        const [orders, total] = await Promise.all([
+            this.prisma.paymentOrder.findMany({
+                where,
+                include: {
+                    tenant: true,
+                    user: {
+                        select: {
+                            id: true,
+                            phone: true,
+                            name: true,
+                        },
+                    },
+                    plan: true,
+                    subscription: true,
+                },
+                orderBy: { [sortBy]: order },
+                skip: (pageNum - 1) * limitNum,
+                take: limitNum,
+            }),
+            this.prisma.paymentOrder.count({ where }),
+        ]);
+
+        return {
+            data: orders,
+            meta: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                lastPage: Math.ceil(total / limitNum),
+            },
+        };
     }
 
     // --- Tenant Management ---
@@ -259,5 +500,11 @@ export class SuperAdminService {
         // 2. [核心] 调用 recipesService 的批量导入功能
         // 我们传入 OWNER 的 userId，并限定只导入到这一个 tenantId
         return this.recipesService.batchImportRecipes(tenantOwner.userId, recipesDto, [tenantId]);
+    }
+
+    private addDays(date: Date, days: number) {
+        const result = new Date(date);
+        result.setDate(result.getDate() + days);
+        return result;
     }
 }

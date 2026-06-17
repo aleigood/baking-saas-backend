@@ -37,6 +37,9 @@ export class UsersService {
         if (!user) {
             throw new NotFoundException('用户不存在');
         }
+        if (!user.password) {
+            throw new UnauthorizedException('当前账号尚未设置密码，请先完成手机号和密码绑定');
+        }
 
         const isPasswordMatching = await bcrypt.compare(changePasswordDto.currentPassword, user.password);
         if (!isPasswordMatching) {

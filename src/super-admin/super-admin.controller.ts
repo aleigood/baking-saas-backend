@@ -12,6 +12,9 @@ import { CreateRecipeDto } from '../recipes/dto/create-recipe.dto';
 import { BatchImportRecipeDto } from '../recipes/dto/batch-import-recipe.dto'; // [G-Code-Note] 确保这个 DTO 路径正确
 import { UpdateTenantStatusDto } from './dto/update-tenant-status.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
+import { UpsertSubscriptionPlanDto } from './dto/upsert-subscription-plan.dto';
+import { CreateTenantSubscriptionDto } from './dto/create-tenant-subscription.dto';
+import { UpdateTenantSubscriptionDto } from './dto/update-tenant-subscription.dto';
 
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
 @Controller('super-admin')
@@ -21,6 +24,44 @@ export class SuperAdminController {
     @Get('dashboard-stats')
     getDashboardStats() {
         return this.superAdminService.getDashboardStats();
+    }
+
+    // --- Subscription plan endpoints ---
+    @Get('subscription-plans')
+    findAllSubscriptionPlans() {
+        return this.superAdminService.findAllSubscriptionPlans();
+    }
+
+    @Post('subscription-plans')
+    createSubscriptionPlan(@Body() dto: UpsertSubscriptionPlanDto) {
+        return this.superAdminService.createSubscriptionPlan(dto);
+    }
+
+    @Patch('subscription-plans/:id')
+    updateSubscriptionPlan(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpsertSubscriptionPlanDto) {
+        return this.superAdminService.updateSubscriptionPlan(id, dto);
+    }
+
+    // --- Subscription endpoints ---
+    @Get('subscriptions')
+    findAllSubscriptions(@Query() queryDto: QueryDto) {
+        return this.superAdminService.findAllSubscriptions(queryDto);
+    }
+
+    @Post('subscriptions')
+    createTenantSubscription(@Body() dto: CreateTenantSubscriptionDto) {
+        return this.superAdminService.createTenantSubscription(dto);
+    }
+
+    @Patch('subscriptions/:id')
+    updateTenantSubscription(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateTenantSubscriptionDto) {
+        return this.superAdminService.updateTenantSubscription(id, dto);
+    }
+
+    // --- Payment order endpoints ---
+    @Get('payment-orders')
+    findAllPaymentOrders(@Query() queryDto: QueryDto) {
+        return this.superAdminService.findAllPaymentOrders(queryDto);
     }
 
     // --- Tenant endpoints ---

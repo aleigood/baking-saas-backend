@@ -94,6 +94,20 @@ enum TaskItemRole {
   PREP_INGREDIENT   // 前置备料（前置准备任务制作的自制原料，如卡仕达酱、波兰种）
 }
 
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELED
+}
+
+enum PaymentOrderStatus {
+  PENDING
+  PAID
+  CLOSED
+  REFUNDED
+  FAILED
+}
+
 // ================================================================= //
 //                         CORE AUTH & TENANCY                       //
 // ================================================================= //
@@ -106,7 +120,9 @@ model User {
   // [新增] 用户姓名 (New: User's name)
   avatarUrl          String?
   // [核心新增] 用户头像URL
-  password           String
+  password           String?
+  wechatOpenId       String?                     @unique
+  wechatUnionId      String?                     @unique
   role               Role                        @default(MEMBER) // Global role, SUPER_ADMIN is highest
   status             UserStatus                  @default(ACTIVE)
   createdAt          DateTime                    @default(now())
@@ -114,6 +130,7 @@ model User {
   tenants            TenantUser[] // User can belong to multiple tenants
   priceRecords       PriceRecord[]
   createdTasks       ProductionTask[] // [核心新增] 关联到该用户创建的生产任务
+  paymentOrders      PaymentOrder[]
 }
 
 // 租户/店铺模型
@@ -129,6 +146,8 @@ model Tenant {
   ingredients     Ingredient[]
   recipeFamilies  RecipeFamily[] // 一个店铺可以有多个配方族
   productionTasks ProductionTask[] // 一个店铺可以有多个生产任务
+  subscriptions   TenantSubscription[]
+  paymentOrders   PaymentOrder[]
 }
 
 // 用户与租户的多对多关系表
@@ -156,6 +175,72 @@ model Invitation {
   updatedAt DateTime         @updatedAt
 
   @@unique([tenantId, phone])
+}
+
+// ================================================================= //
+//                         SUBSCRIPTION BILLING                      //
+// ================================================================= //
+
+model SubscriptionPlan {
+  id                   String               @id @default(uuid())
+  code                 String               @unique
+  name                 String
+  durationDays         Int
+  priceInCents         Int
+  originalPriceInCents Int?
+  isActive             Boolean              @default(true)
+  sortOrder            Int                  @default(0)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  subscriptions        TenantSubscription[]
+  paymentOrders        PaymentOrder[]
+
+  @@index([isActive, sortOrder])
+}
+
+model TenantSubscription {
+  id        String             @id @default(uuid())
+  tenantId  String
+  planId    String
+  status    SubscriptionStatus @default(ACTIVE)
+  startsAt  DateTime
+  expiresAt DateTime
+  source    String             @default("manual")
+  notes     String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  tenant    Tenant             @relation(fields: [tenantId], references: [id])
+  plan      SubscriptionPlan   @relation(fields: [planId], references: [id])
+  orders    PaymentOrder[]
+
+  @@index([tenantId, status])
+  @@index([expiresAt])
+}
+
+model PaymentOrder {
+  id             String             @id @default(uuid())
+  orderNo        String             @unique
+  tenantId       String
+  userId         String?
+  planId         String
+  subscriptionId String?
+  amountInCents  Int
+  status         PaymentOrderStatus @default(PENDING)
+  channel        String             @default("wechat")
+  transactionId  String?
+  paidAt         DateTime?
+  closedAt       DateTime?
+  refundedAt     DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  tenant         Tenant             @relation(fields: [tenantId], references: [id])
+  user           User?              @relation(fields: [userId], references: [id])
+  plan           SubscriptionPlan   @relation(fields: [planId], references: [id])
+  subscription   TenantSubscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 // ================================================================= //
