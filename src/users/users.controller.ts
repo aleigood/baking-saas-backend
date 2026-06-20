@@ -1,12 +1,13 @@
 import { Controller, Body, Patch, UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { AuthGuard } from '@nestjs/passport';
+import { SubscriptionGuard } from '../billing/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), SubscriptionGuard)
 @Controller('users')
 export class UsersController {
     constructor(private readonly usersService: UsersService) {}

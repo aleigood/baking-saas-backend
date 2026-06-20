@@ -1,6 +1,6 @@
 import { Controller, Post, Body, UseGuards, Get, Param } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { AuthDto, RegisterDto, WechatLoginDto } from './dto/auth.dto';
+import { AuthDto, BindWechatDto, RegisterDto, WechatLoginDto } from './dto/auth.dto';
 import { GetUser } from './decorators/get-user.decorator';
 import { UserPayload } from './interfaces/user-payload.interface';
 import { AuthGuard } from '@nestjs/passport';
@@ -22,6 +22,12 @@ export class AuthController {
     @Post('wechat-login')
     loginByWechat(@Body() wechatLoginDto: WechatLoginDto) {
         return this.authService.loginByWechat(wechatLoginDto);
+    }
+
+    @UseGuards(AuthGuard('jwt'))
+    @Post('wechat-bind')
+    bindWechat(@GetUser() user: UserPayload, @Body() dto: BindWechatDto) {
+        return this.authService.bindWechat(user.sub, dto.code);
     }
 
     @UseGuards(AuthGuard('jwt'))

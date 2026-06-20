@@ -1,11 +1,12 @@
 import { Controller, Get, UseGuards, Query } from '@nestjs/common';
 import { StatsService } from './stats.service';
 import { AuthGuard } from '@nestjs/passport';
+import { SubscriptionGuard } from '../billing/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { StatsDto } from './dto/stats.dto';
 
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), SubscriptionGuard)
 @Controller('stats')
 export class StatsController {
     constructor(private readonly statsService: StatsService) {}

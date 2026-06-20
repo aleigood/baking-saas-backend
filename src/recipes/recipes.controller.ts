@@ -23,6 +23,7 @@ import {
 import { RecipesService } from './recipes.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { AuthGuard } from '@nestjs/passport';
+import { SubscriptionGuard } from '../billing/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -32,7 +33,7 @@ import { plainToInstance } from 'class-transformer';
 import { BatchImportRequestDto } from './dto/batch-import-request.dto'; // [新增] 导入新的 DTO
 import { Role } from '@prisma/client'; // [新增] 导入 Role 枚举
 
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), SubscriptionGuard)
 @Controller('recipes')
 export class RecipesController {
     constructor(private readonly recipesService: RecipesService) {}

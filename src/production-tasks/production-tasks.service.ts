@@ -373,6 +373,8 @@ const taskListItemsInclude = {
                         select: {
                             family: {
                                 select: {
+                                    id: true,
+                                    name: true,
                                     category: true,
                                 },
                             },

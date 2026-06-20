@@ -15,11 +15,16 @@ import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpsertSubscriptionPlanDto } from './dto/upsert-subscription-plan.dto';
 import { CreateTenantSubscriptionDto } from './dto/create-tenant-subscription.dto';
 import { UpdateTenantSubscriptionDto } from './dto/update-tenant-subscription.dto';
+import { BillingService } from '../billing/billing.service';
+import { CreateRefundDto } from '../billing/dto/billing.dto';
 
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
 @Controller('super-admin')
 export class SuperAdminController {
-    constructor(private readonly superAdminService: SuperAdminService) {}
+    constructor(
+        private readonly superAdminService: SuperAdminService,
+        private readonly billingService: BillingService,
+    ) {}
 
     @Get('dashboard-stats')
     getDashboardStats() {
@@ -62,6 +67,26 @@ export class SuperAdminController {
     @Get('payment-orders')
     findAllPaymentOrders(@Query() queryDto: QueryDto) {
         return this.superAdminService.findAllPaymentOrders(queryDto);
+    }
+
+    @Post('payment-orders/reconcile')
+    reconcilePaymentOrders() {
+        return this.billingService.reconcilePendingOrders();
+    }
+
+    @Post('payment-orders/:id/sync')
+    syncPaymentOrder(@Param('id', ParseUUIDPipe) id: string) {
+        return this.billingService.syncOrderById(id);
+    }
+
+    @Post('payment-orders/:id/refunds')
+    refundPaymentOrder(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CreateRefundDto) {
+        return this.billingService.createRefund(id, dto.amountInCents, dto.reason);
+    }
+
+    @Get('audit-logs')
+    findAuditLogs(@Query() queryDto: QueryDto) {
+        return this.superAdminService.findAuditLogs(queryDto);
     }
 
     // --- Tenant endpoints ---

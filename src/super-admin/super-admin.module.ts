@@ -7,9 +7,10 @@ import { SuperAdminController } from './super-admin.controller';
 import { SuperAdminService } from './super-admin.service';
 import { AuthModule } from '../auth/auth.module'; // 导入AuthModule以使用认证功能
 import { RecipesModule } from '../recipes/recipes.module'; // [新增] 导入 RecipesModule
+import { BillingModule } from '../billing/billing.module';
 
 @Module({
-    imports: [AuthModule, RecipesModule], // [修改] 添加 RecipesModule
+    imports: [AuthModule, RecipesModule, BillingModule], // [修改] 添加 RecipesModule
     controllers: [SuperAdminController],
     providers: [SuperAdminService],
 })

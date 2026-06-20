@@ -31,13 +31,24 @@ CREATE TYPE "SkuStatus" AS ENUM ('ACTIVE', 'INACTIVE');
 -- CreateEnum
 CREATE TYPE "TaskItemRole" AS ENUM ('FINAL_PRODUCT', 'PREP_INGREDIENT');
 
+-- CreateEnum
+CREATE TYPE "SubscriptionStatus" AS ENUM ('ACTIVE', 'EXPIRED', 'CANCELED');
+
+-- CreateEnum
+CREATE TYPE "PaymentOrderStatus" AS ENUM ('PENDING', 'PAID', 'CLOSED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'FAILED');
+
+-- CreateEnum
+CREATE TYPE "PaymentRefundStatus" AS ENUM ('PENDING', 'SUCCESS', 'CLOSED', 'ABNORMAL');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
     "name" TEXT,
     "avatarUrl" TEXT,
-    "password" TEXT NOT NULL,
+    "password" TEXT,
+    "wechatOpenId" TEXT,
+    "wechatUnionId" TEXT,
     "role" "Role" NOT NULL DEFAULT 'MEMBER',
     "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -79,6 +90,98 @@ CREATE TABLE "Invitation" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Invitation_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "SubscriptionPlan" (
+    "id" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "durationDays" INTEGER NOT NULL,
+    "priceInCents" INTEGER NOT NULL,
+    "originalPriceInCents" INTEGER,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "SubscriptionPlan_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "TenantSubscription" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "planId" TEXT NOT NULL,
+    "status" "SubscriptionStatus" NOT NULL DEFAULT 'ACTIVE',
+    "startsAt" TIMESTAMP(3) NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "source" TEXT NOT NULL DEFAULT 'manual',
+    "notes" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "TenantSubscription_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PaymentOrder" (
+    "id" TEXT NOT NULL,
+    "orderNo" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "userId" TEXT,
+    "planId" TEXT NOT NULL,
+    "subscriptionId" TEXT,
+    "amountInCents" INTEGER NOT NULL,
+    "status" "PaymentOrderStatus" NOT NULL DEFAULT 'PENDING',
+    "channel" TEXT NOT NULL DEFAULT 'wechat',
+    "prepayId" TEXT,
+    "transactionId" TEXT,
+    "refundAmountInCents" INTEGER NOT NULL DEFAULT 0,
+    "lastSyncedAt" TIMESTAMP(3),
+    "failureReason" TEXT,
+    "paidAt" TIMESTAMP(3),
+    "closedAt" TIMESTAMP(3),
+    "refundedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "PaymentOrder_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PaymentRefund" (
+    "id" TEXT NOT NULL,
+    "refundNo" TEXT NOT NULL,
+    "orderId" TEXT NOT NULL,
+    "amountInCents" INTEGER NOT NULL,
+    "reason" TEXT,
+    "status" "PaymentRefundStatus" NOT NULL DEFAULT 'PENDING',
+    "wechatRefundId" TEXT,
+    "successAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "PaymentRefund_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "AuditLog" (
+    "id" TEXT NOT NULL,
+    "actorUserId" TEXT,
+    "actorRole" TEXT,
+    "action" TEXT NOT NULL,
+    "method" TEXT NOT NULL,
+    "path" TEXT NOT NULL,
+    "targetType" TEXT,
+    "targetId" TEXT,
+    "statusCode" INTEGER NOT NULL,
+    "ipAddress" TEXT,
+    "userAgent" TEXT,
+    "metadata" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -284,7 +387,52 @@ CREATE TABLE "IngredientConsumptionLog" (
 CREATE UNIQUE INDEX "User_phone_key" ON "User"("phone");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "User_wechatOpenId_key" ON "User"("wechatOpenId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_wechatUnionId_key" ON "User"("wechatUnionId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Invitation_tenantId_phone_key" ON "Invitation"("tenantId", "phone");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SubscriptionPlan_code_key" ON "SubscriptionPlan"("code");
+
+-- CreateIndex
+CREATE INDEX "SubscriptionPlan_isActive_sortOrder_idx" ON "SubscriptionPlan"("isActive", "sortOrder");
+
+-- CreateIndex
+CREATE INDEX "TenantSubscription_tenantId_status_idx" ON "TenantSubscription"("tenantId", "status");
+
+-- CreateIndex
+CREATE INDEX "TenantSubscription_expiresAt_idx" ON "TenantSubscription"("expiresAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PaymentOrder_orderNo_key" ON "PaymentOrder"("orderNo");
+
+-- CreateIndex
+CREATE INDEX "PaymentOrder_tenantId_status_idx" ON "PaymentOrder"("tenantId", "status");
+
+-- CreateIndex
+CREATE INDEX "PaymentOrder_userId_idx" ON "PaymentOrder"("userId");
+
+-- CreateIndex
+CREATE INDEX "PaymentOrder_createdAt_idx" ON "PaymentOrder"("createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PaymentRefund_refundNo_key" ON "PaymentRefund"("refundNo");
+
+-- CreateIndex
+CREATE INDEX "PaymentRefund_orderId_status_idx" ON "PaymentRefund"("orderId", "status");
+
+-- CreateIndex
+CREATE INDEX "PaymentRefund_createdAt_idx" ON "PaymentRefund"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_actorUserId_createdAt_idx" ON "AuditLog"("actorUserId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_action_createdAt_idx" ON "AuditLog"("action", "createdAt");
 
 -- CreateIndex
 CREATE INDEX "RecipeFamily_tenantId_idx" ON "RecipeFamily"("tenantId");
@@ -338,6 +486,9 @@ CREATE UNIQUE INDEX "Ingredient_tenantId_name_deletedAt_key" ON "Ingredient"("te
 CREATE INDEX "ProcurementRecord_userId_idx" ON "ProcurementRecord"("userId");
 
 -- CreateIndex
+CREATE INDEX "ProcurementRecord_skuId_purchaseDate_idx" ON "ProcurementRecord"("skuId", "purchaseDate" DESC);
+
+-- CreateIndex
 CREATE INDEX "ProductionTask_tenantId_idx" ON "ProductionTask"("tenantId");
 
 -- CreateIndex
@@ -384,6 +535,27 @@ ALTER TABLE "TenantUser" ADD CONSTRAINT "TenantUser_tenantId_fkey" FOREIGN KEY (
 
 -- AddForeignKey
 ALTER TABLE "Invitation" ADD CONSTRAINT "Invitation_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TenantSubscription" ADD CONSTRAINT "TenantSubscription_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TenantSubscription" ADD CONSTRAINT "TenantSubscription_planId_fkey" FOREIGN KEY ("planId") REFERENCES "SubscriptionPlan"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PaymentOrder" ADD CONSTRAINT "PaymentOrder_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PaymentOrder" ADD CONSTRAINT "PaymentOrder_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PaymentOrder" ADD CONSTRAINT "PaymentOrder_planId_fkey" FOREIGN KEY ("planId") REFERENCES "SubscriptionPlan"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PaymentOrder" ADD CONSTRAINT "PaymentOrder_subscriptionId_fkey" FOREIGN KEY ("subscriptionId") REFERENCES "TenantSubscription"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PaymentRefund" ADD CONSTRAINT "PaymentRefund_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "PaymentOrder"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RecipeFamily" ADD CONSTRAINT "RecipeFamily_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

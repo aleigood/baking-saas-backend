@@ -2,11 +2,12 @@ import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { CostingService } from './costing.service';
 // [FIX] 修复守卫的使用方式，与项目中其他控制器（如 members.controller.ts）保持一致
 import { AuthGuard } from '@nestjs/passport';
+import { SubscriptionGuard } from '../billing/subscription.guard';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { UserPayload } from 'src/auth/interfaces/user-payload.interface';
 
 // [FIX] 使用 NestJS 内置的 AuthGuard('jwt')，而不是不存在的自定义 JwtAuthGuard
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), SubscriptionGuard)
 @Controller('costing')
 export class CostingController {
     constructor(private readonly costingService: CostingService) {}

@@ -104,8 +104,16 @@ enum PaymentOrderStatus {
   PENDING
   PAID
   CLOSED
+  PARTIALLY_REFUNDED
   REFUNDED
   FAILED
+}
+
+enum PaymentRefundStatus {
+  PENDING
+  SUCCESS
+  CLOSED
+  ABNORMAL
 }
 
 // ================================================================= //
@@ -227,7 +235,11 @@ model PaymentOrder {
   amountInCents  Int
   status         PaymentOrderStatus @default(PENDING)
   channel        String             @default("wechat")
+  prepayId       String?
   transactionId  String?
+  refundAmountInCents Int            @default(0)
+  lastSyncedAt   DateTime?
+  failureReason  String?
   paidAt         DateTime?
   closedAt       DateTime?
   refundedAt     DateTime?
@@ -237,10 +249,47 @@ model PaymentOrder {
   user           User?              @relation(fields: [userId], references: [id])
   plan           SubscriptionPlan   @relation(fields: [planId], references: [id])
   subscription   TenantSubscription? @relation(fields: [subscriptionId], references: [id])
+  refunds        PaymentRefund[]
 
   @@index([tenantId, status])
   @@index([userId])
   @@index([createdAt])
+}
+
+model PaymentRefund {
+  id             String              @id @default(uuid())
+  refundNo       String              @unique
+  orderId        String
+  amountInCents  Int
+  reason         String?
+  status         PaymentRefundStatus @default(PENDING)
+  wechatRefundId String?
+  successAt      DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  order          PaymentOrder        @relation(fields: [orderId], references: [id])
+
+  @@index([orderId, status])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?
+  actorRole   String?
+  action      String
+  method      String
+  path        String
+  targetType  String?
+  targetId    String?
+  statusCode  Int
+  ipAddress   String?
+  userAgent   String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
 }
 
 // ================================================================= //

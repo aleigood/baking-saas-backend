@@ -19,6 +19,7 @@ import { ProductionTasksService } from './production-tasks.service';
 import { CreateProductionTaskDto } from './dto/create-production-task.dto';
 import { UpdateProductionTaskDto } from './dto/update-production-task.dto';
 import { AuthGuard } from '@nestjs/passport';
+import { SubscriptionGuard } from '../billing/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
@@ -27,7 +28,7 @@ import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 import { TogglePrepItemDto } from './dto/toggle-prep-item.dto';
 
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), SubscriptionGuard)
 @Controller('production-tasks')
 export class ProductionTasksController {
     constructor(private readonly productionTasksService: ProductionTasksService) {}

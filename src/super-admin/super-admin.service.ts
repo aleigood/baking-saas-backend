@@ -502,6 +502,19 @@ export class SuperAdminService {
         return this.recipesService.batchImportRecipes(tenantOwner.userId, recipesDto, [tenantId]);
     }
 
+    async findAuditLogs(query: QueryDto) {
+        const page = Number(query.page || 1);
+        const limit = Number(query.limit || 20);
+        const where: Prisma.AuditLogWhereInput = query.search
+            ? { OR: [{ action: { contains: query.search, mode: 'insensitive' } }, { path: { contains: query.search, mode: 'insensitive' } }, { actorUserId: { contains: query.search, mode: 'insensitive' } }] }
+            : {};
+        const [data, total] = await Promise.all([
+            this.prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+            this.prisma.auditLog.count({ where }),
+        ]);
+        return { data, meta: { total, page, limit, lastPage: Math.ceil(total / limit) } };
+    }
+
     private addDays(date: Date, days: number) {
         const result = new Date(date);
         result.setDate(result.getDate() + days);

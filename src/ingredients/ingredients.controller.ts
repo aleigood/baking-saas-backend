@@ -17,6 +17,7 @@ import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { UserPayload } from 'src/auth/interfaces/user-payload.interface';
 import { AuthGuard } from '@nestjs/passport';
+import { SubscriptionGuard } from '../billing/subscription.guard';
 import { CreateSkuDto } from './dto/create-sku.dto';
 import { CreatePriceRecordDto } from './dto/create-price-record.dto';
 import { SetActiveSkuDto } from './dto/set-active-sku.dto';
@@ -28,7 +29,7 @@ import { QueryConsumptionLedgerDto } from './dto/query-consumption-ledger.dto';
 
 @ApiTags('Ingredients')
 @ApiBearerAuth()
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), SubscriptionGuard)
 @Controller('ingredients')
 export class IngredientsController {
     constructor(private readonly ingredientsService: IngredientsService) {}

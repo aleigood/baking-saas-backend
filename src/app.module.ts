@@ -14,6 +14,9 @@ import { ProductionTasksModule } from './production-tasks/production-tasks.modul
 import { FermentationModule } from './fermentation/fermentation.module';
 import { UsersModule } from './users/users.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { BillingModule } from './billing/billing.module';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { AuditInterceptor } from './audit/audit.interceptor';
 
 @Module({
     imports: [
@@ -30,8 +33,9 @@ import { DashboardModule } from './dashboard/dashboard.module';
         FermentationModule,
         UsersModule,
         DashboardModule,
+        BillingModule,
     ],
     controllers: [AppController],
-    providers: [AppService],
+    providers: [AppService, { provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
 })
 export class AppModule {}

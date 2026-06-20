@@ -13,13 +13,14 @@ import {
 } from '@nestjs/common';
 import { MembersService } from './members.service';
 import { AuthGuard } from '@nestjs/passport';
+import { SubscriptionGuard } from '../billing/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { UpdateMemberDto } from './dto/update-member.dto'; // 修复：使用正确的DTO名称
 import { CreateMemberDto } from './dto/create-member.dto'; // [核心新增] 导入CreateMemberDto
 import { Role } from '@prisma/client';
 
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), SubscriptionGuard)
 @Controller('members')
 export class MembersController {
     constructor(private readonly membersService: MembersService) {}

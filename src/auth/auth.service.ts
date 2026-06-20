@@ -5,6 +5,8 @@ import {
     ConflictException,
     NotFoundException,
     NotImplementedException,
+    BadGatewayException,
+    ServiceUnavailableException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -195,5 +197,20 @@ export class AuthService {
             ...profile,
             hasWechatBinding: Boolean(wechatOpenId || wechatUnionId),
         };
+    }
+
+    async bindWechat(userId: string, code: string) {
+        const appId = process.env.WECHAT_APP_ID;
+        const appSecret = process.env.WECHAT_APP_SECRET;
+        if (!appId || !appSecret) throw new ServiceUnavailableException('微信小程序登录参数尚未配置');
+        const params = new URLSearchParams({ appid: appId, secret: appSecret, js_code: code, grant_type: 'authorization_code' });
+        const response = await fetch(`https://api.weixin.qq.com/sns/jscode2session?${params.toString()}`);
+        const result = (await response.json()) as { openid?: string; unionid?: string; errcode?: number; errmsg?: string };
+        if (!response.ok || !result.openid) throw new BadGatewayException(result.errmsg || '微信登录凭证校验失败');
+
+        const occupied = await this.prisma.user.findFirst({ where: { wechatOpenId: result.openid, id: { not: userId } }, select: { id: true } });
+        if (occupied) throw new ConflictException('该微信账号已绑定其他用户');
+        await this.prisma.user.update({ where: { id: userId }, data: { wechatOpenId: result.openid, wechatUnionId: result.unionid } });
+        return { bound: true };
     }
 }

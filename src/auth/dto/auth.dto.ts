@@ -48,6 +48,12 @@ export class WechatLoginDto {
     invitationCode?: string;
 }
 
+export class BindWechatDto {
+    @IsString()
+    @IsNotEmpty()
+    code!: string;
+}
+
 /**
  * [核心新增] 定义登录成功后返回给客户端的数据结构。
  */
