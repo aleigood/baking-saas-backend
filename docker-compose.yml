@@ -8,7 +8,10 @@ services:
       dockerfile: Dockerfile
     restart: always
     env_file:
-      - .env.prod
+      - .env.production
+    environment:
+      NODE_ENV: production
+      PAYMENT_PROVIDER: wechat
     ports:
       - '9527:9527'
       # [核心修改] 新增这一行来暴露 Prisma Studio 的端口

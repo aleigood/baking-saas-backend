@@ -48,4 +48,21 @@ describe('BillingService payment activation', () => {
         await service.applyWechatTransaction({ out_trade_no: 'BS1', trade_state: 'SUCCESS', amount: { total: 3900 } });
         expect(tx.tenantSubscription.create).not.toHaveBeenCalled();
     });
+
+    it('completes a development mock order through the normal activation handler', async () => {
+        const prisma = {
+            subscriptionPlan: { findFirst: jest.fn().mockResolvedValue({ id: 'plan-id', name: '1个月', priceInCents: 3900 }) },
+            user: { findUnique: jest.fn().mockResolvedValue({ wechatOpenId: null }) },
+            paymentOrder: { create: jest.fn().mockResolvedValue({ id: 'order-id' }), update: jest.fn() },
+        };
+        const wechatPay = { isMockMode: jest.fn().mockReturnValue(true) };
+        const service = new BillingService(prisma as any, wechatPay as any);
+        const activate = jest.spyOn(service, 'applyWechatTransaction').mockResolvedValue(undefined);
+
+        const result = await service.createOrder('user-id', 'tenant-id', 'OWNER', 'plan-id');
+
+        expect(result.mockPaid).toBe(true);
+        expect(result.paymentParams).toBeNull();
+        expect(activate).toHaveBeenCalledWith(expect.objectContaining({ trade_state: 'SUCCESS', amount: { total: 3900 } }));
+    });
 });

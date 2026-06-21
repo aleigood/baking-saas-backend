@@ -24,6 +24,10 @@ export class BillingService {
         return this.prisma.subscriptionPlan.findMany({ where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }, { durationDays: 'asc' }] });
     }
 
+    getPaymentCapabilities() {
+        return { paymentMode: this.wechatPay.getPaymentMode() };
+    }
+
     async getSubscription(tenantId: string) {
         const now = new Date();
         await this.prisma.tenantSubscription.updateMany({
@@ -47,18 +51,28 @@ export class BillingService {
             this.prisma.user.findUnique({ where: { id: userId }, select: { wechatOpenId: true } }),
         ]);
         if (!plan) throw new NotFoundException('套餐不存在或已下架');
-        if (!user?.wechatOpenId) throw new BadRequestException('WECHAT_BINDING_REQUIRED');
+        if (!this.wechatPay.isMockMode() && !user?.wechatOpenId) throw new BadRequestException('WECHAT_BINDING_REQUIRED');
 
         const orderNo = this.generateNo('BS');
         const order = await this.prisma.paymentOrder.create({
             data: { orderNo, tenantId, userId, planId, amountInCents: plan.priceInCents, status: PaymentOrderStatus.PENDING },
         });
         try {
+            if (this.wechatPay.isMockMode()) {
+                await this.applyWechatTransaction({
+                    out_trade_no: orderNo,
+                    transaction_id: `MOCK_${orderNo}`,
+                    trade_state: 'SUCCESS',
+                    success_time: new Date().toISOString(),
+                    amount: { total: plan.priceInCents },
+                });
+                return { orderNo, amountInCents: plan.priceInCents, mockPaid: true, paymentParams: null };
+            }
             const payment = await this.wechatPay.createJsapiOrder({
                 orderNo,
                 amountInCents: plan.priceInCents,
                 description: `烘焙SaaS-${plan.name}`,
-                openId: user.wechatOpenId,
+                openId: user!.wechatOpenId!,
             });
             await this.prisma.paymentOrder.update({ where: { id: order.id }, data: { prepayId: payment.prepayId } });
             return { orderNo, amountInCents: plan.priceInCents, paymentParams: payment.paymentParams };
@@ -156,9 +170,13 @@ export class BillingService {
         if (amountInCents > refundable) throw new BadRequestException('退款金额超过可退金额');
         const refundNo = this.generateNo('RF');
         const result = await this.wechatPay.createRefund({ orderNo: order.orderNo, refundNo, refundAmount: amountInCents, totalAmount: order.amountInCents, reason });
-        return this.prisma.paymentRefund.create({
+        const refund = await this.prisma.paymentRefund.create({
             data: { orderId, refundNo, amountInCents, reason, wechatRefundId: result.refund_id, status: this.mapRefundStatus(result.status) },
         });
+        if (result.status === 'SUCCESS') {
+            await this.applyRefundResult({ out_refund_no: refundNo, refund_id: result.refund_id, refund_status: 'SUCCESS', success_time: new Date().toISOString() });
+        }
+        return this.prisma.paymentRefund.findUnique({ where: { id: refund.id } });
     }
 
     async handleRefundNotification(headers: Record<string, string | string[] | undefined>, rawBody: string) {

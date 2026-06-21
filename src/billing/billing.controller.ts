@@ -15,6 +15,11 @@ export class BillingController {
         return this.billingService.listPlans();
     }
 
+    @Get('capabilities')
+    getPaymentCapabilities() {
+        return this.billingService.getPaymentCapabilities();
+    }
+
     @UseGuards(AuthGuard('jwt'))
     @Get('subscription')
     getSubscription(@GetUser() user: UserPayload) {

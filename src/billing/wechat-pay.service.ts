@@ -12,6 +12,15 @@ interface WechatNotificationResource {
 export class WechatPayService {
     private readonly baseUrl = 'https://api.mch.weixin.qq.com';
 
+    getPaymentMode(): 'mock' | 'wechat' {
+        if (process.env.NODE_ENV === 'production') return 'wechat';
+        return process.env.PAYMENT_PROVIDER === 'wechat' ? 'wechat' : 'mock';
+    }
+
+    isMockMode(): boolean {
+        return this.getPaymentMode() === 'mock';
+    }
+
     private required(name: string): string {
         const value = process.env[name];
         if (!value) throw new ServiceUnavailableException(`微信支付尚未配置：${name}`);
@@ -84,11 +93,17 @@ export class WechatPayService {
     }
 
     queryOrder(orderNo: string) {
+        if (this.isMockMode()) {
+            return Promise.resolve({ out_trade_no: orderNo, trade_state: 'NOTPAY', trade_state_desc: '模拟订单未自动支付' });
+        }
         const path = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderNo)}?mchid=${encodeURIComponent(this.required('WECHAT_PAY_MCH_ID'))}`;
         return this.request<any>('GET', path);
     }
 
     createRefund(input: { orderNo: string; refundNo: string; refundAmount: number; totalAmount: number; reason?: string }) {
+        if (this.isMockMode()) {
+            return Promise.resolve({ refund_id: `MOCK_REFUND_${input.refundNo}`, status: 'SUCCESS' });
+        }
         return this.request<any>('POST', '/v3/refund/domestic/refunds', {
             out_trade_no: input.orderNo,
             out_refund_no: input.refundNo,

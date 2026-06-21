@@ -17,9 +17,17 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { BillingModule } from './billing/billing.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditInterceptor } from './audit/audit.interceptor';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
     imports: [
+        ConfigModule.forRoot({
+            isGlobal: true,
+            envFilePath:
+                process.env.NODE_ENV === 'production'
+                    ? '.env.production'
+                    : '.env.development',
+        }),
         PrismaModule,
         AuthModule,
         SuperAdminModule,

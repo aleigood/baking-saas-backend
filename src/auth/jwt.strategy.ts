@@ -5,13 +5,19 @@ import { PrismaService } from '../prisma/prisma.service';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { UserPayload } from './interfaces/user-payload.interface';
 import { Role, TenantStatus } from '@prisma/client'; // [核心新增] 导入 TenantStatus
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-    constructor(private prisma: PrismaService) {
+    constructor(
+        private prisma: PrismaService,
+        configService: ConfigService,
+    ) {
+        const jwtSecret = configService.get<string>('JWT_SECRET');
+        if (!jwtSecret) throw new Error('JWT_SECRET is not defined in the environment variables');
         super({
             jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-            secretOrKey: process.env.JWT_SECRET || 'your-secret-key',
+            secretOrKey: jwtSecret,
         });
     }
 
