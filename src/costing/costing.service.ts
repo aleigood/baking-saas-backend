@@ -205,7 +205,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            versions: { where: { isActive: true }, select: { id: true } },
+                            versions: { select: { id: true } },
                         },
                     },
                     linkedExtra: {
@@ -214,7 +214,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            versions: { where: { isActive: true }, select: { id: true } },
+                            versions: { select: { id: true } },
                         },
                     },
                 },
@@ -233,7 +233,7 @@ const recipeVersionRecursiveBatchInclude = {
                             name: true,
                             type: true,
                             category: true,
-                            versions: { where: { isActive: true }, select: { id: true } },
+                            versions: { select: { id: true } },
                         },
                     },
                 },
@@ -1350,7 +1350,7 @@ export class CostingService {
                             name: true,
                             type: true,
                             category: true,
-                            versions: { where: { isActive: true }, select: { id: true } }, // L2 ID
+                            versions: { select: { id: true } },
                         },
                     },
                 },
@@ -1384,8 +1384,8 @@ export class CostingService {
             initialVersionIds.add(product.recipeVersionId);
         }
         for (const pIng of product.ingredients) {
-            if (pIng.linkedExtra?.versions[0]?.id) {
-                initialVersionIds.add(pIng.linkedExtra.versions[0].id);
+            if (pIng.linkedExtraVersionId) {
+                initialVersionIds.add(pIng.linkedExtraVersionId);
             }
         }
 
@@ -1413,7 +1413,7 @@ export class CostingService {
             // 4b. 递归组装 Components (linkedPreDough 和 linkedExtra)
             for (const component of version.components) {
                 for (const ing of component.ingredients) {
-                    const nextPreDoughId = ing.linkedPreDough?.versions[0]?.id;
+                    const nextPreDoughId = ing.preDoughVersionId;
                     if (nextPreDoughId) {
                         const stitchedSubVersion = stitchVersionTree(nextPreDoughId);
                         if (stitchedSubVersion) {
@@ -1425,7 +1425,7 @@ export class CostingService {
                         }
                     }
 
-                    const nextExtraId = ing.linkedExtra?.versions[0]?.id;
+                    const nextExtraId = ing.extraVersionId;
                     if (nextExtraId) {
                         const stitchedSubVersion = stitchVersionTree(nextExtraId);
                         if (stitchedSubVersion) {
@@ -1442,7 +1442,7 @@ export class CostingService {
             // 4c. 递归组装 Products (linkedExtra) - (对于配方内部的产品)
             for (const p of version.products) {
                 for (const pIng of p.ingredients) {
-                    const nextVersionId = pIng.linkedExtra?.versions[0]?.id;
+                    const nextVersionId = pIng.linkedExtraVersionId;
                     if (nextVersionId) {
                         const stitchedSubVersion = stitchVersionTree(nextVersionId);
                         if (stitchedSubVersion) {
@@ -1481,7 +1481,7 @@ export class CostingService {
 
         // 5b. 组装 L2 (Product Ingredients)
         for (const pIng of assembledProduct.ingredients) {
-            const l2VersionId = pIng.linkedExtra?.versions[0]?.id;
+            const l2VersionId = pIng.linkedExtraVersionId;
             if (l2VersionId) {
                 const stitchedL2Version = stitchVersionTree(l2VersionId);
                 if (stitchedL2Version) {
@@ -1965,12 +1965,12 @@ export class CostingService {
                     // 4b. 深度优先：查找下一层的新ID
                     for (const component of version.components) {
                         for (const ing of component.ingredients) {
-                            const nextPreDoughId = ing.linkedPreDough?.versions[0]?.id;
+                            const nextPreDoughId = ing.preDoughVersionId;
                             if (nextPreDoughId && !versionsToFetch.has(nextPreDoughId)) {
                                 versionsToFetch.add(nextPreDoughId);
                                 versionsInQueue.push(nextPreDoughId);
                             }
-                            const nextExtraId = ing.linkedExtra?.versions[0]?.id;
+                            const nextExtraId = ing.extraVersionId;
                             if (nextExtraId && !versionsToFetch.has(nextExtraId)) {
                                 versionsToFetch.add(nextExtraId);
                                 versionsInQueue.push(nextExtraId);
@@ -1979,7 +1979,7 @@ export class CostingService {
                     }
                     for (const product of version.products) {
                         for (const pIng of product.ingredients) {
-                            const nextVersionId = pIng.linkedExtra?.versions[0]?.id;
+                            const nextVersionId = pIng.linkedExtraVersionId;
                             if (nextVersionId && !versionsToFetch.has(nextVersionId)) {
                                 versionsToFetch.add(nextVersionId);
                                 versionsInQueue.push(nextVersionId);

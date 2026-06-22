@@ -34,6 +34,10 @@ export class ProductIngredientDto {
     @IsOptional()
     ingredientId?: string;
 
+    @IsUUID()
+    @IsOptional()
+    recipeVersionId?: string;
+
     @IsBoolean()
     @IsOptional()
     isFlour?: boolean;
@@ -106,10 +110,18 @@ export class ComponentIngredientDto {
     @IsUUID()
     @IsOptional()
     ingredientId?: string;
+
+    @IsUUID()
+    @IsOptional()
+    recipeVersionId?: string;
 }
 
 // 主创建DTO
 export class CreateRecipeDto {
+    @IsUUID()
+    @IsOptional()
+    sourceVersionId?: string;
+
     @IsString()
     @IsNotEmpty()
     name!: string;

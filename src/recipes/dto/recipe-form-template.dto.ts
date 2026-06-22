@@ -12,6 +12,7 @@ export interface SubIngredientTemplate {
     isRecipe: boolean;
     isFlour?: boolean;
     waterContent?: number;
+    recipeVersionId?: string;
 }
 
 export interface ProductTemplate {
@@ -30,6 +31,7 @@ export interface ComponentIngredientTemplate {
     isRecipe: boolean;
     isFlour?: boolean;
     waterContent?: number;
+    recipeVersionId?: string;
 }
 
 export interface ComponentTemplate {
@@ -42,6 +44,7 @@ export interface ComponentTemplate {
 
     // [核心新增] 自定义含水量 (用于回显)
     customWaterContent?: number;
+    recipeVersionId?: string;
 
     ingredients: ComponentIngredientTemplate[];
     procedure: string[];

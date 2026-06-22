@@ -154,6 +154,24 @@ export class RecipesController {
         return this.recipesService.getRecipeVersionFormTemplate(user.tenantId, familyId, versionId);
     }
 
+    @Get(':familyId/versions/:versionId/dependency-upgrades')
+    getDependencyUpgradePlan(
+        @GetUser() user: UserPayload,
+        @Param('familyId') familyId: string,
+        @Param('versionId') versionId: string,
+    ) {
+        return this.recipesService.getDependencyUpgradePlan(user.tenantId, familyId, versionId);
+    }
+
+    @Post(':familyId/versions/:versionId/dependency-upgrades/apply')
+    applyDependencyUpgrades(
+        @GetUser() user: UserPayload,
+        @Param('familyId') familyId: string,
+        @Param('versionId') versionId: string,
+    ) {
+        return this.recipesService.applyDependencyUpgrades(user.tenantId, familyId, versionId);
+    }
+
     /**
      * [核心新增] 激活一个指定的配方版本
      * @param user

@@ -204,6 +204,7 @@ CREATE TABLE "RecipeVersion" (
     "familyId" TEXT NOT NULL,
     "version" INTEGER NOT NULL,
     "notes" TEXT,
+    "changeSummary" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -233,7 +234,9 @@ CREATE TABLE "ComponentIngredient" (
     "flourRatio" DECIMAL(65,30),
     "ingredientId" TEXT,
     "preDoughId" TEXT,
+    "preDoughVersionId" TEXT,
     "extraId" TEXT,
+    "extraVersionId" TEXT,
 
     CONSTRAINT "ComponentIngredient_pkey" PRIMARY KEY ("id")
 );
@@ -259,6 +262,7 @@ CREATE TABLE "ProductIngredient" (
     "ratio" DECIMAL(65,30),
     "weightInGrams" DECIMAL(65,30),
     "linkedExtraId" TEXT,
+    "linkedExtraVersionId" TEXT,
 
     CONSTRAINT "ProductIngredient_pkey" PRIMARY KEY ("id")
 );
@@ -316,6 +320,10 @@ CREATE TABLE "ProductionTask" (
     "endDate" TIMESTAMP(3),
     "notes" TEXT,
     "recipeSnapshot" JSONB,
+    "executionStartedAt" TIMESTAMP(3),
+    "executionStartedById" TEXT,
+    "executionBaseline" JSONB,
+    "executionRevision" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
@@ -333,6 +341,19 @@ CREATE TABLE "ProductionTaskItem" (
     "role" "TaskItemRole" NOT NULL DEFAULT 'FINAL_PRODUCT',
 
     CONSTRAINT "ProductionTaskItem_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ProductionTaskAdjustment" (
+    "id" TEXT NOT NULL,
+    "taskId" TEXT NOT NULL,
+    "revision" INTEGER NOT NULL,
+    "reason" TEXT NOT NULL,
+    "changes" JSONB NOT NULL,
+    "createdById" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ProductionTaskAdjustment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -456,7 +477,13 @@ CREATE INDEX "ComponentIngredient_componentId_idx" ON "ComponentIngredient"("com
 CREATE INDEX "ComponentIngredient_preDoughId_idx" ON "ComponentIngredient"("preDoughId");
 
 -- CreateIndex
+CREATE INDEX "ComponentIngredient_preDoughVersionId_idx" ON "ComponentIngredient"("preDoughVersionId");
+
+-- CreateIndex
 CREATE INDEX "ComponentIngredient_extraId_idx" ON "ComponentIngredient"("extraId");
+
+-- CreateIndex
+CREATE INDEX "ComponentIngredient_extraVersionId_idx" ON "ComponentIngredient"("extraVersionId");
 
 -- CreateIndex
 CREATE INDEX "ComponentIngredient_ingredientId_idx" ON "ComponentIngredient"("ingredientId");
@@ -472,6 +499,9 @@ CREATE INDEX "ProductIngredient_productId_idx" ON "ProductIngredient"("productId
 
 -- CreateIndex
 CREATE INDEX "ProductIngredient_linkedExtraId_idx" ON "ProductIngredient"("linkedExtraId");
+
+-- CreateIndex
+CREATE INDEX "ProductIngredient_linkedExtraVersionId_idx" ON "ProductIngredient"("linkedExtraVersionId");
 
 -- CreateIndex
 CREATE INDEX "ProductIngredient_ingredientId_idx" ON "ProductIngredient"("ingredientId");
@@ -495,10 +525,22 @@ CREATE INDEX "ProductionTask_tenantId_idx" ON "ProductionTask"("tenantId");
 CREATE INDEX "ProductionTask_createdById_idx" ON "ProductionTask"("createdById");
 
 -- CreateIndex
+CREATE INDEX "ProductionTask_executionStartedById_idx" ON "ProductionTask"("executionStartedById");
+
+-- CreateIndex
 CREATE INDEX "ProductionTaskItem_taskId_idx" ON "ProductionTaskItem"("taskId");
 
 -- CreateIndex
 CREATE INDEX "ProductionTaskItem_productId_idx" ON "ProductionTaskItem"("productId");
+
+-- CreateIndex
+CREATE INDEX "ProductionTaskAdjustment_taskId_createdAt_idx" ON "ProductionTaskAdjustment"("taskId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "ProductionTaskAdjustment_createdById_idx" ON "ProductionTaskAdjustment"("createdById");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ProductionTaskAdjustment_taskId_revision_key" ON "ProductionTaskAdjustment"("taskId", "revision");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ProductionLog_taskId_key" ON "ProductionLog"("taskId");
@@ -573,7 +615,13 @@ ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_ingredient
 ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_preDoughId_fkey" FOREIGN KEY ("preDoughId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_preDoughVersionId_fkey" FOREIGN KEY ("preDoughVersionId") REFERENCES "RecipeVersion"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_extraId_fkey" FOREIGN KEY ("extraId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_extraVersionId_fkey" FOREIGN KEY ("extraVersionId") REFERENCES "RecipeVersion"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ComponentIngredient" ADD CONSTRAINT "ComponentIngredient_componentId_fkey" FOREIGN KEY ("componentId") REFERENCES "RecipeComponent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -589,6 +637,9 @@ ALTER TABLE "ProductIngredient" ADD CONSTRAINT "ProductIngredient_productId_fkey
 
 -- AddForeignKey
 ALTER TABLE "ProductIngredient" ADD CONSTRAINT "ProductIngredient_linkedExtraId_fkey" FOREIGN KEY ("linkedExtraId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductIngredient" ADD CONSTRAINT "ProductIngredient_linkedExtraVersionId_fkey" FOREIGN KEY ("linkedExtraVersionId") REFERENCES "RecipeVersion"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Ingredient" ADD CONSTRAINT "Ingredient_recipeFamilyId_fkey" FOREIGN KEY ("recipeFamilyId") REFERENCES "RecipeFamily"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -612,6 +663,9 @@ ALTER TABLE "ProcurementRecord" ADD CONSTRAINT "ProcurementRecord_skuId_fkey" FO
 ALTER TABLE "ProductionTask" ADD CONSTRAINT "ProductionTask_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ProductionTask" ADD CONSTRAINT "ProductionTask_executionStartedById_fkey" FOREIGN KEY ("executionStartedById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ProductionTask" ADD CONSTRAINT "ProductionTask_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -619,6 +673,12 @@ ALTER TABLE "ProductionTaskItem" ADD CONSTRAINT "ProductionTaskItem_taskId_fkey"
 
 -- AddForeignKey
 ALTER TABLE "ProductionTaskItem" ADD CONSTRAINT "ProductionTaskItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductionTaskAdjustment" ADD CONSTRAINT "ProductionTaskAdjustment_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "ProductionTask"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductionTaskAdjustment" ADD CONSTRAINT "ProductionTaskAdjustment_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductionLog" ADD CONSTRAINT "ProductionLog_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "ProductionTask"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

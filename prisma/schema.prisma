@@ -90,8 +90,8 @@ enum SkuStatus {
 }
 
 enum TaskItemRole {
-  FINAL_PRODUCT     // 最终产品（主任务的产物，如面包、蛋糕）
-  PREP_INGREDIENT   // 前置备料（前置准备任务制作的自制原料，如卡仕达酱、波兰种）
+  FINAL_PRODUCT // 最终产品（主任务的产物，如面包、蛋糕）
+  PREP_INGREDIENT // 前置备料（前置准备任务制作的自制原料，如卡仕达酱、波兰种）
 }
 
 enum SubscriptionStatus {
@@ -122,33 +122,35 @@ enum PaymentRefundStatus {
 
 // 用户账户模型
 model User {
-  id                 String                      @id @default(uuid())
-  phone              String                      @unique
-  name               String?
+  id              String                     @id @default(uuid())
+  phone           String                     @unique
+  name            String?
   // [新增] 用户姓名 (New: User's name)
-  avatarUrl          String?
+  avatarUrl       String?
   // [核心新增] 用户头像URL
-  password           String?
-  wechatOpenId       String?                     @unique
-  wechatUnionId      String?                     @unique
-  role               Role                        @default(MEMBER) // Global role, SUPER_ADMIN is highest
-  status             UserStatus                  @default(ACTIVE)
-  createdAt          DateTime                    @default(now())
-  updatedAt          DateTime                    @updatedAt
-  tenants            TenantUser[] // User can belong to multiple tenants
-  priceRecords       PriceRecord[]
-  createdTasks       ProductionTask[] // [核心新增] 关联到该用户创建的生产任务
-  paymentOrders      PaymentOrder[]
+  password        String?
+  wechatOpenId    String?                    @unique
+  wechatUnionId   String?                    @unique
+  role            Role                       @default(MEMBER) // Global role, SUPER_ADMIN is highest
+  status          UserStatus                 @default(ACTIVE)
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+  tenants         TenantUser[] // User can belong to multiple tenants
+  priceRecords    PriceRecord[]
+  createdTasks    ProductionTask[]           @relation("TaskCreator")
+  startedTasks    ProductionTask[]           @relation("TaskStarter")
+  taskAdjustments ProductionTaskAdjustment[] @relation("TaskAdjustmentActor")
+  paymentOrders   PaymentOrder[]
 }
 
 // 租户/店铺模型
 model Tenant {
-  id              String           @id @default(uuid())
+  id              String               @id @default(uuid())
   name            String
   // status 字段来管理店铺状态
-  status          TenantStatus     @default(ACTIVE)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  status          TenantStatus         @default(ACTIVE)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
   members         TenantUser[]
   invitations     Invitation[]
   ingredients     Ingredient[]
@@ -226,30 +228,30 @@ model TenantSubscription {
 }
 
 model PaymentOrder {
-  id             String             @id @default(uuid())
-  orderNo        String             @unique
-  tenantId       String
-  userId         String?
-  planId         String
-  subscriptionId String?
-  amountInCents  Int
-  status         PaymentOrderStatus @default(PENDING)
-  channel        String             @default("wechat")
-  prepayId       String?
-  transactionId  String?
-  refundAmountInCents Int            @default(0)
-  lastSyncedAt   DateTime?
-  failureReason  String?
-  paidAt         DateTime?
-  closedAt       DateTime?
-  refundedAt     DateTime?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  tenant         Tenant             @relation(fields: [tenantId], references: [id])
-  user           User?              @relation(fields: [userId], references: [id])
-  plan           SubscriptionPlan   @relation(fields: [planId], references: [id])
-  subscription   TenantSubscription? @relation(fields: [subscriptionId], references: [id])
-  refunds        PaymentRefund[]
+  id                  String              @id @default(uuid())
+  orderNo             String              @unique
+  tenantId            String
+  userId              String?
+  planId              String
+  subscriptionId      String?
+  amountInCents       Int
+  status              PaymentOrderStatus  @default(PENDING)
+  channel             String              @default("wechat")
+  prepayId            String?
+  transactionId       String?
+  refundAmountInCents Int                 @default(0)
+  lastSyncedAt        DateTime?
+  failureReason       String?
+  paidAt              DateTime?
+  closedAt            DateTime?
+  refundedAt          DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  tenant              Tenant              @relation(fields: [tenantId], references: [id])
+  user                User?               @relation(fields: [userId], references: [id])
+  plan                SubscriptionPlan    @relation(fields: [planId], references: [id])
+  subscription        TenantSubscription? @relation(fields: [subscriptionId], references: [id])
+  refunds             PaymentRefund[]
 
   @@index([tenantId, status])
   @@index([userId])
@@ -326,17 +328,22 @@ model RecipeFamily {
 
 // 配方版本：记录配方的具体版本信息
 model RecipeVersion {
-  id         String            @id @default(uuid())
-  familyId   String // 所属配方族ID
-  version    Int // 版本号
-  notes      String?
+  id                   String                @id @default(uuid())
+  familyId             String // 所属配方族ID
+  version              Int // 版本号
+  notes                String?
   // 版本备注，如“夏季版，减少水量”
-  isActive   Boolean           @default(true) // 是否为当前激活版本
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
-  family     RecipeFamily      @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  components RecipeComponent[] // [核心重命名] doughs -> components
-  products   Product[] // 该版本包含的最终产品 (仅MAIN类型的配方有)
+  changeSummary        String?
+  // 相对来源版本自动生成的修改摘要
+  isActive             Boolean               @default(true) // 是否为当前激活版本
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  family               RecipeFamily          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  components           RecipeComponent[] // [核心重命名] doughs -> components
+  products             Product[] // 该版本包含的最终产品 (仅MAIN类型的配方有)
+  usedAsPreDough       ComponentIngredient[] @relation("PreDoughVersionLink")
+  usedAsComponentExtra ComponentIngredient[] @relation("ComponentExtraVersionLink")
+  usedAsProductExtra   ProductIngredient[]   @relation("ProductExtraVersionLink")
 
   @@unique([familyId, version])
   @@index([familyId])
@@ -375,18 +382,24 @@ model ComponentIngredient {
   // [G-Code-Note] [核心修改] 字段重命名并拆分
 
   // G-Code-Note: 这是一个面种配方 (如 "烫种")
-  preDoughId     String?
-  linkedPreDough RecipeFamily? @relation("PreDoughLink", fields: [preDoughId], references: [id])
+  preDoughId            String?
+  linkedPreDough        RecipeFamily?  @relation("PreDoughLink", fields: [preDoughId], references: [id])
+  preDoughVersionId     String?
+  linkedPreDoughVersion RecipeVersion? @relation("PreDoughVersionLink", fields: [preDoughVersionId], references: [id], onDelete: Restrict)
 
   // G-Code-Note: 这是一个馅料配方 (如 "卡仕达酱")
-  extraId     String?
-  linkedExtra RecipeFamily? @relation("ExtraLink_Component", fields: [extraId], references: [id])
+  extraId            String?
+  linkedExtra        RecipeFamily?  @relation("ExtraLink_Component", fields: [extraId], references: [id])
+  extraVersionId     String?
+  linkedExtraVersion RecipeVersion? @relation("ComponentExtraVersionLink", fields: [extraVersionId], references: [id], onDelete: Restrict)
 
   component RecipeComponent @relation(fields: [componentId], references: [id], onDelete: Cascade) // [核心重命名] dough -> component
 
   @@index([componentId]) // [核心重命名] doughId -> componentId
   @@index([preDoughId]) // [G-Code-Note] 原来的 linkedPreDoughId
+  @@index([preDoughVersionId])
   @@index([extraId]) // [G-Code-Note] 新增
+  @@index([extraVersionId])
   @@index([ingredientId])
 }
 
@@ -411,20 +424,23 @@ model Product {
 
 // 产品的附加原料：搅拌、馅料、装饰
 model ProductIngredient {
-  id            String                @id @default(uuid())
-  productId     String // 所属产品ID
-  type          ProductIngredientType // 原料类型 (搅拌/馅料/装饰)
-  ingredientId  String?
+  id                   String                @id @default(uuid())
+  productId            String // 所属产品ID
+  type                 ProductIngredientType // 原料类型 (搅拌/馅料/装饰)
+  ingredientId         String?
   // [核心修改] 用于关联Ingredient模型
-  ingredient    Ingredient?           @relation(fields: [ingredientId], references: [id], onUpdate: Cascade, onDelete: SetNull)
-  ratio         Decimal?
-  weightInGrams Decimal? // [核心修改] 馅料/装饰类原料，单位克
-  linkedExtraId String?
-  product       Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
-  linkedExtra   RecipeFamily?         @relation("ExtraLink", fields: [linkedExtraId], references: [id])
+  ingredient           Ingredient?           @relation(fields: [ingredientId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  ratio                Decimal?
+  weightInGrams        Decimal? // [核心修改] 馅料/装饰类原料，单位克
+  linkedExtraId        String?
+  linkedExtraVersionId String?
+  product              Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  linkedExtra          RecipeFamily?         @relation("ExtraLink", fields: [linkedExtraId], references: [id])
+  linkedExtraVersion   RecipeVersion?        @relation("ProductExtraVersionLink", fields: [linkedExtraVersionId], references: [id], onDelete: Restrict)
 
   @@index([productId])
   @@index([linkedExtraId])
+  @@index([linkedExtraVersionId])
   @@index([ingredientId])
 }
 
@@ -434,13 +450,13 @@ model ProductIngredient {
 
 // 原料品类模型
 model Ingredient {
-  id                  String         @id @default(uuid())
-  tenantId            String
-  name                String // e.g., "High-gluten flour"
-  type                IngredientType @default(STANDARD)
-  isFlour             Boolean        @default(false)
-  waterContent        Decimal        @default(0) // [核心修改] 含水量
-  activeSkuId         String?
+  id           String         @id @default(uuid())
+  tenantId     String
+  name         String // e.g., "High-gluten flour"
+  type         IngredientType @default(STANDARD)
+  isFlour      Boolean        @default(false)
+  waterContent Decimal        @default(0) // [核心修改] 含水量
+  activeSkuId  String?
 
   // [新增] 保质期 (小时)，默认为 0 表示不管理或长期有效
   shelfLife Int @default(0)
@@ -449,13 +465,13 @@ model Ingredient {
   recipeFamilyId String?       @unique
   recipeFamily   RecipeFamily? @relation("RecipeOutput", fields: [recipeFamilyId], references: [id])
 
-  createdAt            DateTime                    @default(now())
-  updatedAt            DateTime                    @updatedAt
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
   deletedAt            DateTime?
-  tenant               Tenant                      @relation(fields: [tenantId], references: [id])
+  tenant               Tenant                     @relation(fields: [tenantId], references: [id])
   skus                 IngredientSKU[]
   consumptionLogs      IngredientConsumptionLog[]
-  activeSku            IngredientSKU?              @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  activeSku            IngredientSKU?             @relation("ActiveSKU", fields: [activeSkuId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   componentIngredients ComponentIngredient[] // [核心重命名] doughIngredients -> componentIngredients
   productIngredients   ProductIngredient[]
 
@@ -480,14 +496,14 @@ model IngredientSKU {
 
 // 价格记录模型：用于记录规格价格并计算配方成本
 model PriceRecord {
-  id                String        @id @default(uuid())
-  skuId             String
-  packageCount      Int           @map("packagesPurchased")
-  pricePerPackage   Decimal
-  recordedAt        DateTime      @default(now()) @map("purchaseDate")
-  userId            String
-  user              User          @relation(fields: [userId], references: [id])
-  sku               IngredientSKU @relation(fields: [skuId], references: [id])
+  id              String        @id @default(uuid())
+  skuId           String
+  packageCount    Int           @map("packagesPurchased")
+  pricePerPackage Decimal
+  recordedAt      DateTime      @default(now()) @map("purchaseDate")
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  sku             IngredientSKU @relation(fields: [skuId], references: [id])
 
   @@index([userId])
   @@index([skuId, recordedAt(sort: Desc)])
@@ -500,25 +516,32 @@ model PriceRecord {
 
 // 生产任务模型
 model ProductionTask {
-  id             String               @id @default(uuid())
-  tenantId       String
-  status         ProductionTaskStatus @default(PENDING)
-  startDate      DateTime
-  endDate        DateTime?
-  notes          String?
-  recipeSnapshot Json?
-  // [核心修改] 配方快照，在任务变为IN_PROGRESS时创建
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-  deletedAt      DateTime?
-  createdById    String // [核心新增] 创建任务的用户ID
-  createdBy      User                 @relation(fields: [createdById], references: [id])
-  tenant         Tenant               @relation(fields: [tenantId], references: [id])
-  log            ProductionLog?
-  items          ProductionTaskItem[]
+  id                   String                     @id @default(uuid())
+  tenantId             String
+  status               ProductionTaskStatus       @default(PENDING)
+  startDate            DateTime
+  endDate              DateTime?
+  notes                String?
+  recipeSnapshot       Json?
+  // 最终配方快照，仅在任务完成时创建
+  executionStartedAt   DateTime?
+  executionStartedById String?
+  executionBaseline    Json?
+  executionRevision    Int                        @default(0)
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  deletedAt            DateTime?
+  createdById          String // [核心新增] 创建任务的用户ID
+  createdBy            User                       @relation("TaskCreator", fields: [createdById], references: [id])
+  executionStartedBy   User?                      @relation("TaskStarter", fields: [executionStartedById], references: [id], onDelete: Restrict)
+  tenant               Tenant                     @relation(fields: [tenantId], references: [id])
+  log                  ProductionLog?
+  items                ProductionTaskItem[]
+  adjustments          ProductionTaskAdjustment[]
 
   @@index([tenantId])
   @@index([createdById]) // [核心新增] 为创建者ID添加索引
+  @@index([executionStartedById])
 }
 
 // 生产任务清单项 (中间表)
@@ -526,13 +549,29 @@ model ProductionTaskItem {
   id        String         @id @default(uuid())
   taskId    String
   productId String
-  quantity  Decimal        // [核心修改] 从 Int 改为 Decimal，支持自制原料等带小数的产出/投入量
+  quantity  Decimal // [核心修改] 从 Int 改为 Decimal，支持自制原料等带小数的产出/投入量
   role      TaskItemRole   @default(FINAL_PRODUCT) // 新增字段：表示在任务中的角色
   task      ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   product   Product        @relation(fields: [productId], references: [id], onDelete: Restrict) // [核心修改] Cascade -> Restrict
 
   @@index([taskId])
   @@index([productId])
+}
+
+model ProductionTaskAdjustment {
+  id          String         @id @default(uuid())
+  taskId      String
+  revision    Int
+  reason      String
+  changes     Json
+  createdById String
+  createdAt   DateTime       @default(now())
+  task        ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdBy   User           @relation("TaskAdjustmentActor", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([taskId, revision])
+  @@index([taskId, createdAt])
+  @@index([createdById])
 }
 
 // ================================================================= //
@@ -561,7 +600,7 @@ model ProductionTaskSpoilageLog {
   productId       String? // [核心修改] 改为可选
   productName     String // [核心新增] 冗余存储产品名称
   stage           String // e.g., 'kneading', 'fermentation', 'baking'
-  quantity        Decimal       // [核心修改] 从 Int 改为 Decimal，支持自制原料的精确报损
+  quantity        Decimal // [核心修改] 从 Int 改为 Decimal，支持自制原料的精确报损
   notes           String?
   createdAt       DateTime      @default(now())
   productionLog   ProductionLog @relation(fields: [productionLogId], references: [id], onDelete: Cascade)
@@ -578,7 +617,7 @@ model ProductionTaskOverproductionLog {
   productId       String?
   // [核心修改] 改为可选
   productName     String // [核心新增] 冗余存储产品名称
-  quantity        Decimal       // [核心修改] 从 Int 改为 Decimal，支持自制原料的精确超产
+  quantity        Decimal // [核心修改] 从 Int 改为 Decimal，支持自制原料的精确超产
   createdAt       DateTime      @default(now())
   productionLog   ProductionLog @relation(fields: [productionLogId], references: [id], onDelete: Cascade)
   product         Product?      @relation(fields: [productId], references: [id], onDelete: SetNull) // [核心修改] 改为可选，onDelete: SetNull

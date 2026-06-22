@@ -11,6 +11,8 @@ export interface TaskIngredientDetail {
     brand: string | null;
     weightInGrams: number;
     isRecipe: boolean;
+    baselineWeightInGrams?: number;
+    isAdjusted?: boolean;
     extraInfo?: string | null;
 }
 
@@ -51,6 +53,7 @@ export interface ComponentGroup {
     productsDescription: string;
     totalComponentWeight: number; // [核心重命名] totalDoughWeight -> totalComponentWeight
     baseComponentIngredients: TaskIngredientDetail[]; // [核心重命名] mainDoughIngredients -> baseComponentIngredients
+    adjustableIngredients: TaskIngredientDetail[];
     baseComponentProcedure: string[]; // [核心重命名] mainDoughProcedure -> baseComponentProcedure
     // [G-Code-Note] [需求修改] 移除 products 字段，其信息已整合到 productDetails.baseComponent
     // products: ProductComponentSummary[];
@@ -64,6 +67,16 @@ export interface TaskCompletionItem {
     plannedQuantity: number;
 }
 
+export interface TaskRecipeVersionStatus {
+    familyId: string;
+    familyName: string;
+    selectedVersionId: string;
+    selectedVersion: number;
+    currentVersionId: string;
+    currentVersion: number;
+    hasUpdate: boolean;
+}
+
 // [核心重构] 最终的任务详情接口响应体
 export interface TaskDetailResponseDto {
     id: string;
@@ -71,4 +84,25 @@ export interface TaskDetailResponseDto {
     notes: string | null;
     componentGroups: ComponentGroup[]; // [核心重命名] doughGroups -> componentGroups
     items: TaskCompletionItem[];
+    recipeVersions: TaskRecipeVersionStatus[];
+    executionStartedAt: Date | null;
+    executionRevision: number;
+    latestAdjustment: {
+        revision: number;
+        reason: string;
+        createdAt: Date;
+        createdByName: string | null;
+    } | null;
+    adjustmentHistory: Array<{
+        revision: number;
+        reason: string;
+        createdAt: Date;
+        createdByName: string | null;
+        changes: Array<{
+            familyId: string;
+            ingredientName: string;
+            beforeWeightInGrams: number;
+            afterWeightInGrams: number;
+        }>;
+    }>;
 }

@@ -27,6 +27,7 @@ import { QueryProductionTaskDto } from './dto/query-production-task.dto';
 import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 import { TogglePrepItemDto } from './dto/toggle-prep-item.dto';
+import { CreateTaskAdjustmentDto } from './dto/create-task-adjustment.dto';
 
 @UseGuards(AuthGuard('jwt'), SubscriptionGuard)
 @Controller('production-tasks')
@@ -120,12 +121,26 @@ export class ProductionTasksController {
         @Param('id', ParseUUIDPipe) id: string,
         @Body() updateProductionTaskDto: UpdateProductionTaskDto,
     ) {
-        return this.productionTasksService.update(user.tenantId, id, updateProductionTaskDto);
+        return this.productionTasksService.update(user.tenantId, user.sub, id, updateProductionTaskDto);
     }
 
     @Delete(':id')
     remove(@GetUser() user: UserPayload, @Param('id', ParseUUIDPipe) id: string) {
         return this.productionTasksService.remove(user.tenantId, id);
+    }
+
+    @Post(':id/apply-current-recipes')
+    applyCurrentRecipeVersions(@GetUser() user: UserPayload, @Param('id', ParseUUIDPipe) id: string) {
+        return this.productionTasksService.applyCurrentRecipeVersions(user.tenantId, id);
+    }
+
+    @Post(':id/adjustments')
+    createAdjustment(
+        @GetUser() user: UserPayload,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: CreateTaskAdjustmentDto,
+    ) {
+        return this.productionTasksService.createAdjustment(user.tenantId, user.sub, id, dto);
     }
 
     @Post(':id/complete')

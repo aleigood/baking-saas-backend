@@ -21,10 +21,17 @@ import {
 import { CompleteProductionTaskDto } from './dto/complete-production-task.dto';
 import { CostingService, CalculatedRecipeDetails } from '../costing/costing.service';
 import { QueryTaskDetailDto } from './dto/query-task-detail.dto';
-import { ComponentGroup, ProductDetails, TaskDetailResponseDto, TaskIngredientDetail } from './dto/task-detail.dto';
+import {
+    ComponentGroup,
+    ProductDetails,
+    TaskDetailResponseDto,
+    TaskIngredientDetail,
+    TaskRecipeVersionStatus,
+} from './dto/task-detail.dto';
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 import { BillOfMaterialsResponseDto, BillOfMaterialsItem, PrepTask } from './dto/preparation.dto';
 import { TogglePrepItemDto } from './dto/toggle-prep-item.dto';
+import { CreateTaskAdjustmentDto } from './dto/create-task-adjustment.dto';
 import { getUtcDayBounds } from '../common/utils/timezone.util';
 import * as path from 'path';
 
@@ -309,7 +316,7 @@ const recipeVersionRecursiveBatchInclude = {
                             type: true,
                             category: true,
                             outputIngredient: { select: { id: true } },
-                            versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
+                            versions: { select: { id: true } },
                         },
                     },
                     // 支持 ComponentIngredient.linkedExtra
@@ -320,7 +327,7 @@ const recipeVersionRecursiveBatchInclude = {
                             type: true,
                             category: true,
                             outputIngredient: { select: { id: true } },
-                            versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
+                            versions: { select: { id: true } },
                         },
                     },
                 },
@@ -343,7 +350,7 @@ const recipeVersionRecursiveBatchInclude = {
                             type: true,
                             category: true,
                             outputIngredient: { select: { id: true } },
-                            versions: { where: { isActive: true }, select: { id: true } }, // <-- 下一个 RecipeVersion ID
+                            versions: { select: { id: true } },
                         },
                     },
                 },
@@ -502,6 +509,15 @@ interface RenderTaskItem {
 type SortableTaskIngredient = TaskIngredientDetail & { isFlour?: boolean };
 type CalculatedRecipeIngredient = Omit<TaskIngredientDetail, 'id'> & { ingredientId: string };
 
+interface StoredTaskAdjustmentChange {
+    familyId: string;
+    ingredientId: string;
+    ingredientName: string;
+    beforeWeightInGrams: number;
+    afterWeightInGrams: number;
+    multiplier: number;
+}
+
 @Injectable()
 export class ProductionTasksService {
     constructor(
@@ -538,13 +554,13 @@ export class ProductionTasksService {
                     for (const component of version.components) {
                         for (const ing of component.ingredients) {
                             // 检查 PreDough
-                            const nextPreDoughId = ing.linkedPreDough?.versions[0]?.id;
+                            const nextPreDoughId = ing.preDoughVersionId;
                             if (nextPreDoughId && !versionsToFetch.has(nextPreDoughId)) {
                                 versionsToFetch.add(nextPreDoughId);
                                 versionsInQueue.push(nextPreDoughId); // 放入“待办”队列
                             }
                             // 检查 Extra
-                            const nextExtraId = ing.linkedExtra?.versions[0]?.id;
+                            const nextExtraId = ing.extraVersionId;
                             if (nextExtraId && !versionsToFetch.has(nextExtraId)) {
                                 versionsToFetch.add(nextExtraId);
                                 versionsInQueue.push(nextExtraId); // 放入“待办”队列
@@ -555,7 +571,7 @@ export class ProductionTasksService {
                     for (const product of version.products) {
                         for (const pIng of product.ingredients) {
                             // 检查 Extra
-                            const nextVersionId = pIng.linkedExtra?.versions[0]?.id;
+                            const nextVersionId = pIng.linkedExtraVersionId;
                             if (nextVersionId && !versionsToFetch.has(nextVersionId)) {
                                 versionsToFetch.add(nextVersionId);
                                 versionsInQueue.push(nextVersionId); // 放入“待办”队列
@@ -598,7 +614,7 @@ export class ProductionTasksService {
                                             name: true,
                                             type: true,
                                             category: true,
-                                            versions: { where: { isActive: true }, select: { id: true } }, // L2 ID
+                                            versions: { select: { id: true } },
                                         },
                                     },
                                 },
@@ -631,8 +647,8 @@ export class ProductionTasksService {
                 initialVersionIds.add(item.product.recipeVersionId);
             }
             for (const pIng of item.product.ingredients) {
-                if (pIng.linkedExtra?.versions[0]?.id) {
-                    initialVersionIds.add(pIng.linkedExtra.versions[0].id);
+                if (pIng.linkedExtraVersionId) {
+                    initialVersionIds.add(pIng.linkedExtraVersionId);
                 }
             }
         }
@@ -666,7 +682,7 @@ export class ProductionTasksService {
             for (const component of version.components) {
                 for (const ing of component.ingredients) {
                     // 组装 PreDough
-                    const nextVersionId = ing.linkedPreDough?.versions[0]?.id;
+                    const nextVersionId = ing.preDoughVersionId;
                     if (nextVersionId) {
                         // 递归调用
                         const stitchedSubVersion = stitchVersionTree(nextVersionId);
@@ -681,7 +697,7 @@ export class ProductionTasksService {
                     }
 
                     // 补上 ComponentIngredient.linkedExtra 的递归组装
-                    const nextExtraVersionId = ing.linkedExtra?.versions[0]?.id;
+                    const nextExtraVersionId = ing.extraVersionId;
                     if (nextExtraVersionId) {
                         const stitchedSubVersion = stitchVersionTree(nextExtraVersionId);
                         if (stitchedSubVersion) {
@@ -698,7 +714,7 @@ export class ProductionTasksService {
             // 递归组装 Products (linkedExtra)
             for (const product of version.products) {
                 for (const pIng of product.ingredients) {
-                    const nextVersionId = pIng.linkedExtra?.versions[0]?.id;
+                    const nextVersionId = pIng.linkedExtraVersionId;
                     if (nextVersionId) {
                         const stitchedSubVersion = stitchVersionTree(nextVersionId);
                         if (stitchedSubVersion) {
@@ -736,7 +752,7 @@ export class ProductionTasksService {
             }
             // 组装 Product Ingredients
             for (const pIng of item.product.ingredients) {
-                const l2VersionId = pIng.linkedExtra?.versions[0]?.id;
+                const l2VersionId = pIng.linkedExtraVersionId;
                 if (l2VersionId) {
                     const stitchedL2Version = stitchVersionTree(l2VersionId);
                     if (stitchedL2Version) {
@@ -769,13 +785,163 @@ export class ProductionTasksService {
             throw new NotFoundException('无法生成快照：任务未找到。');
         }
 
+        const execution = await prismaClient.productionTask.findUnique({
+            where: { id: taskId },
+            select: {
+                executionStartedAt: true,
+                executionStartedById: true,
+                executionBaseline: true,
+                executionRevision: true,
+                adjustments: {
+                    orderBy: { revision: 'asc' },
+                    select: {
+                        revision: true,
+                        reason: true,
+                        changes: true,
+                        createdById: true,
+                        createdAt: true,
+                    },
+                },
+            },
+        });
+        const serializedExecution: unknown = JSON.parse(JSON.stringify(execution));
+
         // 过滤已删除产品的逻辑
         const snapshot = {
             ...taskWithDetails,
             items: taskWithDetails.items.filter((item) => !item.product.deletedAt),
+            execution: serializedExecution as Prisma.JsonValue,
         };
 
         return snapshot as unknown as Prisma.JsonObject;
+    }
+
+    private async _getTaskExecutionData(
+        taskId: string,
+        status: ProductionTaskStatus,
+        recipeSnapshot: Prisma.JsonValue | null,
+        tx: Prisma.TransactionClient = this.prisma,
+    ): Promise<TaskWithDetails> {
+        if (status === ProductionTaskStatus.COMPLETED) {
+            if (!recipeSnapshot) {
+                throw new BadRequestException('已完成任务缺少最终配方快照。');
+            }
+            return recipeSnapshot as unknown as TaskWithDetails;
+        }
+
+        return this._getTaskWithAssembledDetails(taskId, tx);
+    }
+
+    private _buildExecutionBaseline(task: TaskWithDetails, userId: string): Prisma.JsonObject {
+        const versions = new Map<
+            string,
+            { familyId: string; familyName: string; versionId: string; version: number }
+        >();
+
+        const collectVersion = (version: FetchedRecipeVersion) => {
+            if (versions.has(version.id)) return;
+            versions.set(version.id, {
+                familyId: version.family.id,
+                familyName: version.family.name,
+                versionId: version.id,
+                version: version.version,
+            });
+
+            for (const component of version.components) {
+                for (const ingredient of component.ingredients) {
+                    const nestedVersion = ingredient.linkedPreDough?.versions[0] ?? ingredient.linkedExtra?.versions[0];
+                    if (nestedVersion) collectVersion(nestedVersion as FetchedRecipeVersion);
+                }
+            }
+            for (const product of version.products) {
+                for (const ingredient of product.ingredients) {
+                    const nestedVersion = ingredient.linkedExtra?.versions[0];
+                    if (nestedVersion) collectVersion(nestedVersion as FetchedRecipeVersion);
+                }
+            }
+        };
+
+        for (const item of task.items) {
+            collectVersion(item.product.recipeVersion as unknown as FetchedRecipeVersion);
+        }
+
+        return {
+            confirmedAt: new Date().toISOString(),
+            confirmedById: userId,
+            versions: Array.from(versions.values()),
+            items: task.items.map((item) => ({
+                taskItemId: item.id,
+                productId: item.productId,
+                productName: item.product.name,
+                quantity: Number(item.quantity),
+            })),
+        } as unknown as Prisma.JsonObject;
+    }
+
+    private _readAdjustmentChanges(value: Prisma.JsonValue): StoredTaskAdjustmentChange[] {
+        if (!Array.isArray(value)) return [];
+        return value as unknown as StoredTaskAdjustmentChange[];
+    }
+
+    private _buildAdjustmentMultiplierMap(adjustments: Array<{ changes: Prisma.JsonValue }>): Map<string, number> {
+        const multipliers = new Map<string, number>();
+        for (const adjustment of adjustments) {
+            for (const change of this._readAdjustmentChanges(adjustment.changes)) {
+                const key = `${change.familyId}:${change.ingredientId}`;
+                multipliers.set(key, (multipliers.get(key) ?? 1) * change.multiplier);
+            }
+        }
+        return multipliers;
+    }
+
+    private _applyAdjustmentsToComponentGroups(
+        groups: ComponentGroup[],
+        multipliers: Map<string, number>,
+    ): ComponentGroup[] {
+        for (const group of groups) {
+            let weightDifference = 0;
+            for (const ingredient of group.baseComponentIngredients) {
+                if (ingredient.isRecipe) continue;
+                const multiplier = multipliers.get(`${group.familyId}:${ingredient.id}`);
+                if (multiplier === undefined || Math.abs(multiplier - 1) < 0.000001) continue;
+
+                const baselineWeight = ingredient.weightInGrams;
+                ingredient.baselineWeightInGrams = baselineWeight;
+                ingredient.weightInGrams = new Prisma.Decimal(baselineWeight).mul(multiplier).toDP(2).toNumber();
+                ingredient.isAdjusted = true;
+                weightDifference += ingredient.weightInGrams - baselineWeight;
+            }
+            group.totalComponentWeight = new Prisma.Decimal(group.totalComponentWeight)
+                .add(weightDifference)
+                .toDP(2)
+                .toNumber();
+
+            for (const ingredient of group.adjustableIngredients) {
+                const multiplier = multipliers.get(`${group.familyId}:${ingredient.id}`);
+                if (multiplier === undefined || Math.abs(multiplier - 1) < 0.000001) continue;
+                ingredient.baselineWeightInGrams = ingredient.weightInGrams;
+                ingredient.weightInGrams = new Prisma.Decimal(ingredient.weightInGrams)
+                    .mul(multiplier)
+                    .toDP(2)
+                    .toNumber();
+                ingredient.isAdjusted = true;
+            }
+        }
+        return groups;
+    }
+
+    private _applyAdjustmentsToConsumptions<T extends { ingredientId: string; totalConsumed: number }>(
+        consumptions: T[],
+        familyId: string,
+        multipliers: Map<string, number>,
+    ): T[] {
+        return consumptions.map((consumption) => {
+            const multiplier = multipliers.get(`${familyId}:${consumption.ingredientId}`) ?? 1;
+            return {
+                ...consumption,
+                totalConsumed: new Prisma.Decimal(consumption.totalConsumed).mul(multiplier).toNumber(),
+            };
+        });
     }
 
     private _sortTaskIngredients(
@@ -941,200 +1107,6 @@ export class ProductionTasksService {
             throw new BadRequestException('一次生产任务只能包含同一品类的产品。');
         }
 
-        // 获取所有产品“外壳”，用于收集 L1 和 L2 ID
-        const productShells = await this.prisma.product.findMany({
-            where: { id: { in: productIds }, deletedAt: null },
-            // 这是一个“浅层”查询，只为了拿到 L1/L2 ID 和组装所需的基础字段
-            select: {
-                id: true,
-                recipeVersionId: true, // L1 ID
-                name: true,
-                baseDoughWeight: true,
-                procedure: true,
-                deletedAt: true,
-                ingredients: {
-                    // L2
-                    include: {
-                        ingredient: { include: { activeSku: true } }, // 基础原料
-                        linkedExtra: {
-                            // 配方原料 (L2)
-                            select: {
-                                id: true,
-                                name: true,
-                                type: true,
-                                category: true,
-                                versions: { where: { isActive: true }, select: { id: true } }, // L2 ID
-                            },
-                        },
-                    },
-                },
-                // 我们还需要 L1 的 family，以便注入
-                recipeVersion: {
-                    select: {
-                        family: true,
-                    },
-                },
-            },
-        });
-
-        const productShellMap = new Map(productShells.map((p) => [p.id, p]));
-
-        // 收集所有 L1 和 L2 的 RecipeVersion ID
-        const initialVersionIds = new Set<string>();
-        for (const shell of productShells) {
-            if (shell.recipeVersionId) {
-                initialVersionIds.add(shell.recipeVersionId);
-            }
-            for (const pIng of shell.ingredients) {
-                if (pIng.linkedExtra?.versions[0]?.id) {
-                    initialVersionIds.add(pIng.linkedExtra.versions[0].id);
-                }
-            }
-        }
-
-        // 调用“仓库”函数，获取所有配方“碎片”
-        // [核心] 注意：这里使用的是 this.prisma，因为我们尚未进入 $transaction
-        const versionMap = await this._fetchRecursiveRecipeVersions(Array.from(initialVersionIds), this.prisma);
-
-        // 组装逻辑
-        const stitchedVersionsCache = new Map<string, FetchedRecipeVersion | null>();
-        const stitchVersionTree = (versionId: string): FetchedRecipeVersion | null => {
-            if (stitchedVersionsCache.has(versionId)) {
-                return stitchedVersionsCache.get(versionId)!;
-            }
-
-            const versionData = versionMap.get(versionId);
-            if (!versionData) {
-                stitchedVersionsCache.set(versionId, null); // 标记为 null
-                return null;
-            }
-            const version = JSON.parse(JSON.stringify(versionData)) as FetchedRecipeVersion;
-
-            stitchedVersionsCache.set(versionId, null);
-
-            for (const component of version.components) {
-                for (const ing of component.ingredients) {
-                    const nextVersionId = ing.linkedPreDough?.versions[0]?.id;
-                    if (nextVersionId) {
-                        const stitchedSubVersion = stitchVersionTree(nextVersionId);
-                        if (stitchedSubVersion) {
-                            ing.linkedPreDough = {
-                                ...ing.linkedPreDough,
-                                ...stitchedSubVersion.family,
-                                versions: [stitchedSubVersion],
-                            };
-                        }
-                    }
-                    const nextExtraVersionId = ing.linkedExtra?.versions[0]?.id;
-                    if (nextExtraVersionId) {
-                        const stitchedSubVersion = stitchVersionTree(nextExtraVersionId);
-                        if (stitchedSubVersion) {
-                            ing.linkedExtra = {
-                                ...ing.linkedExtra,
-                                ...stitchedSubVersion.family,
-                                versions: [stitchedSubVersion],
-                            };
-                        }
-                    }
-                }
-            }
-
-            for (const product of version.products) {
-                for (const pIng of product.ingredients) {
-                    const nextVersionId = pIng.linkedExtra?.versions[0]?.id;
-                    if (nextVersionId) {
-                        const stitchedSubVersion = stitchVersionTree(nextVersionId);
-                        if (stitchedSubVersion) {
-                            pIng.linkedExtra = {
-                                ...pIng.linkedExtra,
-                                ...stitchedSubVersion.family,
-                                versions: [stitchedSubVersion],
-                            };
-                        }
-                    }
-                }
-            }
-
-            stitchedVersionsCache.set(versionId, version);
-            return version;
-        };
-
-        // 组装并计算所有消耗
-        const allConsumptions = new Map<
-            string,
-            { ingredientId: string; ingredientName: string; totalConsumed: number }
-        >();
-
-        for (const item of products) {
-            // `products` 是 DTO: { productId, quantity }
-            const shell = productShellMap.get(item.productId);
-            if (!shell) continue;
-
-            // 组装 (Stitch)
-            const assembledProduct = JSON.parse(JSON.stringify(shell)) as typeof shell; // 深度复制“外壳”
-
-            // 组装 Main Recipe
-            const topLevelVersionId = shell.recipeVersionId;
-            if (topLevelVersionId) {
-                const stitchedL1Version = stitchVersionTree(topLevelVersionId);
-                if (stitchedL1Version) {
-                    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-                    (assembledProduct as any).recipeVersion = {
-                        ...stitchedL1Version,
-                        family: shell.recipeVersion.family, // 保持 L1 的 family
-                    };
-                }
-            }
-            // 组装 Product Ingredients
-            for (const pIng of assembledProduct.ingredients) {
-                const l2VersionId = pIng.linkedExtra?.versions[0]?.id;
-                if (l2VersionId) {
-                    const stitchedL2Version = stitchVersionTree(l2VersionId);
-                    if (stitchedL2Version) {
-                        pIng.linkedExtra = {
-                            ...pIng.linkedExtra,
-                            ...stitchedL2Version.family,
-                            versions: [stitchedL2Version],
-                        };
-                    }
-                }
-            }
-
-            // 创建模拟对象，类型断言为 ProductWithDetails
-            const mockProductWithDetails = assembledProduct as unknown as ProductWithDetails;
-
-            // [核心] 现在这个调用是安全的，`mockProductWithDetails` 是无限深度的
-            const consumptions = this._getActualMaterialRequirement(mockProductWithDetails);
-
-            // 聚合消耗
-            for (const [ingredientId, weight] of consumptions.entries()) {
-                const totalWeight = weight.mul(item.quantity);
-                const existing = allConsumptions.get(ingredientId);
-                if (existing) {
-                    existing.totalConsumed += totalWeight.toNumber();
-                } else {
-                    allConsumptions.set(ingredientId, {
-                        ingredientId: ingredientId,
-                        ingredientName: '', // 后面批量填充
-                        totalConsumed: totalWeight.toNumber(),
-                    });
-                }
-            }
-        }
-
-        // [优化] 批量获取原料名称
-        const allIngredientIds = Array.from(allConsumptions.keys());
-        if (allIngredientIds.length > 0) {
-            const ingredients = await this.prisma.ingredient.findMany({
-                where: { id: { in: allIngredientIds } },
-                select: { id: true, name: true },
-            });
-            const ingredientNameMap = new Map(ingredients.map((i) => [i.id, i.name]));
-            for (const consumption of allConsumptions.values()) {
-                consumption.ingredientName = ingredientNameMap.get(consumption.ingredientId) || '未知原料';
-            }
-        }
-
         const createdTask = await this.prisma.$transaction(async (tx) => {
             const task = await tx.productionTask.create({
                 data: {
@@ -1149,17 +1121,6 @@ export class ProductionTasksService {
                             quantity: new Prisma.Decimal(p.quantity),
                         })),
                     },
-                },
-            });
-
-            // 调用新的快照生成器
-            const snapshot = await this._fetchAndSerializeSnapshot(task.id, tx);
-
-            // 仅更新快照
-            await tx.productionTask.update({
-                where: { id: task.id },
-                data: {
-                    recipeSnapshot: snapshot,
                 },
             });
 
@@ -1466,9 +1427,10 @@ export class ProductionTasksService {
                         product: { deletedAt: null },
                     },
                 },
-                recipeSnapshot: { not: Prisma.JsonNull },
             },
             select: {
+                id: true,
+                status: true,
                 recipeSnapshot: true,
             },
         });
@@ -1477,25 +1439,22 @@ export class ProductionTasksService {
             return null;
         }
 
-        const snapshotTasks = tasksStartingToday
-            .map((task) => {
-                if (!task.recipeSnapshot) return null;
-                return task.recipeSnapshot as unknown as TaskWithDetails;
-            })
-            .filter((t): t is TaskWithDetails => t !== null);
+        const executionTasks = await Promise.all(
+            tasksStartingToday.map((task) => this._getTaskExecutionData(task.id, task.status, task.recipeSnapshot)),
+        );
 
-        if (snapshotTasks.length === 0) {
+        if (executionTasks.length === 0) {
             return null;
         }
 
         const combinedTaskItems: TaskWithDetails = {
-            ...snapshotTasks[0],
-            items: snapshotTasks.flatMap((task) => task.items),
+            ...executionTasks[0],
+            items: executionTasks.flatMap((task) => task.items),
         };
 
         const [prepItems, billOfMaterials] = await Promise.all([
             this._getPrepItemsForTask(tenantId, combinedTaskItems), // 同步函数
-            this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks),
+            this._getBillOfMaterialsForDateInternal(tenantId, executionTasks),
         ]);
 
         const detailsParts: string[] = [];
@@ -1541,10 +1500,10 @@ export class ProductionTasksService {
                         product: { deletedAt: null },
                     },
                 },
-                recipeSnapshot: { not: Prisma.JsonNull },
             },
             select: {
                 id: true,
+                status: true,
                 recipeSnapshot: true,
                 items: {
                     where: {
@@ -1587,14 +1546,11 @@ export class ProductionTasksService {
             };
         }
 
-        const snapshotTasks = filteredTasks
-            .map((task) => {
-                if (!task.recipeSnapshot) return null;
-                return task.recipeSnapshot as unknown as TaskWithDetails;
-            })
-            .filter((t): t is TaskWithDetails => t !== null);
+        const executionTasks = await Promise.all(
+            filteredTasks.map((task) => this._getTaskExecutionData(task.id, task.status, task.recipeSnapshot)),
+        );
 
-        if (snapshotTasks.length === 0) {
+        if (executionTasks.length === 0) {
             return {
                 id: 'prep-task-combined',
                 title: '前置准备任务',
@@ -1606,13 +1562,13 @@ export class ProductionTasksService {
         }
 
         const combinedTaskItems: TaskWithDetails = {
-            ...snapshotTasks[0],
-            items: snapshotTasks.flatMap((task) => task.items),
+            ...executionTasks[0],
+            items: executionTasks.flatMap((task) => task.items),
         };
 
         const [prepItems, billOfMaterials, existingPrepTaskItems] = await Promise.all([
             this._getPrepItemsForTask(tenantId, combinedTaskItems), // 同步函数
-            this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks),
+            this._getBillOfMaterialsForDateInternal(tenantId, executionTasks),
             this.prisma.productionTaskItem.findMany({
                 where: {
                     role: TaskItemRole.PREP_INGREDIENT,
@@ -1686,6 +1642,7 @@ export class ProductionTasksService {
             },
             select: {
                 id: true,
+                status: true,
                 recipeSnapshot: true,
             },
         });
@@ -1693,6 +1650,14 @@ export class ProductionTasksService {
         if (tasks.length === 0) {
             throw new BadRequestException('该日期下没有找到关联的生产任务');
         }
+
+        const executionTaskEntries = await Promise.all(
+            tasks.map(
+                async (task) =>
+                    [task.id, await this._getTaskExecutionData(task.id, task.status, task.recipeSnapshot)] as const,
+            ),
+        );
+        const executionTaskMap = new Map(executionTaskEntries);
 
         // 查找该自制原料配方默认的 Product ID
         const defaultProduct = await this.prisma.product.findFirst({
@@ -1713,9 +1678,9 @@ export class ProductionTasksService {
             if (dto.completed) {
                 // 遍历每个任务，如果该任务需要这个自制原料，则创建对应的 ProductionTaskItem
                 for (const task of tasks) {
-                    if (!task.recipeSnapshot) continue;
-                    const snapshot = task.recipeSnapshot as unknown as TaskWithDetails;
-                    const prepItems = this._getPrepItemsForTask(tenantId, snapshot);
+                    const executionTask = executionTaskMap.get(task.id);
+                    if (!executionTask) continue;
+                    const prepItems = this._getPrepItemsForTask(tenantId, executionTask);
                     const prepItem = prepItems.find((item) => item.id === dto.recipeFamilyId);
 
                     if (prepItem) {
@@ -2091,7 +2056,7 @@ export class ProductionTasksService {
     /**
      * 此方法基于传入的“产品详情”（来自快照或实时）计算BOM
      */
-    private _getActualMaterialRequirement(product: ProductWithDetails): Map<string, Prisma.Decimal> {
+    private _getTheoreticalMaterialRequirement(product: ProductWithDetails): Map<string, Prisma.Decimal> {
         const flattenedIngredients = new Map<string, Prisma.Decimal>();
         if (!product.recipeVersion || product.deletedAt) {
             return flattenedIngredients;
@@ -2229,12 +2194,21 @@ export class ProductionTasksService {
         const totalConsumptionMap = new Map<string, Prisma.Decimal>();
 
         for (const task of tasks) {
+            const adjustments = await this.prisma.productionTaskAdjustment.findMany({
+                where: { taskId: task.id },
+                orderBy: { revision: 'asc' },
+                select: { changes: true },
+            });
+            const adjustmentMultipliers = this._buildAdjustmentMultiplierMap(adjustments);
+
             for (const item of task.items) {
                 if (item.product.deletedAt) continue;
-                const consumptions = this._getActualMaterialRequirement(item.product);
+                const consumptions = this._getTheoreticalMaterialRequirement(item.product);
+                const familyId = item.product.recipeVersion.family.id;
 
                 for (const [ingredientId, weight] of consumptions.entries()) {
-                    const totalRequiredForItem = weight.mul(item.quantity);
+                    const multiplier = adjustmentMultipliers.get(`${familyId}:${ingredientId}`) ?? 1;
+                    const totalRequiredForItem = weight.mul(item.quantity).mul(multiplier);
                     const existing = totalConsumptionMap.get(ingredientId) || new Prisma.Decimal(0);
                     totalConsumptionMap.set(ingredientId, existing.add(totalRequiredForItem));
                 }
@@ -2331,9 +2305,10 @@ export class ProductionTasksService {
                         product: { deletedAt: null },
                     },
                 },
-                recipeSnapshot: { not: Prisma.JsonNull },
             },
             select: {
+                id: true,
+                status: true,
                 recipeSnapshot: true,
             },
         });
@@ -2342,14 +2317,11 @@ export class ProductionTasksService {
             return { standardItems: [], nonInventoriedItems: [] };
         }
 
-        const snapshotTasks = tasksStartingToday
-            .map((task) => {
-                if (!task.recipeSnapshot) return null;
-                return task.recipeSnapshot as unknown as TaskWithDetails;
-            })
-            .filter((t): t is TaskWithDetails => t !== null);
+        const executionTasks = await Promise.all(
+            tasksStartingToday.map((task) => this._getTaskExecutionData(task.id, task.status, task.recipeSnapshot)),
+        );
 
-        return this._getBillOfMaterialsForDateInternal(tenantId, snapshotTasks);
+        return this._getBillOfMaterialsForDateInternal(tenantId, executionTasks);
     }
 
     async findOne(tenantId: string, id: string, query: QueryTaskDetailDto): Promise<TaskDetailResponseDto> {
@@ -2359,6 +2331,18 @@ export class ProductionTasksService {
                 id: true,
                 status: true,
                 notes: true,
+                executionStartedAt: true,
+                executionRevision: true,
+                adjustments: {
+                    orderBy: { revision: 'asc' },
+                    select: {
+                        revision: true,
+                        reason: true,
+                        changes: true,
+                        createdAt: true,
+                        createdBy: { select: { name: true } },
+                    },
+                },
                 items: {
                     where: {
                         role: { not: TaskItemRole.PREP_INGREDIENT },
@@ -2369,6 +2353,23 @@ export class ProductionTasksService {
                             select: {
                                 id: true,
                                 name: true,
+                                recipeVersion: {
+                                    select: {
+                                        id: true,
+                                        version: true,
+                                        family: {
+                                            select: {
+                                                id: true,
+                                                name: true,
+                                                versions: {
+                                                    where: { isActive: true },
+                                                    select: { id: true, version: true },
+                                                    take: 1,
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
                             },
                         },
                     },
@@ -2381,17 +2382,7 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
-        if (!task.recipeSnapshot) {
-            try {
-                task.recipeSnapshot = await this._fetchAndSerializeSnapshot(id);
-            } catch (error: unknown) {
-                const message = error instanceof Error ? error.message : String(error);
-                throw new NotFoundException(`生产任务数据不完整或快照丢失: ${message}`);
-            }
-        }
-
-        // 任务数据源*始终*是快照
-        const taskDataForCalc = task.recipeSnapshot as unknown as TaskWithDetails;
+        const taskDataForCalc = await this._getTaskExecutionData(id, task.status, task.recipeSnapshot);
 
         // [修复] 将 item.quantity (Decimal) 转换为 _calculateComponentGroups 需要的 number
         const mappedOriginalItems = task.items.map((item) => ({
@@ -2399,7 +2390,31 @@ export class ProductionTasksService {
             product: { id: item.product.id },
         }));
 
-        const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, mappedOriginalItems);
+        const adjustmentMultipliers = this._buildAdjustmentMultiplierMap(task.adjustments);
+        const componentGroups = this._applyAdjustmentsToComponentGroups(
+            this._calculateComponentGroups(taskDataForCalc, query, mappedOriginalItems),
+            adjustmentMultipliers,
+        );
+
+        const recipeVersionMap = new Map<string, TaskRecipeVersionStatus>();
+        for (const item of task.items) {
+            const selectedVersion = item.product.recipeVersion;
+            const family = selectedVersion.family;
+            const currentVersion = family.versions[0] ?? {
+                id: selectedVersion.id,
+                version: selectedVersion.version,
+            };
+
+            recipeVersionMap.set(family.id, {
+                familyId: family.id,
+                familyName: family.name,
+                selectedVersionId: selectedVersion.id,
+                selectedVersion: selectedVersion.version,
+                currentVersionId: currentVersion.id,
+                currentVersion: currentVersion.version,
+                hasUpdate: task.status === ProductionTaskStatus.PENDING && currentVersion.id !== selectedVersion.id,
+            });
+        }
 
         return {
             id: task.id,
@@ -2410,6 +2425,30 @@ export class ProductionTasksService {
                 id: item.product.id,
                 name: item.product.name,
                 plannedQuantity: item.quantity.toNumber(), // [修复] 转为 number 返回给 DTO
+            })),
+            recipeVersions: Array.from(recipeVersionMap.values()),
+            executionStartedAt: task.executionStartedAt,
+            executionRevision: task.executionRevision,
+            latestAdjustment:
+                task.adjustments.length > 0
+                    ? {
+                          revision: task.adjustments[task.adjustments.length - 1].revision,
+                          reason: task.adjustments[task.adjustments.length - 1].reason,
+                          createdAt: task.adjustments[task.adjustments.length - 1].createdAt,
+                          createdByName: task.adjustments[task.adjustments.length - 1].createdBy.name,
+                      }
+                    : null,
+            adjustmentHistory: [...task.adjustments].reverse().map((adjustment) => ({
+                revision: adjustment.revision,
+                reason: adjustment.reason,
+                createdAt: adjustment.createdAt,
+                createdByName: adjustment.createdBy.name,
+                changes: this._readAdjustmentChanges(adjustment.changes).map((change) => ({
+                    familyId: change.familyId,
+                    ingredientName: change.ingredientName,
+                    beforeWeightInGrams: change.beforeWeightInGrams,
+                    afterWeightInGrams: change.afterWeightInGrams,
+                })),
             })),
         };
     }
@@ -2816,6 +2855,30 @@ export class ProductionTasksService {
                 });
             });
 
+            const adjustableIngredientsMap = new Map<string, Prisma.Decimal>();
+            for (const item of data.items) {
+                const originalItem = originalItemsMap.get(item.productId);
+                const quantity = originalItem?.quantity ?? 0;
+                const requirements = this._getTheoreticalMaterialRequirement(item.product);
+                for (const [ingredientId, weight] of requirements) {
+                    const current = adjustableIngredientsMap.get(ingredientId) ?? new Prisma.Decimal(0);
+                    adjustableIngredientsMap.set(ingredientId, current.add(weight.mul(quantity)));
+                }
+            }
+
+            const adjustableIngredients: TaskIngredientDetail[] = Array.from(adjustableIngredientsMap.entries())
+                .map(([ingredientId, weight]) => {
+                    const ingredient = this._findIngredientInSnapshot(task, ingredientId);
+                    return {
+                        id: ingredientId,
+                        name: ingredient?.name ?? '未知原料',
+                        brand: null,
+                        weightInGrams: weight.toDP(2).toNumber(),
+                        isRecipe: false,
+                    };
+                })
+                .sort((a, b) => b.weightInGrams - a.weightInGrams);
+
             componentGroups.push({
                 familyId,
                 familyName: data.familyName,
@@ -2837,6 +2900,7 @@ export class ProductionTasksService {
                     data.category,
                     data.type,
                 ),
+                adjustableIngredients,
                 baseComponentProcedure: processedProcedure,
                 productDetails,
             });
@@ -3311,22 +3375,12 @@ export class ProductionTasksService {
                 },
             });
 
-            // 重新生成并保存快照
-            const snapshot = await this._fetchAndSerializeSnapshot(id, tx);
-            await tx.productionTask.update({
-                where: { id },
-                data: {
-                    recipeSnapshot: snapshot,
-                },
-            });
-
-            // 调用“组装”函数来获取返回数据
-            const taskWithSnapshot = await this._getTaskWithAssembledDetails(id, tx);
-            return this._sanitizeTask(taskWithSnapshot);
+            const taskWithDetails = await this._getTaskWithAssembledDetails(id, tx);
+            return this._sanitizeTask(taskWithDetails);
         });
     }
 
-    async update(tenantId: string, id: string, updateProductionTaskDto: UpdateProductionTaskDto) {
+    async update(tenantId: string, userId: string, id: string, updateProductionTaskDto: UpdateProductionTaskDto) {
         const task = await this.prisma.productionTask.findFirst({
             where: { id, tenantId, deletedAt: null },
         });
@@ -3335,21 +3389,206 @@ export class ProductionTasksService {
             throw new NotFoundException('生产任务不存在');
         }
 
-        const data: Prisma.ProductionTaskUpdateInput = { ...updateProductionTaskDto };
-
-        // 状态由 PENDING 变更为 IN_PROGRESS 时重新生成配方快照
         if (
-            task.status === ProductionTaskStatus.PENDING &&
-            updateProductionTaskDto.status === ProductionTaskStatus.IN_PROGRESS
+            updateProductionTaskDto.status === ProductionTaskStatus.IN_PROGRESS &&
+            task.status !== ProductionTaskStatus.PENDING
         ) {
-            const snapshot = await this._fetchAndSerializeSnapshot(id);
-            data.recipeSnapshot = snapshot;
+            throw new BadRequestException('只有待开始任务可以开始制作');
+        }
+
+        if (updateProductionTaskDto.status === ProductionTaskStatus.IN_PROGRESS) {
+            return this.prisma.$transaction(async (tx) => {
+                const executionTask = await this._getTaskWithAssembledDetails(id, tx);
+                const baseline = this._buildExecutionBaseline(executionTask, userId);
+                const startedAt = new Date();
+                const updated = await tx.productionTask.updateMany({
+                    where: {
+                        id,
+                        tenantId,
+                        deletedAt: null,
+                        status: ProductionTaskStatus.PENDING,
+                    },
+                    data: {
+                        status: ProductionTaskStatus.IN_PROGRESS,
+                        executionStartedAt: startedAt,
+                        executionStartedById: userId,
+                        executionBaseline: baseline,
+                        executionRevision: 0,
+                    },
+                });
+                if (updated.count !== 1) {
+                    throw new BadRequestException('任务状态已发生变化，请刷新后重试');
+                }
+                return tx.productionTask.findUnique({ where: { id } });
+            });
         }
 
         return this.prisma.productionTask.update({
             where: { id },
-            data,
+            data: updateProductionTaskDto,
         });
+    }
+
+    async applyCurrentRecipeVersions(tenantId: string, id: string) {
+        const task = await this.prisma.productionTask.findFirst({
+            where: { id, tenantId, deletedAt: null },
+            select: {
+                status: true,
+                items: {
+                    where: { role: { not: TaskItemRole.PREP_INGREDIENT } },
+                    select: {
+                        id: true,
+                        product: {
+                            select: {
+                                id: true,
+                                name: true,
+                                recipeVersion: {
+                                    select: {
+                                        id: true,
+                                        family: {
+                                            select: {
+                                                name: true,
+                                                versions: {
+                                                    where: { isActive: true },
+                                                    take: 1,
+                                                    select: {
+                                                        id: true,
+                                                        version: true,
+                                                        products: {
+                                                            where: { deletedAt: null },
+                                                            select: { id: true, name: true },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!task) {
+            throw new NotFoundException('生产任务不存在');
+        }
+        if (task.status !== ProductionTaskStatus.PENDING) {
+            throw new BadRequestException('只有待开始任务可以应用新的配方版本');
+        }
+
+        const updates: { itemId: string; productId: string }[] = [];
+        for (const item of task.items) {
+            const selectedVersion = item.product.recipeVersion;
+            const currentVersion = selectedVersion.family.versions[0];
+            if (!currentVersion || currentVersion.id === selectedVersion.id) continue;
+
+            const currentProduct = currentVersion.products.find((product) => product.name === item.product.name);
+            if (!currentProduct) {
+                throw new BadRequestException(
+                    `配方“${selectedVersion.family.name}”的新版本中找不到产品“${item.product.name}”，请编辑任务后重新选择产品。`,
+                );
+            }
+            updates.push({ itemId: item.id, productId: currentProduct.id });
+        }
+
+        if (updates.length > 0) {
+            await this.prisma.$transaction(
+                updates.map((update) =>
+                    this.prisma.productionTaskItem.update({
+                        where: { id: update.itemId },
+                        data: { productId: update.productId },
+                    }),
+                ),
+            );
+        }
+
+        return this.findOne(tenantId, id, {});
+    }
+
+    async createAdjustment(
+        tenantId: string,
+        userId: string,
+        id: string,
+        dto: CreateTaskAdjustmentDto,
+    ): Promise<TaskDetailResponseDto> {
+        const task = await this.prisma.productionTask.findFirst({
+            where: { id, tenantId, deletedAt: null },
+            select: { status: true, executionRevision: true },
+        });
+        if (!task) throw new NotFoundException('生产任务不存在');
+        if (task.status !== ProductionTaskStatus.IN_PROGRESS) {
+            throw new BadRequestException('只有进行中的任务可以调整本批次用量');
+        }
+
+        const detail = await this.findOne(tenantId, id, {});
+        const adjustableIngredients = new Map<string, TaskIngredientDetail>();
+        for (const group of detail.componentGroups) {
+            for (const ingredient of group.adjustableIngredients) {
+                adjustableIngredients.set(`${group.familyId}:${ingredient.id}`, ingredient);
+            }
+        }
+
+        const seen = new Set<string>();
+        const changes: StoredTaskAdjustmentChange[] = [];
+        for (const requested of dto.changes) {
+            const key = `${requested.familyId}:${requested.ingredientId}`;
+            if (seen.has(key)) {
+                throw new BadRequestException('同一种原料不能在一次调整中重复提交');
+            }
+            seen.add(key);
+
+            const ingredient = adjustableIngredients.get(key);
+            if (!ingredient || ingredient.weightInGrams <= 0) {
+                throw new BadRequestException('调整项不存在或不是可直接调整的基础原料');
+            }
+
+            const beforeWeight = ingredient.weightInGrams;
+            const afterWeight = new Prisma.Decimal(requested.afterWeightInGrams).toDP(2).toNumber();
+            if (new Prisma.Decimal(afterWeight).sub(beforeWeight).abs().lt(0.01)) continue;
+
+            changes.push({
+                familyId: requested.familyId,
+                ingredientId: requested.ingredientId,
+                ingredientName: ingredient.name,
+                beforeWeightInGrams: beforeWeight,
+                afterWeightInGrams: afterWeight,
+                multiplier: new Prisma.Decimal(afterWeight).div(beforeWeight).toNumber(),
+            });
+        }
+
+        if (changes.length === 0) {
+            throw new BadRequestException('没有检测到有效的用量变化');
+        }
+
+        await this.prisma.$transaction(async (tx) => {
+            const nextRevision = task.executionRevision + 1;
+            const updated = await tx.productionTask.updateMany({
+                where: {
+                    id,
+                    tenantId,
+                    status: ProductionTaskStatus.IN_PROGRESS,
+                    executionRevision: task.executionRevision,
+                },
+                data: { executionRevision: nextRevision },
+            });
+            if (updated.count !== 1) {
+                throw new BadRequestException('批次用量已被其他人调整，请刷新后重试');
+            }
+
+            await tx.productionTaskAdjustment.create({
+                data: {
+                    taskId: id,
+                    revision: nextRevision,
+                    reason: dto.reason.trim(),
+                    changes: changes as unknown as Prisma.JsonArray,
+                    createdById: userId,
+                },
+            });
+        });
+
+        return this.findOne(tenantId, id, {});
     }
 
     async remove(tenantId: string, id: string) {
@@ -3393,24 +3632,25 @@ export class ProductionTasksService {
                     },
                 },
                 recipeSnapshot: true,
+                adjustments: {
+                    orderBy: { revision: 'asc' },
+                    select: { changes: true },
+                },
                 status: true,
                 id: true,
+                executionRevision: true,
             },
         });
 
         if (!task) throw new NotFoundException('生产任务不存在');
-        if (task.status !== 'PENDING' && task.status !== 'IN_PROGRESS') {
-            throw new BadRequestException('只有“待开始”或“进行中”的任务才能被完成');
+        if (task.status !== ProductionTaskStatus.IN_PROGRESS) {
+            throw new BadRequestException('只有进行中的任务才能被完成');
         }
 
-        if (!task.recipeSnapshot) {
-            throw new BadRequestException(
-                '任务数据不完整，缺少配方快照，无法完成任务。请尝试编辑并重新保存任务以生成快照。',
-            );
-        }
-
-        const snapshot = task.recipeSnapshot as unknown as TaskWithDetails;
+        const finalSnapshot = await this._fetchAndSerializeSnapshot(id);
+        const snapshot = finalSnapshot as unknown as TaskWithDetails;
         const snapshotProductMap = new Map(snapshot.items.map((i) => [i.product.id, i.product]));
+        const adjustmentMultipliers = this._buildAdjustmentMultiplierMap(task.adjustments);
 
         const { notes, completedItems } = completeDto;
 
@@ -3430,9 +3670,10 @@ export class ProductionTasksService {
                 }
 
                 // calculateProductConsumptionsFromSnapshot 计算的是“含损耗”的总投入量
-                const consumptions = this.costingService.calculateProductConsumptionsFromSnapshot(
-                    snapshotProduct,
-                    plannedQuantity,
+                const consumptions = this._applyAdjustmentsToConsumptions(
+                    this.costingService.calculateProductConsumptionsFromSnapshot(snapshotProduct, plannedQuantity),
+                    snapshotProduct.recipeVersion.family.id,
+                    adjustmentMultipliers,
                 );
                 for (const cons of consumptions) {
                     const existing = totalInputNeeded.get(cons.ingredientId);
@@ -3455,9 +3696,13 @@ export class ProductionTasksService {
             if (!snapshotProduct) continue;
 
             if (completedQuantity > 0) {
-                const successConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
-                    snapshotProduct,
-                    completedQuantity,
+                const successConsumptions = this._applyAdjustmentsToConsumptions(
+                    this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                        snapshotProduct,
+                        completedQuantity,
+                    ),
+                    snapshotProduct.recipeVersion.family.id,
+                    adjustmentMultipliers,
                 );
                 for (const cons of successConsumptions) {
                     uniqueIngredientIds.add(cons.ingredientId);
@@ -3466,9 +3711,13 @@ export class ProductionTasksService {
 
             const calculatedSpoilage = spoilageDetails?.reduce((sum, s) => sum + s.quantity, 0) || 0;
             if (calculatedSpoilage > 0) {
-                const spoiledConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
-                    snapshotProduct,
-                    calculatedSpoilage,
+                const spoiledConsumptions = this._applyAdjustmentsToConsumptions(
+                    this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                        snapshotProduct,
+                        calculatedSpoilage,
+                    ),
+                    snapshotProduct.recipeVersion.family.id,
+                    adjustmentMultipliers,
                 );
                 for (const cons of spoiledConsumptions) {
                     uniqueIngredientIds.add(cons.ingredientId);
@@ -3481,10 +3730,21 @@ export class ProductionTasksService {
 
         return this.prisma.$transaction(async (tx) => {
             // 1. 更新任务状态
-            await tx.productionTask.update({
-                where: { id },
-                data: { status: ProductionTaskStatus.COMPLETED },
+            const completed = await tx.productionTask.updateMany({
+                where: {
+                    id,
+                    tenantId,
+                    status: ProductionTaskStatus.IN_PROGRESS,
+                    executionRevision: task.executionRevision,
+                },
+                data: {
+                    status: ProductionTaskStatus.COMPLETED,
+                    recipeSnapshot: finalSnapshot,
+                },
             });
+            if (completed.count !== 1) {
+                throw new BadRequestException('任务执行数据已发生变化，请刷新后重新完成');
+            }
 
             // 2. 创建生产日志
             const productionLog = await tx.productionLog.create({
@@ -3570,9 +3830,13 @@ export class ProductionTasksService {
 
                 // --- 步骤一：处理【成功产品】 ---
                 if (completedQuantity > 0) {
-                    const successConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
-                        snapshotProduct,
-                        completedQuantity,
+                    const successConsumptions = this._applyAdjustmentsToConsumptions(
+                        this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                            snapshotProduct,
+                            completedQuantity,
+                        ),
+                        snapshotProduct.recipeVersion.family.id,
+                        adjustmentMultipliers,
                     );
 
                     for (const cons of successConsumptions) {
@@ -3611,9 +3875,13 @@ export class ProductionTasksService {
                     }
 
                     // 计算报损品的理论消耗
-                    const spoiledConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
-                        snapshotProduct,
-                        calculatedSpoilage,
+                    const spoiledConsumptions = this._applyAdjustmentsToConsumptions(
+                        this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                            snapshotProduct,
+                            calculatedSpoilage,
+                        ),
+                        snapshotProduct.recipeVersion.family.id,
+                        adjustmentMultipliers,
                     );
 
                     for (const cons of spoiledConsumptions) {

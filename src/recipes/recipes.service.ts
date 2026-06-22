@@ -16,7 +16,6 @@ import {
     IngredientType,
     RecipeComponent,
     ComponentIngredient,
-    Product,
     RecipeCategory,
     Ingredient,
     Role,
@@ -29,6 +28,11 @@ import {
     BatchComponentIngredientDto,
     BatchProductDto,
 } from './dto/batch-import-recipe.dto';
+import {
+    ApplyDependencyUpgradeResultDto,
+    DependencyUpgradeItemDto,
+    DependencyUpgradePlanDto,
+} from './dto/dependency-upgrade.dto';
 
 // [新增] 单一递归类型定义
 type WaterCalcFamily = {
@@ -849,205 +853,160 @@ export class RecipesService {
     async createVersion(tenantId: string, familyId: string, createRecipeDto: CreateRecipeDto) {
         const recipeFamily = await this.prisma.recipeFamily.findFirst({
             where: { id: familyId, tenantId, deletedAt: null },
+            include: { versions: { where: { isActive: true }, take: 1, select: { id: true } } },
         });
 
         if (!recipeFamily) {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
-        return this.createVersionInternal(tenantId, familyId, createRecipeDto);
+        const sourceVersionId = createRecipeDto.sourceVersionId ?? recipeFamily.versions[0]?.id;
+        const changeSummary = sourceVersionId
+            ? await this._buildVersionChangeSummary(tenantId, familyId, sourceVersionId, createRecipeDto)
+            : '初始版本';
+        return this.createVersionInternal(tenantId, familyId, createRecipeDto, false, changeSummary);
     }
 
     async updateVersion(tenantId: string, familyId: string, versionId: string, updateRecipeDto: CreateRecipeDto) {
-        const versionToUpdate = await this.prisma.recipeVersion.findFirst({
+        const sourceVersion = await this.prisma.recipeVersion.findFirst({
             where: {
                 id: versionId,
-                familyId: familyId,
-                family: { tenantId },
+                familyId,
+                family: { tenantId, deletedAt: null },
             },
-            include: {
-                products: {
-                    where: { deletedAt: null },
-                },
-            },
+            select: { id: true },
         });
 
-        if (!versionToUpdate) {
+        if (!sourceVersion) {
             throw new NotFoundException('指定的配方版本不存在');
         }
 
-        return this.prisma.$transaction(async (tx) => {
-            const {
-                ingredients,
-                products,
-                targetTemp,
-                lossRatio,
-                divisionLoss,
-                customWaterContent,
-                procedure,
-                name,
-                type = 'MAIN',
-                category,
-            } = updateRecipeDto;
-
-            await tx.componentIngredient.deleteMany({
-                where: { component: { recipeVersionId: versionId } },
-            });
-            await tx.recipeComponent.deleteMany({
-                where: { recipeVersionId: versionId },
-            });
-
-            const ingredientNames = new Set<string>();
-            for (const ing of ingredients) {
-                if (ingredientNames.has(ing.name)) {
-                    throw new BadRequestException(`配方中包含重复的原料或面种: "${ing.name}"`);
-                }
-                ingredientNames.add(ing.name);
-            }
-            await this._ensureIngredientsExist(tenantId, updateRecipeDto, tx);
-
-            const linkedFamilies = await this.preloadLinkedFamilies(tenantId, ingredients, tx);
-
-            await this._validateCircularReference(familyId, updateRecipeDto.name, ingredients, linkedFamilies, tx);
-
-            this.calculateAndValidateLinkedFamilyRatios(type, ingredients, linkedFamilies);
-
-            this._validateBakerPercentage(type, category, ingredients);
-
-            const component = await tx.recipeComponent.create({
-                data: {
-                    recipeVersionId: versionId,
-                    name: name,
-                    targetTemp: type === 'MAIN' ? targetTemp : undefined,
-                    lossRatio: lossRatio,
-                    divisionLoss: divisionLoss,
-                    customWaterContent: customWaterContent,
-                    procedure: procedure,
-                },
-            });
-
-            for (const ingredientDto of ingredients) {
-                const linkedFamily = linkedFamilies.get(ingredientDto.name);
-
-                const ingredientId = linkedFamily ? undefined : ingredientDto.ingredientId;
-                const preDoughId = linkedFamily?.type === 'PRE_DOUGH' ? linkedFamily.id : undefined;
-                const extraId = linkedFamily?.type === 'EXTRA' ? linkedFamily.id : undefined;
-
-                if (!ingredientId && !preDoughId && !extraId) {
-                    throw new BadRequestException(
-                        `原料 "${ingredientDto.name}" 无法被识别，它既不是基础原料，也不是一个有效的 PRE_DOUGH 或 EXTRA 配方。`,
-                    );
-                }
-
-                const ratioForDb =
-                    ingredientDto.ratio === null || ingredientDto.ratio === undefined
-                        ? null
-                        : new Prisma.Decimal(ingredientDto.ratio);
-
-                const flourRatioForDb =
-                    ingredientDto.flourRatio === null || ingredientDto.flourRatio === undefined
-                        ? null
-                        : new Prisma.Decimal(ingredientDto.flourRatio);
-
-                await tx.componentIngredient.create({
-                    data: {
-                        componentId: component.id,
-                        ratio: ratioForDb,
-                        flourRatio: flourRatioForDb,
-                        ingredientId: ingredientId,
-                        preDoughId: preDoughId,
-                        extraId: extraId,
-                    },
-                });
-            }
-
-            await this._syncProductsForVersion(tenantId, versionId, versionToUpdate.products, products || [], tx);
-
-            await tx.recipeVersion.update({
-                where: { id: versionId },
-                data: { notes: updateRecipeDto.notes },
-            });
-
-            const updatedFamily = await this.prisma.recipeFamily.findUnique({
-                where: { id: familyId },
-                include: recipeFamilyWithDetailsInclude,
-            });
-
-            // [核心新增] 同步更新自制原料的含水量、名称和保质期
-            const waterContent = this._calculateWaterContent(updatedFamily as unknown as WaterCalcFamily);
-            await this._syncSelfMadeIngredient(tx, tenantId, familyId, name, type, waterContent);
-
-            // [核心新增] 同步更新默认产品
-            await this._syncDefaultProduct(tx, versionId, name, type);
-
-            return this._sanitizeFamily(updatedFamily);
-        });
+        const changeSummary = await this._buildVersionChangeSummary(tenantId, familyId, versionId, updateRecipeDto);
+        return this.createVersionInternal(tenantId, familyId, updateRecipeDto, true, changeSummary);
     }
 
-    private async _syncProductsForVersion(
+    private async _buildVersionChangeSummary(
         tenantId: string,
-        versionId: string,
-        existingProducts: Product[],
-        newProductsDto: ProductDto[],
-        tx: Prisma.TransactionClient,
-    ) {
-        const existingProductsMap = new Map(existingProducts.map((p) => [p.id, p]));
-        const newProductIds = new Set(newProductsDto.filter((p) => p.id).map((p) => p.id!));
+        familyId: string,
+        sourceVersionId: string,
+        recipe: CreateRecipeDto,
+    ): Promise<string> {
+        const source = await this.getRecipeVersionFormTemplate(tenantId, familyId, sourceVersionId);
+        const changes: string[] = [];
+        const sourceMainComponent =
+            source.components.find(
+                (component) => component.type === 'MAIN_DOUGH' || component.type === 'BASE_COMPONENT',
+            ) ?? source.components[0];
 
-        const productsToSoftDelete = existingProducts.filter((p) => !newProductIds.has(p.id));
+        const sourceIngredients = new Map<string, { value: number | null; versionId?: string }>();
+        for (const ingredient of sourceMainComponent?.ingredients ?? []) {
+            sourceIngredients.set(ingredient.name, {
+                value: ingredient.ratio,
+                versionId: ingredient.recipeVersionId,
+            });
+        }
+        for (const component of source.components.filter((item) => item.type === 'PRE_DOUGH')) {
+            sourceIngredients.set(component.name, {
+                value: component.flourRatioInMainDough ?? null,
+                versionId: component.recipeVersionId,
+            });
+        }
 
-        if (productsToSoftDelete.length > 0) {
-            const productIdsToSoftDelete = productsToSoftDelete.map((p) => p.id);
-
-            const usageCount = await tx.productionTaskItem.count({
-                where: {
-                    productId: { in: productIdsToSoftDelete },
-                    task: {
-                        status: { in: ['PENDING', 'IN_PROGRESS'] },
-                    },
+        const nextIngredients = new Map(
+            recipe.ingredients.map((ingredient) => [
+                ingredient.name,
+                {
+                    value: ingredient.flourRatio ?? ingredient.ratio ?? null,
+                    versionId: ingredient.recipeVersionId,
                 },
-            });
+            ]),
+        );
+        const addedIngredients = [...nextIngredients.keys()].filter((name) => !sourceIngredients.has(name));
+        const removedIngredients = [...sourceIngredients.keys()].filter((name) => !nextIngredients.has(name));
+        if (addedIngredients.length > 0) changes.push(`新增原料：${addedIngredients.join('、')}`);
+        if (removedIngredients.length > 0) changes.push(`移除原料：${removedIngredients.join('、')}`);
 
-            if (usageCount > 0) {
-                const productNames = productsToSoftDelete.map((p) => p.name).join(', ');
-                throw new BadRequestException(
-                    `无法删除产品: ${productNames}，因为它已被一个“待开始”或“进行中”的生产任务使用。`,
-                );
+        const ratioChanges: string[] = [];
+        const dependencyChanges: string[] = [];
+        for (const [name, next] of nextIngredients) {
+            const previous = sourceIngredients.get(name);
+            if (!previous) continue;
+            if (previous.value !== null && next.value !== null && Math.abs(previous.value - next.value) >= 0.001) {
+                ratioChanges.push(`${name} ${previous.value}%→${next.value}%`);
             }
-
-            await tx.product.updateMany({
-                where: { id: { in: productIdsToSoftDelete } },
-                data: { deletedAt: new Date() },
-            });
-        }
-
-        for (const productDto of newProductsDto) {
-            const existingProduct = productDto.id ? existingProductsMap.get(productDto.id) : undefined;
-
-            if (existingProduct) {
-                await tx.product.update({
-                    where: { id: existingProduct.id },
-                    data: {
-                        name: productDto.name,
-                        baseDoughWeight: new Prisma.Decimal(productDto.weight),
-                        procedure: productDto.procedure,
-                        deletedAt: null,
-                    },
-                });
-                await tx.productIngredient.deleteMany({ where: { productId: existingProduct.id } });
-                await this._createProductIngredients(tenantId, existingProduct.id, productDto, tx);
-            } else {
-                const newProduct = await tx.product.create({
-                    data: {
-                        recipeVersionId: versionId,
-                        name: productDto.name,
-                        baseDoughWeight: new Prisma.Decimal(productDto.weight),
-                        procedure: productDto.procedure,
-                    },
-                });
-                await this._createProductIngredients(tenantId, newProduct.id, productDto, tx);
+            if (previous.versionId && next.versionId && previous.versionId !== next.versionId) {
+                dependencyChanges.push(name);
             }
         }
+        if (ratioChanges.length > 0) changes.push(`调整比例：${ratioChanges.join('、')}`);
+        if (dependencyChanges.length > 0) changes.push(`升级依赖：${dependencyChanges.join('、')}`);
+
+        const sourceProducts = new Map((source.products ?? []).map((product) => [product.name, product]));
+        const nextProducts = new Map((recipe.products ?? []).map((product) => [product.name, product]));
+        const addedProducts = [...nextProducts.keys()].filter((name) => !sourceProducts.has(name));
+        const removedProducts = [...sourceProducts.keys()].filter((name) => !nextProducts.has(name));
+        if (addedProducts.length > 0) changes.push(`新增产品：${addedProducts.join('、')}`);
+        if (removedProducts.length > 0) changes.push(`移除产品：${removedProducts.join('、')}`);
+
+        const productWeightChanges: string[] = [];
+        let productIngredientsChanged = false;
+        let productProcedureChanged = false;
+        const normalizeProductIngredients = (
+            ingredients: Array<{
+                name: string;
+                ratio?: number | null;
+                weightInGrams?: number | null;
+                recipeVersionId?: string;
+            }>,
+        ) =>
+            ingredients
+                .map((ingredient) => ({
+                    name: ingredient.name,
+                    ratio: ingredient.ratio ?? null,
+                    weightInGrams: ingredient.weightInGrams ?? null,
+                    recipeVersionId: ingredient.recipeVersionId ?? null,
+                }))
+                .sort((a, b) => a.name.localeCompare(b.name));
+        for (const [name, next] of nextProducts) {
+            const previous = sourceProducts.get(name);
+            if (!previous) continue;
+            if (Math.abs(previous.baseDoughWeight - next.weight) >= 0.01) {
+                productWeightChanges.push(`${name} ${previous.baseDoughWeight}g→${next.weight}g`);
+            }
+            const sourceIngredientSignature = JSON.stringify({
+                mixIn: normalizeProductIngredients(previous.mixIns),
+                fillings: normalizeProductIngredients(previous.fillings),
+                toppings: normalizeProductIngredients(previous.toppings),
+            });
+            const nextIngredientSignature = JSON.stringify({
+                mixIn: normalizeProductIngredients(next.mixIn ?? []),
+                fillings: normalizeProductIngredients(next.fillings ?? []),
+                toppings: normalizeProductIngredients(next.toppings ?? []),
+            });
+            productIngredientsChanged ||= sourceIngredientSignature !== nextIngredientSignature;
+            productProcedureChanged ||=
+                JSON.stringify(previous.procedure ?? []) !== JSON.stringify(next.procedure ?? []);
+        }
+        if (productWeightChanges.length > 0) changes.push(`调整产品克重：${productWeightChanges.join('、')}`);
+        if (productIngredientsChanged) changes.push('调整产品辅料');
+        if (productProcedureChanged) changes.push('调整产品制作步骤');
+
+        const scalarChanges: string[] = [];
+        const addScalarChange = (label: string, previous: number | undefined, next: number | undefined) => {
+            if (previous === undefined && next === undefined) return;
+            if (Math.abs((previous ?? 0) - (next ?? 0)) >= 0.001) scalarChanges.push(label);
+        };
+        addScalarChange('目标温度', source.targetTemp, recipe.targetTemp);
+        addScalarChange('损耗率', sourceMainComponent?.lossRatio, recipe.lossRatio);
+        addScalarChange('分割损耗', sourceMainComponent?.divisionLoss, recipe.divisionLoss);
+        addScalarChange('含水量', sourceMainComponent?.customWaterContent, recipe.customWaterContent);
+        if (scalarChanges.length > 0) changes.push(`调整${scalarChanges.join('、')}`);
+        if (JSON.stringify(sourceMainComponent?.procedure ?? []) !== JSON.stringify(recipe.procedure ?? [])) {
+            changes.push('调整配方制作步骤');
+        }
+
+        const summary = changes.length > 0 ? changes.join('；') : '内容未发生变化';
+        return summary.length > 180 ? `${summary.slice(0, 177)}...` : summary;
     }
 
     private async _createProductIngredients(
@@ -1070,7 +1029,23 @@ export class RecipesService {
                     type: 'EXTRA',
                     deletedAt: null,
                 },
+                include: {
+                    versions: {
+                        where: pIngredientDto.recipeVersionId
+                            ? { OR: [{ id: pIngredientDto.recipeVersionId }, { isActive: true }] }
+                            : { isActive: true },
+                        select: { id: true },
+                    },
+                },
             });
+
+            const linkedExtraVersion = pIngredientDto.recipeVersionId
+                ? linkedExtra?.versions.find((version) => version.id === pIngredientDto.recipeVersionId)
+                : linkedExtra?.versions[0];
+
+            if (linkedExtra && !linkedExtraVersion) {
+                throw new BadRequestException(`关联配方 "${linkedExtra.name}" 没有正在使用的版本。`);
+            }
 
             const ratioForDb =
                 pIngredientDto.ratio === null || pIngredientDto.ratio === undefined
@@ -1089,12 +1064,19 @@ export class RecipesService {
                     weightInGrams: weightInGramsForDb,
                     ingredientId: linkedExtra ? null : pIngredientDto.ingredientId,
                     linkedExtraId: linkedExtra?.id,
+                    linkedExtraVersionId: linkedExtraVersion?.id,
                 },
             });
         }
     }
 
-    private async createVersionInternal(tenantId: string, familyId: string | null, createRecipeDto: CreateRecipeDto) {
+    private async createVersionInternal(
+        tenantId: string,
+        familyId: string | null,
+        createRecipeDto: CreateRecipeDto,
+        activateNewVersion = false,
+        changeSummary = '初始版本',
+    ) {
         const { name, type = 'MAIN', category } = createRecipeDto;
 
         const finalCategory = type === 'MAIN' ? category : 'OTHER';
@@ -1175,13 +1157,34 @@ export class RecipesService {
                         ? Math.max(...recipeFamily.versions.map((v: RecipeVersion) => v.version)) + 1
                         : 1;
 
+                if (activateNewVersion && hasActiveVersion) {
+                    await tx.recipeVersion.updateMany({
+                        where: { familyId: recipeFamily.id },
+                        data: { isActive: false },
+                    });
+                }
+
                 const recipeVersion = await tx.recipeVersion.create({
                     data: {
                         familyId: recipeFamily.id,
                         version: nextVersionNumber,
                         notes: createRecipeDto.notes || `版本 ${nextVersionNumber}`,
-                        isActive: !hasActiveVersion,
+                        changeSummary,
+                        isActive: activateNewVersion || !hasActiveVersion,
                     },
+                });
+
+                await tx.componentIngredient.updateMany({
+                    where: { preDoughId: recipeFamily.id, preDoughVersionId: null },
+                    data: { preDoughVersionId: recipeVersion.id },
+                });
+                await tx.componentIngredient.updateMany({
+                    where: { extraId: recipeFamily.id, extraVersionId: null },
+                    data: { extraVersionId: recipeVersion.id },
+                });
+                await tx.productIngredient.updateMany({
+                    where: { linkedExtraId: recipeFamily.id, linkedExtraVersionId: null },
+                    data: { linkedExtraVersionId: recipeVersion.id },
                 });
 
                 const finalFamily = await this.createVersionContents(tenantId, recipeVersion.id, createRecipeDto, tx);
@@ -1277,9 +1280,19 @@ export class RecipesService {
         for (const ingredientDto of ingredients) {
             const linkedFamily = linkedFamilies.get(ingredientDto.name);
 
+            const linkedVersion = ingredientDto.recipeVersionId
+                ? linkedFamily?.versions.find((version) => version.id === ingredientDto.recipeVersionId)
+                : linkedFamily?.versions.find((version) => version.isActive);
+
+            if (linkedFamily && !linkedVersion) {
+                throw new BadRequestException(`关联配方 "${linkedFamily.name}" 没有正在使用的版本。`);
+            }
+
             const ingredientId = linkedFamily ? undefined : ingredientDto.ingredientId;
             const preDoughId = linkedFamily?.type === 'PRE_DOUGH' ? linkedFamily.id : undefined;
             const extraId = linkedFamily?.type === 'EXTRA' ? linkedFamily.id : undefined;
+            const preDoughVersionId = preDoughId ? linkedVersion?.id : undefined;
+            const extraVersionId = extraId ? linkedVersion?.id : undefined;
 
             if (!ingredientId && !preDoughId && !extraId) {
                 throw new BadRequestException(
@@ -1304,7 +1317,9 @@ export class RecipesService {
                     flourRatio: flourRatioForDb,
                     ingredientId: ingredientId,
                     preDoughId: preDoughId,
+                    preDoughVersionId,
                     extraId: extraId,
+                    extraVersionId,
                 },
             });
         }
@@ -1477,10 +1492,27 @@ export class RecipesService {
             },
             _count: {
                 select: {
+                    versions: true,
                     usedInComponentsAsPreDough: true,
                     usedInComponentsAsExtra: true,
                     usedInProducts: true,
                 },
+            },
+            usedInComponentsAsPreDough: {
+                where: { component: { recipeVersion: { isActive: true, family: { deletedAt: null } } } },
+                select: {
+                    component: { select: { recipeVersion: { select: { family: { select: { name: true } } } } } },
+                },
+            },
+            usedInComponentsAsExtra: {
+                where: { component: { recipeVersion: { isActive: true, family: { deletedAt: null } } } },
+                select: {
+                    component: { select: { recipeVersion: { select: { family: { select: { name: true } } } } } },
+                },
+            },
+            usedInProducts: {
+                where: { product: { recipeVersion: { isActive: true, family: { deletedAt: null } } } },
+                select: { product: { select: { recipeVersion: { select: { family: { select: { name: true } } } } } } },
             },
         };
 
@@ -1506,8 +1538,36 @@ export class RecipesService {
                     (family._count?.usedInComponentsAsExtra || 0) +
                     (family._count?.usedInProducts || 0);
 
+                const referencedByNames = Array.from(
+                    new Set([
+                        ...family.usedInComponentsAsPreDough.map((item) => item.component.recipeVersion.family.name),
+                        ...family.usedInComponentsAsExtra.map((item) => item.component.recipeVersion.family.name),
+                        ...family.usedInProducts.map((item) => item.product.recipeVersion.family.name),
+                    ]),
+                ).sort((a, b) => a.localeCompare(b));
+
+                const listMetadata = {
+                    productNames: activeVersion?.products.map((product) => product.name) ?? [],
+                    referencedByNames,
+                    versionCount: family._count.versions,
+                    activeVersion: activeVersion
+                        ? {
+                              version: activeVersion.version,
+                              notes: activeVersion.notes,
+                              changeSummary: activeVersion.changeSummary,
+                          }
+                        : null,
+                };
+
                 if (!activeVersion || activeVersion.products.length === 0) {
-                    return { ...family, productCount, ingredientCount, productionTaskCount: 0, usageCount };
+                    return {
+                        ...family,
+                        productCount,
+                        ingredientCount,
+                        productionTaskCount: 0,
+                        usageCount,
+                        ...listMetadata,
+                    };
                 }
 
                 const productIds = activeVersion.products.map((p) => p.id);
@@ -1529,6 +1589,7 @@ export class RecipesService {
                     ingredientCount,
                     productionTaskCount: distinctTasks.length,
                     usageCount,
+                    ...listMetadata,
                 };
             }),
         );
@@ -1553,6 +1614,10 @@ export class RecipesService {
                 ingredientCount: family.ingredientCount,
                 productionTaskCount: family.productionTaskCount,
                 usageCount: family.usageCount,
+                productNames: family.productNames,
+                referencedByNames: family.referencedByNames,
+                versionCount: family.versionCount,
+                activeVersion: family.activeVersion,
             };
         });
 
@@ -1819,16 +1884,12 @@ export class RecipesService {
                         ingredients: {
                             include: {
                                 ingredient: true,
-                                linkedPreDough: {
+                                linkedPreDough: true,
+                                linkedPreDoughVersion: {
                                     include: {
-                                        versions: {
-                                            where: { isActive: true },
+                                        components: {
                                             include: {
-                                                components: {
-                                                    include: {
-                                                        ingredients: { include: { ingredient: true } },
-                                                    },
-                                                },
+                                                ingredients: { include: { ingredient: true } },
                                             },
                                         },
                                     },
@@ -1896,6 +1957,7 @@ export class RecipesService {
                                 isRecipe: true,
                                 isFlour: false,
                                 waterContent: 0,
+                                recipeVersionId: ing.preDoughVersionId ?? ing.extraVersionId ?? undefined,
                             };
                         } else if (standardIngredient) {
                             return {
@@ -1942,8 +2004,7 @@ export class RecipesService {
             for (const ing of sortedIngredients) {
                 if (ing.linkedPreDough) {
                     const preDoughFamily = ing.linkedPreDough;
-                    const preDoughActiveVersion = preDoughFamily.versions.find((v) => v.isActive);
-                    const preDoughRecipe = preDoughActiveVersion?.components?.[0];
+                    const preDoughRecipe = ing.linkedPreDoughVersion?.components[0];
 
                     if (preDoughRecipe) {
                         const flourRatioInMainDough = ing.flourRatio
@@ -1964,6 +2025,7 @@ export class RecipesService {
                             id: preDoughFamily.id,
                             name: preDoughFamily.name,
                             type: 'PRE_DOUGH',
+                            recipeVersionId: ing.preDoughVersionId ?? undefined,
                             flourRatioInMainDough: toCleanPercent(flourRatioInMainDough) ?? undefined,
                             ingredients: ingredientsForTemplate,
                             procedure: preDoughRecipe.procedure,
@@ -1986,6 +2048,7 @@ export class RecipesService {
                         isRecipe: true,
                         isFlour: false,
                         waterContent: 0,
+                        recipeVersionId: ing.extraVersionId ?? undefined,
                     });
                 }
             }
@@ -2033,6 +2096,7 @@ export class RecipesService {
                                 isRecipe: true,
                                 isFlour: false,
                                 waterContent: 0,
+                                recipeVersionId: ing.preDoughVersionId ?? ing.extraVersionId ?? undefined,
                             };
                         } else if (standardIngredient) {
                             return {
@@ -2081,6 +2145,7 @@ export class RecipesService {
                                 ratio: toCleanPercent(ing.ratio),
                                 weightInGrams: ing.weightInGrams?.toNumber(),
                                 isRecipe: !!ing.linkedExtra,
+                                recipeVersionId: ing.linkedExtraVersionId ?? undefined,
                                 isFlour: ing.ingredient?.isFlour ?? false,
                                 waterContent: ing.ingredient?.waterContent.toNumber() ?? 0,
                             };
@@ -2099,6 +2164,308 @@ export class RecipesService {
         };
 
         return formTemplate;
+    }
+
+    private async buildDependencyUpgradePlan(
+        tenantId: string,
+        familyId: string,
+        versionId: string,
+    ): Promise<DependencyUpgradePlanDto> {
+        const sourceVersion = await this.prisma.recipeVersion.findFirst({
+            where: {
+                id: versionId,
+                familyId,
+                isActive: true,
+                family: { tenantId, deletedAt: null },
+            },
+            select: { id: true, version: true },
+        });
+
+        if (!sourceVersion) {
+            throw new BadRequestException('只有当前使用中的配方版本可以检查依赖升级。');
+        }
+
+        const activeVersions = await this.prisma.recipeVersion.findMany({
+            where: {
+                isActive: true,
+                family: { tenantId, deletedAt: null },
+            },
+            select: {
+                id: true,
+                version: true,
+                family: { select: { id: true, name: true, type: true } },
+                components: {
+                    select: {
+                        ingredients: {
+                            select: {
+                                preDoughId: true,
+                                preDoughVersionId: true,
+                                extraId: true,
+                                extraVersionId: true,
+                            },
+                        },
+                    },
+                },
+                products: {
+                    where: { deletedAt: null },
+                    select: {
+                        ingredients: {
+                            select: {
+                                linkedExtraId: true,
+                                linkedExtraVersionId: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        const activeVersionByFamily = new Map(activeVersions.map((version) => [version.family.id, version]));
+        const parentsByChild = new Map<string, Map<string, Set<string | null>>>();
+
+        const addDependency = (
+            childFamilyId: string | null,
+            pinnedVersionId: string | null,
+            parentFamilyId: string,
+        ) => {
+            if (!childFamilyId || childFamilyId === parentFamilyId) return;
+            const parentMap = parentsByChild.get(childFamilyId) ?? new Map<string, Set<string | null>>();
+            const pinnedVersions = parentMap.get(parentFamilyId) ?? new Set<string | null>();
+            pinnedVersions.add(pinnedVersionId);
+            parentMap.set(parentFamilyId, pinnedVersions);
+            parentsByChild.set(childFamilyId, parentMap);
+        };
+
+        for (const parentVersion of activeVersions) {
+            for (const component of parentVersion.components) {
+                for (const ingredient of component.ingredients) {
+                    addDependency(ingredient.preDoughId, ingredient.preDoughVersionId, parentVersion.family.id);
+                    addDependency(ingredient.extraId, ingredient.extraVersionId, parentVersion.family.id);
+                }
+            }
+            for (const product of parentVersion.products) {
+                for (const ingredient of product.ingredients) {
+                    addDependency(ingredient.linkedExtraId, ingredient.linkedExtraVersionId, parentVersion.family.id);
+                }
+            }
+        }
+
+        const affected = new Map<string, DependencyUpgradeItemDto>();
+        const queue: Array<{ familyId: string; depth: number; isSource: boolean }> = [
+            { familyId, depth: 0, isSource: true },
+        ];
+
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            const parents = parentsByChild.get(current.familyId);
+            if (!parents) continue;
+
+            for (const [parentFamilyId, pinnedVersions] of parents) {
+                if (affected.has(parentFamilyId) || parentFamilyId === familyId) continue;
+                if (current.isSource && [...pinnedVersions].every((pinned) => pinned === versionId)) continue;
+
+                const activeParent = activeVersionByFamily.get(parentFamilyId);
+                if (!activeParent) continue;
+
+                const item: DependencyUpgradeItemDto = {
+                    familyId: parentFamilyId,
+                    familyName: activeParent.family.name,
+                    type: activeParent.family.type,
+                    currentVersionId: activeParent.id,
+                    currentVersion: activeParent.version,
+                    nextVersion: activeParent.version + 1,
+                    depth: current.depth + 1,
+                };
+                affected.set(parentFamilyId, item);
+                queue.push({ familyId: parentFamilyId, depth: item.depth, isSource: false });
+            }
+        }
+
+        return {
+            sourceFamilyId: familyId,
+            sourceVersionId: versionId,
+            sourceVersion: sourceVersion.version,
+            affectedRecipes: Array.from(affected.values()).sort(
+                (a, b) => a.depth - b.depth || a.familyName.localeCompare(b.familyName, 'zh-CN'),
+            ),
+        };
+    }
+
+    getDependencyUpgradePlan(tenantId: string, familyId: string, versionId: string) {
+        return this.buildDependencyUpgradePlan(tenantId, familyId, versionId);
+    }
+
+    private async cloneActiveVersionWithCurrentDependencies(
+        tx: Prisma.TransactionClient,
+        tenantId: string,
+        planItem: DependencyUpgradeItemDto,
+        activeVersionIds: Map<string, string>,
+    ) {
+        const source = await tx.recipeVersion.findFirst({
+            where: {
+                id: planItem.currentVersionId,
+                familyId: planItem.familyId,
+                isActive: true,
+                family: { tenantId, deletedAt: null },
+            },
+            include: {
+                family: true,
+                components: { include: { ingredients: true } },
+                products: {
+                    where: { deletedAt: null },
+                    include: { ingredients: true },
+                },
+            },
+        });
+
+        if (!source) {
+            throw new BadRequestException(`配方“${planItem.familyName}”已发生变化，请刷新后重试。`);
+        }
+
+        const latestVersion = await tx.recipeVersion.findFirst({
+            where: { familyId: planItem.familyId },
+            orderBy: { version: 'desc' },
+            select: { version: true },
+        });
+        const nextVersion = (latestVersion?.version ?? 0) + 1;
+
+        await tx.recipeVersion.updateMany({
+            where: { familyId: planItem.familyId },
+            data: { isActive: false },
+        });
+
+        const createdVersion = await tx.recipeVersion.create({
+            data: {
+                familyId: planItem.familyId,
+                version: nextVersion,
+                notes: source.notes ? `${source.notes}；依赖升级` : `版本 ${nextVersion}；依赖升级`,
+                changeSummary: `升级“${planItem.familyName}”的子配方依赖版本`,
+                isActive: true,
+            },
+        });
+
+        const resolveVersionId = (dependencyFamilyId: string | null): string | null => {
+            if (!dependencyFamilyId) return null;
+            const dependencyVersionId = activeVersionIds.get(dependencyFamilyId);
+            if (!dependencyVersionId) {
+                throw new BadRequestException('依赖配方没有正在使用的版本，无法完成级联升级。');
+            }
+            return dependencyVersionId;
+        };
+
+        for (const component of source.components) {
+            const createdComponent = await tx.recipeComponent.create({
+                data: {
+                    recipeVersionId: createdVersion.id,
+                    name: component.name,
+                    targetTemp: component.targetTemp,
+                    lossRatio: component.lossRatio,
+                    divisionLoss: component.divisionLoss,
+                    customWaterContent: component.customWaterContent,
+                    procedure: component.procedure,
+                },
+            });
+
+            if (component.ingredients.length > 0) {
+                await tx.componentIngredient.createMany({
+                    data: component.ingredients.map((ingredient) => ({
+                        componentId: createdComponent.id,
+                        ratio: ingredient.ratio,
+                        flourRatio: ingredient.flourRatio,
+                        ingredientId: ingredient.ingredientId,
+                        preDoughId: ingredient.preDoughId,
+                        preDoughVersionId: resolveVersionId(ingredient.preDoughId),
+                        extraId: ingredient.extraId,
+                        extraVersionId: resolveVersionId(ingredient.extraId),
+                    })),
+                });
+            }
+        }
+
+        for (const product of source.products) {
+            const createdProduct = await tx.product.create({
+                data: {
+                    recipeVersionId: createdVersion.id,
+                    name: product.name,
+                    baseDoughWeight: product.baseDoughWeight,
+                    procedure: product.procedure,
+                },
+            });
+
+            if (product.ingredients.length > 0) {
+                await tx.productIngredient.createMany({
+                    data: product.ingredients.map((ingredient) => ({
+                        productId: createdProduct.id,
+                        type: ingredient.type,
+                        ingredientId: ingredient.ingredientId,
+                        ratio: ingredient.ratio,
+                        weightInGrams: ingredient.weightInGrams,
+                        linkedExtraId: ingredient.linkedExtraId,
+                        linkedExtraVersionId: resolveVersionId(ingredient.linkedExtraId),
+                    })),
+                });
+            }
+        }
+
+        activeVersionIds.set(planItem.familyId, createdVersion.id);
+        return {
+            familyId: planItem.familyId,
+            familyName: planItem.familyName,
+            versionId: createdVersion.id,
+            version: createdVersion.version,
+        };
+    }
+
+    async applyDependencyUpgrades(
+        tenantId: string,
+        familyId: string,
+        versionId: string,
+    ): Promise<ApplyDependencyUpgradeResultDto> {
+        const plan = await this.buildDependencyUpgradePlan(tenantId, familyId, versionId);
+        if (plan.affectedRecipes.length === 0) {
+            return { upgradedRecipes: [] };
+        }
+
+        return this.prisma.$transaction(
+            async (tx) => {
+                const activeVersions = await tx.recipeVersion.findMany({
+                    where: { isActive: true, family: { tenantId, deletedAt: null } },
+                    select: { id: true, familyId: true },
+                });
+                const activeVersionIds = new Map(activeVersions.map((version) => [version.familyId, version.id]));
+                if (activeVersionIds.get(familyId) !== versionId) {
+                    throw new BadRequestException('源配方版本已发生变化，请刷新后重试。');
+                }
+                const upgradedRecipes: ApplyDependencyUpgradeResultDto['upgradedRecipes'] = [];
+
+                for (const planItem of plan.affectedRecipes) {
+                    upgradedRecipes.push(
+                        await this.cloneActiveVersionWithCurrentDependencies(tx, tenantId, planItem, activeVersionIds),
+                    );
+                }
+
+                for (const upgraded of upgradedRecipes) {
+                    const family = await tx.recipeFamily.findUnique({
+                        where: { id: upgraded.familyId },
+                        include: recipeFamilyWithDetailsInclude,
+                    });
+                    if (family && family.type !== RecipeType.MAIN) {
+                        const waterContent = this._calculateWaterContent(family as unknown as WaterCalcFamily);
+                        await this._syncSelfMadeIngredient(
+                            tx,
+                            tenantId,
+                            family.id,
+                            family.name,
+                            family.type,
+                            waterContent,
+                        );
+                    }
+                }
+
+                return { upgradedRecipes };
+            },
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
     }
 
     async activateVersion(tenantId: string, familyId: string, versionId: string) {
@@ -2127,6 +2494,15 @@ export class RecipesService {
                 data: { isActive: true },
             });
 
+            const family = await tx.recipeFamily.findUnique({
+                where: { id: familyId },
+                include: recipeFamilyWithDetailsInclude,
+            });
+            if (family && family.type !== RecipeType.MAIN) {
+                const waterContent = this._calculateWaterContent(family as unknown as WaterCalcFamily);
+                await this._syncSelfMadeIngredient(tx, tenantId, family.id, family.name, family.type, waterContent);
+            }
+
             return activatedVersion;
         });
     }
@@ -2134,38 +2510,14 @@ export class RecipesService {
     async remove(familyId: string) {
         const family = await this.prisma.recipeFamily.findUnique({
             where: { id: familyId },
-            include: {
-                versions: {
-                    include: {
-                        products: true,
-                    },
-                },
-            },
+            select: { id: true },
         });
 
         if (!family) {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
-        const productIds = family.versions.flatMap((version) => version.products.map((product) => product.id));
-
-        if (productIds.length > 0) {
-            const taskCount = await this.prisma.productionTaskItem.count({
-                where: {
-                    productId: {
-                        in: productIds,
-                    },
-                },
-            });
-
-            if (taskCount > 0) {
-                throw new BadRequestException('该配方已被生产任务使用，无法（物理）删除。请改用“弃用”操作。');
-            }
-        }
-
-        return this.prisma.recipeFamily.delete({
-            where: { id: familyId },
-        });
+        throw new BadRequestException('配方及历史版本不可物理删除，请使用“停用配方”。');
     }
 
     async discontinue(familyId: string) {
@@ -2202,56 +2554,20 @@ export class RecipesService {
     }
 
     async deleteVersion(tenantId: string, familyId: string, versionId: string) {
-        const versionToDelete = await this.prisma.recipeVersion.findFirst({
+        const version = await this.prisma.recipeVersion.findFirst({
             where: {
                 id: versionId,
-                familyId: familyId,
-                family: {
-                    tenantId: tenantId,
-                },
+                familyId,
+                family: { tenantId },
             },
-            include: {
-                products: true,
-                family: {
-                    include: {
-                        _count: {
-                            select: { versions: true },
-                        },
-                    },
-                },
-            },
+            select: { id: true },
         });
 
-        if (!versionToDelete) {
+        if (!version) {
             throw new NotFoundException('指定的配方版本不存在');
         }
 
-        if (versionToDelete.isActive) {
-            throw new BadRequestException('不能删除当前激活的配方版本');
-        }
-
-        if (versionToDelete.family._count.versions <= 1) {
-            throw new BadRequestException('不能删除配方族的最后一个版本');
-        }
-
-        const productIds = versionToDelete.products.map((p) => p.id);
-        if (productIds.length > 0) {
-            const taskCount = await this.prisma.productionTaskItem.count({
-                where: {
-                    productId: {
-                        in: productIds,
-                    },
-                },
-            });
-
-            if (taskCount > 0) {
-                throw new BadRequestException('该配方版本已被生产任务使用，无法删除');
-            }
-        }
-
-        return this.prisma.recipeVersion.delete({
-            where: { id: versionId },
-        });
+        throw new BadRequestException('历史配方版本不可删除，可以停用整个配方。');
     }
 
     private async preloadLinkedFamilies(
@@ -2260,6 +2576,9 @@ export class RecipesService {
         tx: Prisma.TransactionClient,
     ): Promise<Map<string, PreloadedRecipeFamily>> {
         const linkedRecipeNames = ingredients.map((ing) => ing.name);
+        const requestedVersionIds = ingredients
+            .map((ingredient) => ingredient.recipeVersionId)
+            .filter((id): id is string => !!id);
 
         if (linkedRecipeNames.length === 0) {
             return new Map();
@@ -2274,7 +2593,9 @@ export class RecipesService {
             },
             include: {
                 versions: {
-                    where: { isActive: true },
+                    where: {
+                        OR: [{ isActive: true }, { id: { in: requestedVersionIds } }],
+                    },
                     include: {
                         components: {
                             include: { ingredients: { include: { ingredient: true } } },
