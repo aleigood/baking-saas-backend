@@ -40,8 +40,8 @@ export class AuthService {
         };
     }
 
-    async register(registerDto: RegisterDto): Promise<{ accessToken: string }> {
-        const { name, phone, password, tenantName } = registerDto; // [修改] 解构出 name
+    async register(registerDto: RegisterDto): Promise<LoginResponseDto> {
+        const { name, phone, password } = registerDto;
 
         const existingUser = await this.prisma.user.findUnique({
             where: { phone },
@@ -52,36 +52,17 @@ export class AuthService {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const { user, tenantUser } = await this.prisma.$transaction(async (tx) => {
-            const newUser = await tx.user.create({
-                data: {
-                    name, // [修改] 保存姓名
-                    phone,
-                    password: hashedPassword,
-                },
-            });
-
-            const newTenant = await tx.tenant.create({
-                data: {
-                    name: tenantName,
-                    // 新注册的店铺默认为激活状态
-                    status: TenantStatus.ACTIVE,
-                },
-            });
-
-            const newTenantUser = await tx.tenantUser.create({
-                data: {
-                    userId: newUser.id,
-                    tenantId: newTenant.id,
-                    role: Role.OWNER,
-                    status: 'ACTIVE',
-                },
-            });
-
-            return { user: newUser, tenantUser: newTenantUser };
+        const user = await this.prisma.user.create({
+            data: {
+                name,
+                phone,
+                password: hashedPassword,
+            },
         });
-
-        return this.generateJwtToken(user.id, tenantUser.tenantId, tenantUser.role, user.role);
+        return {
+            ...this.generateJwtToken(user.id, '', Role.MEMBER, user.role),
+            redirectTo: '/pages/onboarding/store-access',
+        };
     }
 
     async login(loginDto: AuthDto): Promise<LoginResponseDto> {
@@ -109,7 +90,10 @@ export class AuthService {
 
         const firstTenantUser = user.tenants[0];
         if (!firstTenantUser) {
-            throw new UnauthorizedException('用户不属于任何店铺，无法登录。');
+            return {
+                ...this.generateJwtToken(user.id, '', Role.MEMBER, user.role),
+                redirectTo: '/pages/onboarding/store-access',
+            };
         }
 
         // [核心新增] 检查首个店铺的状态
@@ -203,14 +187,30 @@ export class AuthService {
         const appId = process.env.WECHAT_APP_ID;
         const appSecret = process.env.WECHAT_APP_SECRET;
         if (!appId || !appSecret) throw new ServiceUnavailableException('微信小程序登录参数尚未配置');
-        const params = new URLSearchParams({ appid: appId, secret: appSecret, js_code: code, grant_type: 'authorization_code' });
+        const params = new URLSearchParams({
+            appid: appId,
+            secret: appSecret,
+            js_code: code,
+            grant_type: 'authorization_code',
+        });
         const response = await fetch(`https://api.weixin.qq.com/sns/jscode2session?${params.toString()}`);
-        const result = (await response.json()) as { openid?: string; unionid?: string; errcode?: number; errmsg?: string };
+        const result = (await response.json()) as {
+            openid?: string;
+            unionid?: string;
+            errcode?: number;
+            errmsg?: string;
+        };
         if (!response.ok || !result.openid) throw new BadGatewayException(result.errmsg || '微信登录凭证校验失败');
 
-        const occupied = await this.prisma.user.findFirst({ where: { wechatOpenId: result.openid, id: { not: userId } }, select: { id: true } });
+        const occupied = await this.prisma.user.findFirst({
+            where: { wechatOpenId: result.openid, id: { not: userId } },
+            select: { id: true },
+        });
         if (occupied) throw new ConflictException('该微信账号已绑定其他用户');
-        await this.prisma.user.update({ where: { id: userId }, data: { wechatOpenId: result.openid, wechatUnionId: result.unionid } });
+        await this.prisma.user.update({
+            where: { id: userId },
+            data: { wechatOpenId: result.openid, wechatUnionId: result.unionid },
+        });
         return { bound: true };
     }
 }

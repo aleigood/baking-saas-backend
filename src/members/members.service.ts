@@ -8,11 +8,10 @@ import {
     ConflictException,
 } from '@nestjs/common';
 import { PrismaService as PrismaServiceMembers } from '../prisma/prisma.service';
-import { Role as RoleMembers, UserStatus } from '@prisma/client';
+import { InvitationStatus, Role as RoleMembers } from '@prisma/client';
 import { UpdateMemberDto as UpdateMemberDtoMembers } from './dto/update-member.dto';
 import { UserPayload as UserPayloadMembers } from 'src/auth/interfaces/user-payload.interface';
 import { CreateMemberDto } from './dto/create-member.dto'; // [核心新增] 导入CreateMemberDto
-import * as bcrypt from 'bcrypt'; // [核心新增] 导入bcrypt用于密码哈希
 
 @InjectableMembers()
 export class MembersService {
@@ -42,49 +41,20 @@ export class MembersService {
             throw new ForbiddenExceptionMembers('不能直接创建所有者角色。');
         }
 
-        const existingUser = await this.prisma.user.findUnique({
-            where: { phone: dto.phone },
-        });
-
+        const existingUser = await this.prisma.user.findUnique({ where: { phone: dto.phone }, select: { id: true } });
         if (existingUser) {
-            throw new ConflictException('该手机号已被注册。');
+            const membership = await this.prisma.tenantUser.findUnique({
+                where: { userId_tenantId: { userId: existingUser.id, tenantId } },
+            });
+            if (membership) throw new ConflictException('该用户已经属于当前店铺。');
         }
 
-        const hashedPassword = await bcrypt.hash(dto.password, 10);
-
-        // 使用事务确保用户创建和店铺关联的原子性
-        return this.prisma.$transaction(async (tx) => {
-            const newUser = await tx.user.create({
-                data: {
-                    name: dto.name,
-                    phone: dto.phone,
-                    password: hashedPassword,
-                    status: UserStatus.ACTIVE, // 直接创建的用户默认为激活状态
-                },
-                // [核心修正] 使用 select 来返回不包含密码的用户信息，以解决 lint 错误
-                select: {
-                    id: true,
-                    phone: true,
-                    name: true,
-                    avatarUrl: true,
-                    role: true,
-                    status: true,
-                    createdAt: true,
-                    updatedAt: true,
-                },
-            });
-
-            await tx.tenantUser.create({
-                data: {
-                    tenantId: tenantId,
-                    userId: newUser.id,
-                    role: dto.role, // [核心修改] 使用DTO中传入的角色
-                    status: UserStatus.ACTIVE,
-                },
-            });
-
-            // 直接返回已筛选字段的 newUser 对象
-            return newUser;
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        return this.prisma.invitation.upsert({
+            where: { tenantId_phone: { tenantId, phone: dto.phone } },
+            update: { role: dto.role, status: InvitationStatus.PENDING, expiresAt },
+            create: { tenantId, phone: dto.phone, role: dto.role, status: InvitationStatus.PENDING, expiresAt },
+            include: { tenant: { select: { id: true, name: true } } },
         });
     }
 

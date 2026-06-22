@@ -18,15 +18,13 @@ import { BillingModule } from './billing/billing.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditInterceptor } from './audit/audit.interceptor';
 import { ConfigModule } from '@nestjs/config';
+import { OnboardingModule } from './onboarding/onboarding.module';
 
 @Module({
     imports: [
         ConfigModule.forRoot({
             isGlobal: true,
-            envFilePath:
-                process.env.NODE_ENV === 'production'
-                    ? '.env.production'
-                    : '.env.development',
+            envFilePath: process.env.NODE_ENV === 'production' ? '.env.production' : '.env.development',
         }),
         PrismaModule,
         AuthModule,
@@ -42,6 +40,7 @@ import { ConfigModule } from '@nestjs/config';
         UsersModule,
         DashboardModule,
         BillingModule,
+        OnboardingModule,
     ],
     controllers: [AppController],
     providers: [AppService, { provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

@@ -1,19 +1,14 @@
-import { IsNotEmpty, IsString, MinLength, IsEnum } from 'class-validator';
+import { IsNotEmpty, IsString, IsEnum } from 'class-validator';
 import { Role } from '@prisma/client';
+import { Matches } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CreateMemberDto {
     @IsString()
     @IsNotEmpty()
-    name!: string;
-
-    @IsString()
-    @IsNotEmpty()
+    @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
+    @Matches(/^1\d{10}$/, { message: '请输入正确的11位手机号' })
     phone!: string;
-
-    @IsString()
-    @IsNotEmpty()
-    @MinLength(3, { message: '密码至少需要3个字符' })
-    password!: string;
 
     @IsEnum(Role)
     @IsNotEmpty()

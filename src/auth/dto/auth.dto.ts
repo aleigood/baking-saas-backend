@@ -1,5 +1,6 @@
 // 文件路径: src/auth/dto/auth.dto.ts
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, Matches, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 /**
  * [修改] 用于新用户注册并创建店铺的DTO
@@ -11,15 +12,14 @@ export class RegisterDto {
 
     @IsString()
     @IsNotEmpty()
+    @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
+    @Matches(/^1\d{10}$/, { message: '请输入正确的11位手机号' })
     phone!: string;
 
     @IsString()
     @IsNotEmpty()
+    @MinLength(8, { message: '密码至少需要8个字符' })
     password!: string;
-
-    @IsString()
-    @IsNotEmpty()
-    tenantName!: string;
 }
 
 /**
@@ -28,6 +28,8 @@ export class RegisterDto {
 export class AuthDto {
     @IsString()
     @IsNotEmpty()
+    @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
+    @Matches(/^1\d{10}$/, { message: '请输入正确的11位手机号' })
     phone!: string;
 
     @IsString()

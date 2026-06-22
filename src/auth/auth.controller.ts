@@ -10,7 +10,7 @@ export class AuthController {
     constructor(private authService: AuthService) {}
 
     @Post('register')
-    register(@Body() registerDto: RegisterDto): Promise<{ accessToken: string }> {
+    register(@Body() registerDto: RegisterDto) {
         return this.authService.register(registerDto);
     }
 
