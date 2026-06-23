@@ -32,6 +32,7 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { BatchImportRequestDto } from './dto/batch-import-request.dto'; // [新增] 导入新的 DTO
 import { Role } from '@prisma/client'; // [新增] 导入 Role 枚举
+import { UpdateRecipeVersionNotesDto } from './dto/update-recipe-version-notes.dto';
 
 @UseGuards(AuthGuard('jwt'), SubscriptionGuard)
 @Controller('recipes')
@@ -112,7 +113,7 @@ export class RecipesController {
     @Post()
     create(@GetUser() user: UserPayload, @Body() createRecipeDto: CreateRecipeDto) {
         const tenantId = user.tenantId;
-        return this.recipesService.create(tenantId, createRecipeDto);
+        return this.recipesService.create(tenantId, user.sub, createRecipeDto);
     }
 
     /**
@@ -125,7 +126,7 @@ export class RecipesController {
         @Body() createRecipeDto: CreateRecipeDto,
     ) {
         const tenantId = user.tenantId;
-        return this.recipesService.createVersion(tenantId, familyId, createRecipeDto);
+        return this.recipesService.createVersion(tenantId, familyId, user.sub, createRecipeDto);
     }
 
     /**
@@ -139,7 +140,22 @@ export class RecipesController {
         @Body() updateRecipeDto: CreateRecipeDto,
     ) {
         const tenantId = user.tenantId;
-        return this.recipesService.updateVersion(tenantId, familyId, versionId, updateRecipeDto);
+        return this.recipesService.updateVersion(tenantId, familyId, versionId, user.sub, updateRecipeDto);
+    }
+
+    @Patch(':familyId/versions/:versionId/notes')
+    updateVersionNotes(
+        @GetUser() user: UserPayload,
+        @Param('familyId') familyId: string,
+        @Param('versionId') versionId: string,
+        @Body() dto: UpdateRecipeVersionNotesDto,
+    ) {
+        return this.recipesService.updateVersionNotes(user.tenantId, familyId, versionId, user.sub, dto.notes);
+    }
+
+    @Get(':familyId/operation-logs')
+    getOperationLogs(@GetUser() user: UserPayload, @Param('familyId') familyId: string) {
+        return this.recipesService.getOperationLogs(user.tenantId, familyId);
     }
 
     /**
@@ -169,7 +185,17 @@ export class RecipesController {
         @Param('familyId') familyId: string,
         @Param('versionId') versionId: string,
     ) {
-        return this.recipesService.applyDependencyUpgrades(user.tenantId, familyId, versionId);
+        return this.recipesService.applyDependencyUpgrades(user.tenantId, familyId, versionId, user.sub);
+    }
+
+    @Get(':familyId/pending-dependency-upgrades')
+    getPendingDependencyUpgrades(@GetUser() user: UserPayload, @Param('familyId') familyId: string) {
+        return this.recipesService.getPendingDependencyUpgrades(user.tenantId, familyId);
+    }
+
+    @Post(':familyId/pending-dependency-upgrades/apply')
+    applyPendingDependencyUpgrades(@GetUser() user: UserPayload, @Param('familyId') familyId: string) {
+        return this.recipesService.applyPendingDependencyUpgrades(user.tenantId, familyId, user.sub);
     }
 
     /**
@@ -185,7 +211,7 @@ export class RecipesController {
         @Param('familyId') familyId: string,
         @Param('versionId') versionId: string,
     ) {
-        return this.recipesService.activateVersion(user.tenantId, familyId, versionId);
+        return this.recipesService.activateVersion(user.tenantId, familyId, versionId, user.sub);
     }
 
     /**
@@ -250,8 +276,8 @@ export class RecipesController {
      * @param id 配方族ID
      */
     @Patch(':id/discontinue')
-    discontinue(@Param('id') id: string) {
-        return this.recipesService.discontinue(id);
+    discontinue(@GetUser() user: UserPayload, @Param('id') id: string) {
+        return this.recipesService.discontinue(user.tenantId, id, user.sub);
     }
 
     /**
@@ -259,8 +285,8 @@ export class RecipesController {
      * @param id 配方族ID
      */
     @Patch(':id/restore')
-    restore(@Param('id') id: string) {
-        return this.recipesService.restore(id);
+    restore(@GetUser() user: UserPayload, @Param('id') id: string) {
+        return this.recipesService.restore(user.tenantId, id, user.sub);
     }
 }
 

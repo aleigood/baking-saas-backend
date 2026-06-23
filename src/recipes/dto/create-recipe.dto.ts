@@ -118,10 +118,6 @@ export class ComponentIngredientDto {
 
 // 主创建DTO
 export class CreateRecipeDto {
-    @IsUUID()
-    @IsOptional()
-    sourceVersionId?: string;
-
     @IsString()
     @IsNotEmpty()
     name!: string;

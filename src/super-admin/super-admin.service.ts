@@ -475,12 +475,12 @@ export class SuperAdminService {
     }
 
     // --- Recipe Management ---
-    async createRecipeForTenant(tenantId: string, recipeDto: CreateRecipeDto) {
-        return this.recipesService.create(tenantId, recipeDto);
+    async createRecipeForTenant(tenantId: string, actorUserId: string, recipeDto: CreateRecipeDto) {
+        return this.recipesService.create(tenantId, actorUserId, recipeDto);
     }
 
     // [G-Code-Note] [核心新增] 批量导入配方到指定店铺
-    async batchImportRecipesForTenant(tenantId: string, recipesDto: BatchImportRecipeDto[]) {
+    async batchImportRecipesForTenant(tenantId: string, actorUserId: string, recipesDto: BatchImportRecipeDto[]) {
         // 1. 作为超级管理员，我们首先要找到这个店铺的 OWNER
         //    因为 recipesService 内部的逻辑是基于 OWNER 权限的
         const tenantOwner = await this.prisma.tenantUser.findFirst({
@@ -499,17 +499,28 @@ export class SuperAdminService {
 
         // 2. [核心] 调用 recipesService 的批量导入功能
         // 我们传入 OWNER 的 userId，并限定只导入到这一个 tenantId
-        return this.recipesService.batchImportRecipes(tenantOwner.userId, recipesDto, [tenantId]);
+        return this.recipesService.batchImportRecipes(tenantOwner.userId, recipesDto, [tenantId], actorUserId);
     }
 
     async findAuditLogs(query: QueryDto) {
         const page = Number(query.page || 1);
         const limit = Number(query.limit || 20);
         const where: Prisma.AuditLogWhereInput = query.search
-            ? { OR: [{ action: { contains: query.search, mode: 'insensitive' } }, { path: { contains: query.search, mode: 'insensitive' } }, { actorUserId: { contains: query.search, mode: 'insensitive' } }] }
+            ? {
+                  OR: [
+                      { action: { contains: query.search, mode: 'insensitive' } },
+                      { path: { contains: query.search, mode: 'insensitive' } },
+                      { actorUserId: { contains: query.search, mode: 'insensitive' } },
+                  ],
+              }
             : {};
         const [data, total] = await Promise.all([
-            this.prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+            this.prisma.auditLog.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip: (page - 1) * limit,
+                take: limit,
+            }),
             this.prisma.auditLog.count({ where }),
         ]);
         return { data, meta: { total, page, limit, lastPage: Math.ceil(total / limit) } };

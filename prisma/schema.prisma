@@ -122,41 +122,44 @@ enum PaymentRefundStatus {
 
 // 用户账户模型
 model User {
-  id              String                     @id @default(uuid())
-  phone           String                     @unique
-  name            String?
+  id                    String               @id @default(uuid())
+  phone                 String               @unique
+  name                  String?
   // [新增] 用户姓名 (New: User's name)
-  avatarUrl       String?
+  avatarUrl             String?
   // [核心新增] 用户头像URL
-  password        String?
-  wechatOpenId    String?                    @unique
-  wechatUnionId   String?                    @unique
-  role            Role                       @default(MEMBER) // Global role, SUPER_ADMIN is highest
-  status          UserStatus                 @default(ACTIVE)
-  createdAt       DateTime                   @default(now())
-  updatedAt       DateTime                   @updatedAt
-  tenants         TenantUser[] // User can belong to multiple tenants
-  priceRecords    PriceRecord[]
-  createdTasks    ProductionTask[]           @relation("TaskCreator")
-  startedTasks    ProductionTask[]           @relation("TaskStarter")
-  paymentOrders   PaymentOrder[]
+  password              String?
+  wechatOpenId          String?              @unique
+  wechatUnionId         String?              @unique
+  role                  Role                 @default(MEMBER) // Global role, SUPER_ADMIN is highest
+  status                UserStatus           @default(ACTIVE)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  tenants               TenantUser[] // User can belong to multiple tenants
+  priceRecords          PriceRecord[]
+  createdTasks          ProductionTask[]     @relation("TaskCreator")
+  startedTasks          ProductionTask[]     @relation("TaskStarter")
+  paymentOrders         PaymentOrder[]
+  createdRecipeVersions RecipeVersion[]      @relation("RecipeVersionCreator")
+  recipeOperationLogs   RecipeOperationLog[] @relation("RecipeOperationActor")
 }
 
 // 租户/店铺模型
 model Tenant {
-  id              String               @id @default(uuid())
-  name            String
+  id                  String               @id @default(uuid())
+  name                String
   // status 字段来管理店铺状态
-  status          TenantStatus         @default(ACTIVE)
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  members         TenantUser[]
-  invitations     Invitation[]
-  ingredients     Ingredient[]
-  recipeFamilies  RecipeFamily[] // 一个店铺可以有多个配方族
-  productionTasks ProductionTask[] // 一个店铺可以有多个生产任务
-  subscriptions   TenantSubscription[]
-  paymentOrders   PaymentOrder[]
+  status              TenantStatus         @default(ACTIVE)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  members             TenantUser[]
+  invitations         Invitation[]
+  ingredients         Ingredient[]
+  recipeFamilies      RecipeFamily[] // 一个店铺可以有多个配方族
+  recipeOperationLogs RecipeOperationLog[]
+  productionTasks     ProductionTask[] // 一个店铺可以有多个生产任务
+  subscriptions       TenantSubscription[]
+  paymentOrders       PaymentOrder[]
 }
 
 // 用户与租户的多对多关系表
@@ -310,6 +313,7 @@ model RecipeFamily {
   deletedAt                  DateTime?
   tenant                     Tenant                @relation(fields: [tenantId], references: [id])
   versions                   RecipeVersion[] // 一个配方族包含多个版本
+  operationLogs              RecipeOperationLog[]
   // [核心修改] 当此配方作为预制面团在其他配方中使用时
   usedInComponentsAsPreDough ComponentIngredient[] @relation("PreDoughLink")
   // [核心修改] 当此配方作为附加项(馅料/装饰)在其他配方中使用时
@@ -333,11 +337,14 @@ model RecipeVersion {
   notes                String?
   // 版本备注，如“夏季版，减少水量”
   changeSummary        Json?
-  // 相对来源版本自动生成的修改摘要
+  // 相对上一版本自动生成的修改摘要
+  createdById          String?
   isActive             Boolean               @default(true) // 是否为当前激活版本
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   family               RecipeFamily          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy            User?                 @relation("RecipeVersionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  operationLogs        RecipeOperationLog[]
   components           RecipeComponent[] // [核心重命名] doughs -> components
   products             Product[] // 该版本包含的最终产品 (仅MAIN类型的配方有)
   usedAsPreDough       ComponentIngredient[] @relation("PreDoughVersionLink")
@@ -346,6 +353,27 @@ model RecipeVersion {
 
   @@unique([familyId, version])
   @@index([familyId])
+  @@index([createdById])
+}
+
+model RecipeOperationLog {
+  id          String         @id @default(uuid())
+  tenantId    String
+  familyId    String
+  versionId   String?
+  actorUserId String?
+  action      String
+  description String
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  family      RecipeFamily   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  version     RecipeVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  actor       User?          @relation("RecipeOperationActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([familyId, createdAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([actorUserId, createdAt(sort: Desc)])
 }
 
 // [核心重命名] Dough -> RecipeComponent，使其成为一个更通用的配方组件模型
@@ -515,9 +543,9 @@ model PriceRecord {
 
 // 生产任务模型
 model ProductionTask {
-  id                   String                     @id @default(uuid())
+  id                   String               @id @default(uuid())
   tenantId             String
-  status               ProductionTaskStatus       @default(PENDING)
+  status               ProductionTaskStatus @default(PENDING)
   startDate            DateTime
   endDate              DateTime?
   notes                String?
@@ -526,13 +554,13 @@ model ProductionTask {
   executionStartedAt   DateTime?
   executionStartedById String?
   executionBaseline    Json?
-  createdAt            DateTime                   @default(now())
-  updatedAt            DateTime                   @updatedAt
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
   deletedAt            DateTime?
   createdById          String // [核心新增] 创建任务的用户ID
-  createdBy            User                       @relation("TaskCreator", fields: [createdById], references: [id])
-  executionStartedBy   User?                      @relation("TaskStarter", fields: [executionStartedById], references: [id], onDelete: Restrict)
-  tenant               Tenant                     @relation(fields: [tenantId], references: [id])
+  createdBy            User                 @relation("TaskCreator", fields: [createdById], references: [id])
+  executionStartedBy   User?                @relation("TaskStarter", fields: [executionStartedById], references: [id], onDelete: Restrict)
+  tenant               Tenant               @relation(fields: [tenantId], references: [id])
   log                  ProductionLog?
   items                ProductionTaskItem[]
 

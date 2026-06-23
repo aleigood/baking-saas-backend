@@ -205,11 +205,27 @@ CREATE TABLE "RecipeVersion" (
     "version" INTEGER NOT NULL,
     "notes" TEXT,
     "changeSummary" JSONB,
+    "createdById" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "RecipeVersion_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RecipeOperationLog" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "familyId" TEXT NOT NULL,
+    "versionId" TEXT,
+    "actorUserId" TEXT,
+    "action" TEXT NOT NULL,
+    "description" TEXT NOT NULL,
+    "metadata" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RecipeOperationLog_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -451,7 +467,19 @@ CREATE UNIQUE INDEX "RecipeFamily_tenantId_name_deletedAt_key" ON "RecipeFamily"
 CREATE INDEX "RecipeVersion_familyId_idx" ON "RecipeVersion"("familyId");
 
 -- CreateIndex
+CREATE INDEX "RecipeVersion_createdById_idx" ON "RecipeVersion"("createdById");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "RecipeVersion_familyId_version_key" ON "RecipeVersion"("familyId", "version");
+
+-- CreateIndex
+CREATE INDEX "RecipeOperationLog_familyId_createdAt_idx" ON "RecipeOperationLog"("familyId", "createdAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "RecipeOperationLog_tenantId_createdAt_idx" ON "RecipeOperationLog"("tenantId", "createdAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "RecipeOperationLog_actorUserId_createdAt_idx" ON "RecipeOperationLog"("actorUserId", "createdAt" DESC);
 
 -- CreateIndex
 CREATE INDEX "RecipeComponent_recipeVersionId_idx" ON "RecipeComponent"("recipeVersionId");
@@ -581,6 +609,21 @@ ALTER TABLE "RecipeFamily" ADD CONSTRAINT "RecipeFamily_tenantId_fkey" FOREIGN K
 
 -- AddForeignKey
 ALTER TABLE "RecipeVersion" ADD CONSTRAINT "RecipeVersion_familyId_fkey" FOREIGN KEY ("familyId") REFERENCES "RecipeFamily"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecipeVersion" ADD CONSTRAINT "RecipeVersion_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecipeOperationLog" ADD CONSTRAINT "RecipeOperationLog_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecipeOperationLog" ADD CONSTRAINT "RecipeOperationLog_familyId_fkey" FOREIGN KEY ("familyId") REFERENCES "RecipeFamily"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecipeOperationLog" ADD CONSTRAINT "RecipeOperationLog_versionId_fkey" FOREIGN KEY ("versionId") REFERENCES "RecipeVersion"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecipeOperationLog" ADD CONSTRAINT "RecipeOperationLog_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RecipeComponent" ADD CONSTRAINT "RecipeComponent_recipeVersionId_fkey" FOREIGN KEY ("recipeVersionId") REFERENCES "RecipeVersion"("id") ON DELETE CASCADE ON UPDATE CASCADE;

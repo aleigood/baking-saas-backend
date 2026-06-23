@@ -17,6 +17,8 @@ import { CreateTenantSubscriptionDto } from './dto/create-tenant-subscription.dt
 import { UpdateTenantSubscriptionDto } from './dto/update-tenant-subscription.dto';
 import { BillingService } from '../billing/billing.service';
 import { CreateRefundDto } from '../billing/dto/billing.dto';
+import { GetUser } from '../auth/decorators/get-user.decorator';
+import { UserPayload } from '../auth/interfaces/user-payload.interface';
 
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
 @Controller('super-admin')
@@ -148,10 +150,11 @@ export class SuperAdminController {
      */
     @Post('tenants/:tenantId/recipes')
     createRecipeForTenant(
+        @GetUser() user: UserPayload,
         @Param('tenantId', ParseUUIDPipe) tenantId: string,
         @Body() createRecipeDto: CreateRecipeDto, // [G-Code-Note] 接收一个对象 {}
     ) {
-        return this.superAdminService.createRecipeForTenant(tenantId, createRecipeDto);
+        return this.superAdminService.createRecipeForTenant(tenantId, user.sub, createRecipeDto);
     }
 
     /**
@@ -159,9 +162,10 @@ export class SuperAdminController {
      */
     @Post('tenants/:tenantId/recipes/batch-import')
     batchImportRecipesForTenant(
+        @GetUser() user: UserPayload,
         @Param('tenantId', ParseUUIDPipe) tenantId: string,
         @Body() batchImportRecipesDto: BatchImportRecipeDto[], // [G-Code-Note] 接收一个数组 []
     ) {
-        return this.superAdminService.batchImportRecipesForTenant(tenantId, batchImportRecipesDto);
+        return this.superAdminService.batchImportRecipesForTenant(tenantId, user.sub, batchImportRecipesDto);
     }
 }

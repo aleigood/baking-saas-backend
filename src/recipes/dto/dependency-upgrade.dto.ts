@@ -5,15 +5,13 @@ export interface DependencyUpgradeItemDto {
     familyName: string;
     type: RecipeType;
     currentVersionId: string;
-    currentVersion: number;
-    nextVersion: number;
+    updatedDependencyFamilyIds: string[];
     depth: number;
 }
 
 export interface DependencyUpgradePlanDto {
     sourceFamilyId: string;
     sourceVersionId: string;
-    sourceVersion: number;
     affectedRecipes: DependencyUpgradeItemDto[];
 }
 
@@ -24,4 +22,16 @@ export interface ApplyDependencyUpgradeResultDto {
         versionId: string;
         version: number;
     }>;
+}
+
+export interface PendingDependencyItemDto {
+    familyId: string;
+    familyName: string;
+}
+
+export interface PendingDependencyUpgradePlanDto {
+    familyId: string;
+    familyName: string;
+    currentVersionId: string;
+    dependencies: PendingDependencyItemDto[];
 }

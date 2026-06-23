@@ -32,6 +32,7 @@ import {
     ApplyDependencyUpgradeResultDto,
     DependencyUpgradeItemDto,
     DependencyUpgradePlanDto,
+    PendingDependencyUpgradePlanDto,
 } from './dto/dependency-upgrade.dto';
 
 // [新增] 单一递归类型定义
@@ -95,6 +96,7 @@ type RecipeFamilyWithLink = RecipeFamily & { outputIngredient?: Ingredient | nul
 const recipeFamilyWithDetailsInclude = {
     versions: {
         include: {
+            createdBy: { select: { id: true, name: true, phone: true } },
             components: {
                 include: {
                     ingredients: {
@@ -190,9 +192,44 @@ type RecipeVersionChangeSummary = {
     items: RecipeVersionChangeItem[];
 };
 
+type RecipeOperationAction =
+    | 'RECIPE_CREATED'
+    | 'RECIPE_DISCONTINUED'
+    | 'RECIPE_RESTORED'
+    | 'VERSION_CREATED'
+    | 'VERSION_UPDATED'
+    | 'VERSION_NOTES_UPDATED'
+    | 'VERSION_ACTIVATED'
+    | 'DEPENDENCY_UPDATED';
+
 @Injectable()
 export class RecipesService {
     constructor(private prisma: PrismaService) {}
+
+    private async _recordOperation(
+        tx: Prisma.TransactionClient,
+        input: {
+            tenantId: string;
+            familyId: string;
+            versionId?: string;
+            actorUserId?: string;
+            action: RecipeOperationAction;
+            description: string;
+            metadata?: Prisma.InputJsonValue;
+        },
+    ) {
+        await tx.recipeOperationLog.create({
+            data: {
+                tenantId: input.tenantId,
+                familyId: input.familyId,
+                versionId: input.versionId,
+                actorUserId: input.actorUserId,
+                action: input.action,
+                description: input.description,
+                metadata: input.metadata,
+            },
+        });
+    }
 
     // [核心新增] 同步维护 SELF_MADE 原料
     private async _syncSelfMadeIngredient(
@@ -492,6 +529,7 @@ export class RecipesService {
         userId: string,
         recipesDto: BatchImportRecipeDto[],
         tenantIds?: string[],
+        actorUserId = userId,
     ): Promise<BatchImportResultDto> {
         let targetTenants: { id: string; name: string }[];
 
@@ -613,7 +651,7 @@ export class RecipesService {
                             const createDto = convertVersionToCreateDto(versionDto);
 
                             if (familyId === null) {
-                                const createdFamily = await this.create(tenantId, createDto);
+                                const createdFamily = await this.create(tenantId, actorUserId, createDto);
 
                                 if (!createdFamily) {
                                     throw new Error(`创建配方族 "${recipeDto.name}" 失败，_sanitizeFamily 返回 null`);
@@ -621,7 +659,7 @@ export class RecipesService {
                                 familyId = createdFamily.id;
                                 versionsCreatedCount++;
                             } else {
-                                await this.createVersion(tenantId, familyId, createDto);
+                                await this.createVersion(tenantId, familyId, actorUserId, createDto);
                                 versionsCreatedCount++;
                             }
                         }
@@ -643,7 +681,7 @@ export class RecipesService {
                             }
 
                             const createDto = convertVersionToCreateDto(versionDto);
-                            await this.createVersion(tenantId, existingFamily.id, createDto);
+                            await this.createVersion(tenantId, existingFamily.id, actorUserId, createDto);
                             newVersionsAdded++;
                         }
 
@@ -868,7 +906,7 @@ export class RecipesService {
         }
     }
 
-    async create(tenantId: string, createRecipeDto: CreateRecipeDto) {
+    async create(tenantId: string, actorUserId: string, createRecipeDto: CreateRecipeDto) {
         const { name } = createRecipeDto;
 
         const existingFamily = await this.prisma.recipeFamily.findFirst({
@@ -883,42 +921,137 @@ export class RecipesService {
             throw new ConflictException(`名为 "${name}" 的配方已存在。`);
         }
 
-        return this.createVersionInternal(tenantId, null, createRecipeDto);
+        return this.createVersionInternal(
+            tenantId,
+            null,
+            actorUserId,
+            createRecipeDto,
+            false,
+            undefined,
+            'RECIPE_CREATED',
+        );
     }
 
-    async createVersion(tenantId: string, familyId: string, createRecipeDto: CreateRecipeDto) {
+    async createVersion(tenantId: string, familyId: string, actorUserId: string, createRecipeDto: CreateRecipeDto) {
         const recipeFamily = await this.prisma.recipeFamily.findFirst({
             where: { id: familyId, tenantId, deletedAt: null },
-            include: { versions: { where: { isActive: true }, take: 1, select: { id: true } } },
+            include: {
+                versions: { orderBy: { version: 'desc' }, take: 1, select: { id: true } },
+            },
         });
 
         if (!recipeFamily) {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
-        const sourceVersionId = createRecipeDto.sourceVersionId ?? recipeFamily.versions[0]?.id;
-        const changeSummary = sourceVersionId
-            ? await this._buildVersionChangeSummary(tenantId, familyId, sourceVersionId, createRecipeDto)
+        const latestVersionId = recipeFamily.versions[0]?.id;
+        const changeSummary = latestVersionId
+            ? await this._buildVersionChangeSummary(tenantId, familyId, latestVersionId, createRecipeDto)
             : { schemaVersion: 1 as const, items: [{ kind: 'INITIAL_VERSION' as const }] };
-        return this.createVersionInternal(tenantId, familyId, createRecipeDto, false, changeSummary);
+        return this.createVersionInternal(
+            tenantId,
+            familyId,
+            actorUserId,
+            createRecipeDto,
+            false,
+            changeSummary,
+            'VERSION_CREATED',
+        );
     }
 
-    async updateVersion(tenantId: string, familyId: string, versionId: string, updateRecipeDto: CreateRecipeDto) {
-        const sourceVersion = await this.prisma.recipeVersion.findFirst({
+    async updateVersion(
+        tenantId: string,
+        familyId: string,
+        versionId: string,
+        actorUserId: string,
+        updateRecipeDto: CreateRecipeDto,
+    ) {
+        const latestVersion = await this.prisma.recipeVersion.findFirst({
             where: {
-                id: versionId,
                 familyId,
                 family: { tenantId, deletedAt: null },
             },
+            orderBy: { version: 'desc' },
             select: { id: true },
         });
 
-        if (!sourceVersion) {
+        if (!latestVersion) {
             throw new NotFoundException('指定的配方版本不存在');
+        }
+        if (latestVersion.id !== versionId) {
+            throw new BadRequestException('只能基于最新版本新建配方版本，请刷新后重试。');
         }
 
         const changeSummary = await this._buildVersionChangeSummary(tenantId, familyId, versionId, updateRecipeDto);
-        return this.createVersionInternal(tenantId, familyId, updateRecipeDto, true, changeSummary);
+        return this.createVersionInternal(
+            tenantId,
+            familyId,
+            actorUserId,
+            updateRecipeDto,
+            false,
+            changeSummary,
+            'VERSION_UPDATED',
+        );
+    }
+
+    async updateVersionNotes(
+        tenantId: string,
+        familyId: string,
+        versionId: string,
+        actorUserId: string,
+        notes: string,
+    ) {
+        const version = await this.prisma.recipeVersion.findFirst({
+            where: { id: versionId, familyId, family: { tenantId } },
+            select: { id: true, version: true, notes: true },
+        });
+        if (!version) throw new NotFoundException('指定的配方版本不存在');
+
+        const nextNotes = notes.trim();
+        if (version.notes === nextNotes) return version;
+
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.recipeVersion.update({
+                where: { id: versionId },
+                data: { notes: nextNotes },
+            });
+            await this._recordOperation(tx, {
+                tenantId,
+                familyId,
+                versionId,
+                actorUserId,
+                action: 'VERSION_NOTES_UPDATED',
+                description: `修改 V${version.version} 的版本说明`,
+                metadata: {
+                    version: version.version,
+                    before: version.notes,
+                    after: nextNotes,
+                },
+            });
+            return updated;
+        });
+    }
+
+    async getOperationLogs(tenantId: string, familyId: string) {
+        const family = await this.prisma.recipeFamily.findFirst({
+            where: { id: familyId, tenantId },
+            select: { id: true },
+        });
+        if (!family) throw new NotFoundException('配方不存在');
+
+        return this.prisma.recipeOperationLog.findMany({
+            where: { tenantId, familyId },
+            orderBy: { createdAt: 'desc' },
+            select: {
+                id: true,
+                action: true,
+                description: true,
+                metadata: true,
+                createdAt: true,
+                versionId: true,
+                actor: { select: { id: true, name: true, phone: true } },
+            },
+        });
     }
 
     private async _buildVersionChangeSummary(
@@ -1184,12 +1317,11 @@ export class RecipesService {
         addFieldChange('targetTemp', source.targetTemp, recipe.targetTemp, 'CELSIUS');
         addFieldChange('lossRatio', fromPercentage(sourceMainComponent?.lossRatio), recipe.lossRatio, 'RATIO');
         addFieldChange('divisionLoss', sourceMainComponent?.divisionLoss, recipe.divisionLoss, 'GRAM');
-        addFieldChange(
-            'customWaterContent',
-            sourceMainComponent?.customWaterContent,
-            recipe.customWaterContent,
-            'PERCENT',
-        );
+        if (source.type !== RecipeType.MAIN) {
+            const sourceWaterContent = await this._calculateVersionEffectiveWaterPercentage(tenantId, sourceVersionId);
+            const nextWaterContent = await this._calculateRecipeDtoEffectiveWaterPercentage(tenantId, recipe);
+            addFieldChange('customWaterContent', sourceWaterContent, nextWaterContent, 'PERCENT');
+        }
         if (JSON.stringify(sourceMainComponent?.procedure ?? []) !== JSON.stringify(recipe.procedure ?? [])) {
             items.push({ kind: 'PROCEDURE_CHANGED', scope: 'RECIPE' });
         }
@@ -1221,6 +1353,110 @@ export class RecipesService {
             schemaVersion: 1,
             items: items.length > 0 ? items : [{ kind: 'NO_CHANGES' }],
         };
+    }
+
+    private async _calculateVersionEffectiveWaterPercentage(
+        tenantId: string,
+        versionId: string,
+        cache = new Map<string, number>(),
+        depth = 0,
+    ): Promise<number> {
+        if (depth > 8) return 0;
+        const cached = cache.get(versionId);
+        if (cached !== undefined) return cached;
+
+        const version = await this.prisma.recipeVersion.findFirst({
+            where: { id: versionId, family: { tenantId } },
+            select: {
+                components: {
+                    take: 1,
+                    select: {
+                        customWaterContent: true,
+                        ingredients: {
+                            select: {
+                                ratio: true,
+                                flourRatio: true,
+                                preDoughVersionId: true,
+                                extraVersionId: true,
+                                ingredient: { select: { waterContent: true } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        const component = version?.components[0];
+        if (!component) return 0;
+        if (component.customWaterContent !== null) {
+            const result = component.customWaterContent.toNumber();
+            cache.set(versionId, result);
+            return result;
+        }
+
+        let total = 0;
+        let water = 0;
+        for (const ingredient of component.ingredients) {
+            const ratio = (ingredient.ratio ?? ingredient.flourRatio)?.toNumber() ?? 0;
+            if (ratio <= 0) continue;
+            let waterFraction = ingredient.ingredient?.waterContent.toNumber() ?? 0;
+            const dependencyVersionId = ingredient.preDoughVersionId ?? ingredient.extraVersionId;
+            if (dependencyVersionId) {
+                waterFraction =
+                    (await this._calculateVersionEffectiveWaterPercentage(
+                        tenantId,
+                        dependencyVersionId,
+                        cache,
+                        depth + 1,
+                    )) / 100;
+            }
+            total += ratio;
+            water += ratio * waterFraction;
+        }
+        const result = total > 0 ? (water / total) * 100 : 0;
+        cache.set(versionId, result);
+        return result;
+    }
+
+    private async _calculateRecipeDtoEffectiveWaterPercentage(
+        tenantId: string,
+        recipe: CreateRecipeDto,
+    ): Promise<number> {
+        if (recipe.customWaterContent !== null && recipe.customWaterContent !== undefined) {
+            return recipe.customWaterContent;
+        }
+
+        const ingredientIds = recipe.ingredients
+            .map((ingredient) => ingredient.ingredientId)
+            .filter((id): id is string => !!id);
+        const ingredients = await this.prisma.ingredient.findMany({
+            where: { id: { in: ingredientIds }, tenantId },
+            select: { id: true, waterContent: true },
+        });
+        const waterByIngredientId = new Map(
+            ingredients.map((ingredient) => [ingredient.id, ingredient.waterContent.toNumber()]),
+        );
+        const versionWaterCache = new Map<string, number>();
+        let total = 0;
+        let water = 0;
+
+        for (const ingredient of recipe.ingredients) {
+            const ratio = ingredient.ratio ?? ingredient.flourRatio ?? 0;
+            if (ratio <= 0) continue;
+            let waterFraction = ingredient.ingredientId
+                ? (waterByIngredientId.get(ingredient.ingredientId) ?? ingredient.waterContent ?? 0)
+                : (ingredient.waterContent ?? 0);
+            if (ingredient.recipeVersionId) {
+                waterFraction =
+                    (await this._calculateVersionEffectiveWaterPercentage(
+                        tenantId,
+                        ingredient.recipeVersionId,
+                        versionWaterCache,
+                    )) / 100;
+            }
+            total += ratio;
+            water += ratio * waterFraction;
+        }
+        return total > 0 ? (water / total) * 100 : 0;
     }
 
     private async _createProductIngredients(
@@ -1287,12 +1523,14 @@ export class RecipesService {
     private async createVersionInternal(
         tenantId: string,
         familyId: string | null,
+        actorUserId: string,
         createRecipeDto: CreateRecipeDto,
         activateNewVersion = false,
         changeSummary: RecipeVersionChangeSummary = {
             schemaVersion: 1,
             items: [{ kind: 'INITIAL_VERSION' }],
         },
+        operationAction: RecipeOperationAction = 'VERSION_CREATED',
     ) {
         const { name, type = 'MAIN', category } = createRecipeDto;
 
@@ -1387,6 +1625,7 @@ export class RecipesService {
                         version: nextVersionNumber,
                         notes: createRecipeDto.notes || `版本 ${nextVersionNumber}`,
                         changeSummary: changeSummary as unknown as Prisma.InputJsonValue,
+                        createdById: actorUserId,
                         isActive: activateNewVersion || !hasActiveVersion,
                     },
                 });
@@ -1411,6 +1650,24 @@ export class RecipesService {
                 await this._syncSelfMadeIngredient(tx, tenantId, recipeFamily.id, name, type, waterContent);
 
                 await this._syncDefaultProduct(tx, recipeVersion.id, name, type);
+
+                const description =
+                    operationAction === 'RECIPE_CREATED'
+                        ? `创建配方并生成 V${recipeVersion.version}`
+                        : `新建配方版本 V${recipeVersion.version}${activateNewVersion ? '，并设为使用中' : ''}`;
+                await this._recordOperation(tx, {
+                    tenantId,
+                    familyId: recipeFamily.id,
+                    versionId: recipeVersion.id,
+                    actorUserId,
+                    action: operationAction,
+                    description,
+                    metadata: {
+                        targetVersion: recipeVersion.version,
+                        isActive: recipeVersion.isActive,
+                        changeSummary: changeSummary as unknown as Prisma.InputJsonValue,
+                    },
+                });
 
                 return this._sanitizeFamily(finalFamily);
             },
@@ -2399,7 +2656,7 @@ export class RecipesService {
         });
 
         if (!sourceVersion) {
-            throw new BadRequestException('只有当前使用中的配方版本可以检查依赖升级。');
+            throw new BadRequestException('只有当前使用中的配方版本可以检查关联更新。');
         }
 
         const activeVersions = await this.prisma.recipeVersion.findMany({
@@ -2438,6 +2695,17 @@ export class RecipesService {
         });
 
         const activeVersionByFamily = new Map(activeVersions.map((version) => [version.family.id, version]));
+        const versionsByNewest = await this.prisma.recipeVersion.findMany({
+            where: { family: { tenantId, deletedAt: null } },
+            orderBy: { version: 'desc' },
+            select: { id: true, familyId: true, version: true },
+        });
+        const latestVersionByFamily = new Map<string, { id: string; version: number }>();
+        for (const version of versionsByNewest) {
+            if (!latestVersionByFamily.has(version.familyId)) {
+                latestVersionByFamily.set(version.familyId, version);
+            }
+        }
         const parentsByChild = new Map<string, Map<string, Set<string | null>>>();
 
         const addDependency = (
@@ -2478,19 +2746,27 @@ export class RecipesService {
             if (!parents) continue;
 
             for (const [parentFamilyId, pinnedVersions] of parents) {
-                if (affected.has(parentFamilyId) || parentFamilyId === familyId) continue;
+                if (parentFamilyId === familyId) continue;
                 if (current.isSource && [...pinnedVersions].every((pinned) => pinned === versionId)) continue;
+
+                const existingItem = affected.get(parentFamilyId);
+                if (existingItem) {
+                    if (!existingItem.updatedDependencyFamilyIds.includes(current.familyId)) {
+                        existingItem.updatedDependencyFamilyIds.push(current.familyId);
+                    }
+                    continue;
+                }
 
                 const activeParent = activeVersionByFamily.get(parentFamilyId);
                 if (!activeParent) continue;
+                const latestParent = latestVersionByFamily.get(parentFamilyId) ?? activeParent;
 
                 const item: DependencyUpgradeItemDto = {
                     familyId: parentFamilyId,
                     familyName: activeParent.family.name,
                     type: activeParent.family.type,
-                    currentVersionId: activeParent.id,
-                    currentVersion: activeParent.version,
-                    nextVersion: activeParent.version + 1,
+                    currentVersionId: latestParent.id,
+                    updatedDependencyFamilyIds: [current.familyId],
                     depth: current.depth + 1,
                 };
                 affected.set(parentFamilyId, item);
@@ -2501,7 +2777,6 @@ export class RecipesService {
         return {
             sourceFamilyId: familyId,
             sourceVersionId: versionId,
-            sourceVersion: sourceVersion.version,
             affectedRecipes: Array.from(affected.values()).sort(
                 (a, b) => a.depth - b.depth || a.familyName.localeCompare(b.familyName, 'zh-CN'),
             ),
@@ -2512,19 +2787,145 @@ export class RecipesService {
         return this.buildDependencyUpgradePlan(tenantId, familyId, versionId);
     }
 
+    async getPendingDependencyUpgrades(tenantId: string, familyId: string): Promise<PendingDependencyUpgradePlanDto> {
+        const currentVersion = await this.prisma.recipeVersion.findFirst({
+            where: { familyId, isActive: true, family: { tenantId, deletedAt: null } },
+            select: {
+                id: true,
+                version: true,
+                family: { select: { name: true } },
+                components: {
+                    select: {
+                        ingredients: {
+                            select: {
+                                preDoughId: true,
+                                preDoughVersionId: true,
+                                extraId: true,
+                                extraVersionId: true,
+                            },
+                        },
+                    },
+                },
+                products: {
+                    where: { deletedAt: null },
+                    select: {
+                        ingredients: {
+                            select: { linkedExtraId: true, linkedExtraVersionId: true },
+                        },
+                    },
+                },
+            },
+        });
+        if (!currentVersion) throw new NotFoundException('当前配方没有使用中的版本');
+
+        const pinnedByFamily = new Map<string, string | null>();
+        for (const component of currentVersion.components) {
+            for (const ingredient of component.ingredients) {
+                if (ingredient.preDoughId) {
+                    pinnedByFamily.set(ingredient.preDoughId, ingredient.preDoughVersionId);
+                }
+                if (ingredient.extraId) {
+                    pinnedByFamily.set(ingredient.extraId, ingredient.extraVersionId);
+                }
+            }
+        }
+        for (const product of currentVersion.products) {
+            for (const ingredient of product.ingredients) {
+                if (ingredient.linkedExtraId) {
+                    pinnedByFamily.set(ingredient.linkedExtraId, ingredient.linkedExtraVersionId);
+                }
+            }
+        }
+
+        const activeDependencies = await this.prisma.recipeVersion.findMany({
+            where: {
+                familyId: { in: [...pinnedByFamily.keys()] },
+                isActive: true,
+                family: { tenantId, deletedAt: null },
+            },
+            select: {
+                id: true,
+                version: true,
+                familyId: true,
+                family: { select: { name: true } },
+            },
+        });
+        const latestVersion = await this.prisma.recipeVersion.findFirst({
+            where: { familyId },
+            orderBy: { version: 'desc' },
+            select: { id: true, version: true },
+        });
+
+        return {
+            familyId,
+            familyName: currentVersion.family.name,
+            currentVersionId: latestVersion?.id ?? currentVersion.id,
+            dependencies: activeDependencies
+                .filter((dependency) => pinnedByFamily.get(dependency.familyId) !== dependency.id)
+                .map((dependency) => ({
+                    familyId: dependency.familyId,
+                    familyName: dependency.family.name,
+                }))
+                .sort((a, b) => a.familyName.localeCompare(b.familyName, 'zh-CN')),
+        };
+    }
+
+    async applyPendingDependencyUpgrades(
+        tenantId: string,
+        familyId: string,
+        actorUserId: string,
+    ): Promise<ApplyDependencyUpgradeResultDto> {
+        const plan = await this.getPendingDependencyUpgrades(tenantId, familyId);
+        if (plan.dependencies.length === 0) return { upgradedRecipes: [] };
+
+        return this.prisma.$transaction(
+            async (tx) => {
+                const activeVersions = await tx.recipeVersion.findMany({
+                    where: { isActive: true, family: { tenantId, deletedAt: null } },
+                    select: { id: true, familyId: true },
+                });
+                const activeVersionIds = new Map(activeVersions.map((version) => [version.familyId, version.id]));
+                const upgraded = await this.cloneActiveVersionWithCurrentDependencies(
+                    tx,
+                    tenantId,
+                    actorUserId,
+                    {
+                        familyId,
+                        familyName: plan.familyName,
+                        type: RecipeType.MAIN,
+                        currentVersionId: plan.currentVersionId,
+                        updatedDependencyFamilyIds: plan.dependencies.map((dependency) => dependency.familyId),
+                        depth: 0,
+                    },
+                    activeVersionIds,
+                );
+                const family = await tx.recipeFamily.findUnique({
+                    where: { id: familyId },
+                    include: recipeFamilyWithDetailsInclude,
+                });
+                if (family && family.type !== RecipeType.MAIN) {
+                    const waterContent = this._calculateWaterContent(family as unknown as WaterCalcFamily);
+                    await this._syncSelfMadeIngredient(tx, tenantId, family.id, family.name, family.type, waterContent);
+                }
+                return { upgradedRecipes: [upgraded] };
+            },
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+    }
+
     private async cloneActiveVersionWithCurrentDependencies(
         tx: Prisma.TransactionClient,
         tenantId: string,
+        actorUserId: string,
         planItem: DependencyUpgradeItemDto,
         activeVersionIds: Map<string, string>,
     ) {
         const source = await tx.recipeVersion.findFirst({
             where: {
-                id: planItem.currentVersionId,
                 familyId: planItem.familyId,
-                isActive: true,
                 family: { tenantId, deletedAt: null },
             },
+            orderBy: { version: 'desc' },
             include: {
                 family: true,
                 components: { include: { ingredients: true } },
@@ -2535,7 +2936,7 @@ export class RecipesService {
             },
         });
 
-        if (!source) {
+        if (!source || source.id !== planItem.currentVersionId) {
             throw new BadRequestException(`配方“${planItem.familyName}”已发生变化，请刷新后重试。`);
         }
 
@@ -2551,15 +2952,61 @@ export class RecipesService {
             data: { isActive: false },
         });
 
+        const dependencyFamilyIds = new Set<string>();
+        for (const component of source.components) {
+            for (const ingredient of component.ingredients) {
+                if (ingredient.preDoughId) dependencyFamilyIds.add(ingredient.preDoughId);
+                if (ingredient.extraId) dependencyFamilyIds.add(ingredient.extraId);
+            }
+        }
+        for (const product of source.products) {
+            for (const ingredient of product.ingredients) {
+                if (ingredient.linkedExtraId) dependencyFamilyIds.add(ingredient.linkedExtraId);
+            }
+        }
+        const changedDependencyIds = [...dependencyFamilyIds].filter((dependencyFamilyId) => {
+            const activeVersionId = activeVersionIds.get(dependencyFamilyId);
+            if (!activeVersionId) return false;
+            return (
+                source.components.some((component) =>
+                    component.ingredients.some(
+                        (ingredient) =>
+                            (ingredient.preDoughId === dependencyFamilyId &&
+                                ingredient.preDoughVersionId !== activeVersionId) ||
+                            (ingredient.extraId === dependencyFamilyId &&
+                                ingredient.extraVersionId !== activeVersionId),
+                    ),
+                ) ||
+                source.products.some((product) =>
+                    product.ingredients.some(
+                        (ingredient) =>
+                            ingredient.linkedExtraId === dependencyFamilyId &&
+                            ingredient.linkedExtraVersionId !== activeVersionId,
+                    ),
+                )
+            );
+        });
+        const summaryDependencyIds = [...new Set([...changedDependencyIds, ...planItem.updatedDependencyFamilyIds])];
+        const changedDependencies = await tx.recipeFamily.findMany({
+            where: { id: { in: summaryDependencyIds }, tenantId },
+            select: { id: true, name: true },
+            orderBy: { name: 'asc' },
+        });
+        const changeSummary: RecipeVersionChangeSummary = {
+            schemaVersion: 1,
+            items: changedDependencies.map((dependency) => ({
+                kind: 'DEPENDENCY_VERSION_CHANGED',
+                name: dependency.name,
+            })),
+        };
+
         const createdVersion = await tx.recipeVersion.create({
             data: {
                 familyId: planItem.familyId,
                 version: nextVersion,
-                notes: source.notes ? `${source.notes}；依赖升级` : `版本 ${nextVersion}；依赖升级`,
-                changeSummary: {
-                    schemaVersion: 1,
-                    items: [{ kind: 'DEPENDENCY_VERSION_CHANGED', name: '子配方' }],
-                },
+                notes: '更新原料配方',
+                changeSummary: changeSummary as unknown as Prisma.InputJsonValue,
+                createdById: actorUserId,
                 isActive: true,
             },
         });
@@ -2568,7 +3015,7 @@ export class RecipesService {
             if (!dependencyFamilyId) return null;
             const dependencyVersionId = activeVersionIds.get(dependencyFamilyId);
             if (!dependencyVersionId) {
-                throw new BadRequestException('依赖配方没有正在使用的版本，无法完成级联升级。');
+                throw new BadRequestException('依赖配方没有正在使用的版本，无法完成关联更新。');
             }
             return dependencyVersionId;
         };
@@ -2628,6 +3075,18 @@ export class RecipesService {
         }
 
         activeVersionIds.set(planItem.familyId, createdVersion.id);
+        await this._recordOperation(tx, {
+            tenantId,
+            familyId: planItem.familyId,
+            versionId: createdVersion.id,
+            actorUserId,
+            action: 'DEPENDENCY_UPDATED',
+            description: '更新原料配方',
+            metadata: {
+                targetVersion: createdVersion.version,
+                changeSummary: changeSummary as unknown as Prisma.InputJsonValue,
+            },
+        });
         return {
             familyId: planItem.familyId,
             familyName: planItem.familyName,
@@ -2640,6 +3099,7 @@ export class RecipesService {
         tenantId: string,
         familyId: string,
         versionId: string,
+        actorUserId: string,
     ): Promise<ApplyDependencyUpgradeResultDto> {
         const plan = await this.buildDependencyUpgradePlan(tenantId, familyId, versionId);
         if (plan.affectedRecipes.length === 0) {
@@ -2660,7 +3120,13 @@ export class RecipesService {
 
                 for (const planItem of plan.affectedRecipes) {
                     upgradedRecipes.push(
-                        await this.cloneActiveVersionWithCurrentDependencies(tx, tenantId, planItem, activeVersionIds),
+                        await this.cloneActiveVersionWithCurrentDependencies(
+                            tx,
+                            tenantId,
+                            actorUserId,
+                            planItem,
+                            activeVersionIds,
+                        ),
                     );
                 }
 
@@ -2688,7 +3154,7 @@ export class RecipesService {
         );
     }
 
-    async activateVersion(tenantId: string, familyId: string, versionId: string) {
+    async activateVersion(tenantId: string, familyId: string, versionId: string, actorUserId: string) {
         const versionToActivate = await this.prisma.recipeVersion.findFirst({
             where: {
                 id: versionId,
@@ -2697,6 +3163,7 @@ export class RecipesService {
                     tenantId: tenantId,
                 },
             },
+            select: { id: true, version: true, isActive: true },
         });
 
         if (!versionToActivate) {
@@ -2704,6 +3171,10 @@ export class RecipesService {
         }
 
         return this.prisma.$transaction(async (tx) => {
+            const previousActive = await tx.recipeVersion.findFirst({
+                where: { familyId, isActive: true },
+                select: { id: true, version: true },
+            });
             await tx.recipeVersion.updateMany({
                 where: { familyId: familyId },
                 data: { isActive: false },
@@ -2723,6 +3194,21 @@ export class RecipesService {
                 await this._syncSelfMadeIngredient(tx, tenantId, family.id, family.name, family.type, waterContent);
             }
 
+            if (!versionToActivate.isActive) {
+                await this._recordOperation(tx, {
+                    tenantId,
+                    familyId,
+                    versionId,
+                    actorUserId,
+                    action: 'VERSION_ACTIVATED',
+                    description: `启用 V${versionToActivate.version}`,
+                    metadata: {
+                        previousVersion: previousActive?.version ?? null,
+                        activatedVersion: versionToActivate.version,
+                    },
+                });
+            }
+
             return activatedVersion;
         });
     }
@@ -2740,22 +3226,32 @@ export class RecipesService {
         throw new BadRequestException('配方及历史版本不可物理删除，请使用“停用配方”。');
     }
 
-    async discontinue(familyId: string) {
-        const family = await this.prisma.recipeFamily.findUnique({
-            where: { id: familyId },
+    async discontinue(tenantId: string, familyId: string, actorUserId: string) {
+        const family = await this.prisma.recipeFamily.findFirst({
+            where: { id: familyId, tenantId },
         });
         if (!family) {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
-        return this.prisma.recipeFamily.update({
-            where: { id: familyId },
-            data: { deletedAt: new Date() },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.recipeFamily.update({
+                where: { id: familyId },
+                data: { deletedAt: new Date() },
+            });
+            await this._recordOperation(tx, {
+                tenantId,
+                familyId,
+                actorUserId,
+                action: 'RECIPE_DISCONTINUED',
+                description: '停用配方',
+            });
+            return updated;
         });
     }
 
-    async restore(familyId: string) {
+    async restore(tenantId: string, familyId: string, actorUserId: string) {
         const family = await this.prisma.recipeFamily.findFirst({
-            where: { id: familyId },
+            where: { id: familyId, tenantId },
             select: { id: true, deletedAt: true },
         });
 
@@ -2767,9 +3263,19 @@ export class RecipesService {
             throw new BadRequestException('该配方未被弃用，无需恢复。');
         }
 
-        return this.prisma.recipeFamily.update({
-            where: { id: familyId },
-            data: { deletedAt: null },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.recipeFamily.update({
+                where: { id: familyId },
+                data: { deletedAt: null },
+            });
+            await this._recordOperation(tx, {
+                tenantId,
+                familyId,
+                actorUserId,
+                action: 'RECIPE_RESTORED',
+                description: '恢复配方',
+            });
+            return updated;
         });
     }
 
