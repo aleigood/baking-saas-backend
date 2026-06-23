@@ -31,7 +31,6 @@ import {
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 import { BillOfMaterialsResponseDto, BillOfMaterialsItem, PrepTask } from './dto/preparation.dto';
 import { TogglePrepItemDto } from './dto/toggle-prep-item.dto';
-import { CreateTaskAdjustmentDto } from './dto/create-task-adjustment.dto';
 import { getUtcDayBounds } from '../common/utils/timezone.util';
 import * as path from 'path';
 
@@ -509,15 +508,6 @@ interface RenderTaskItem {
 type SortableTaskIngredient = TaskIngredientDetail & { isFlour?: boolean };
 type CalculatedRecipeIngredient = Omit<TaskIngredientDetail, 'id'> & { ingredientId: string };
 
-interface StoredTaskAdjustmentChange {
-    familyId: string;
-    ingredientId: string;
-    ingredientName: string;
-    beforeWeightInGrams: number;
-    afterWeightInGrams: number;
-    multiplier: number;
-}
-
 @Injectable()
 export class ProductionTasksService {
     constructor(
@@ -791,17 +781,6 @@ export class ProductionTasksService {
                 executionStartedAt: true,
                 executionStartedById: true,
                 executionBaseline: true,
-                executionRevision: true,
-                adjustments: {
-                    orderBy: { revision: 'asc' },
-                    select: {
-                        revision: true,
-                        reason: true,
-                        changes: true,
-                        createdById: true,
-                        createdAt: true,
-                    },
-                },
             },
         });
         const serializedExecution: unknown = JSON.parse(JSON.stringify(execution));
@@ -876,72 +855,6 @@ export class ProductionTasksService {
                 quantity: Number(item.quantity),
             })),
         } as unknown as Prisma.JsonObject;
-    }
-
-    private _readAdjustmentChanges(value: Prisma.JsonValue): StoredTaskAdjustmentChange[] {
-        if (!Array.isArray(value)) return [];
-        return value as unknown as StoredTaskAdjustmentChange[];
-    }
-
-    private _buildAdjustmentMultiplierMap(adjustments: Array<{ changes: Prisma.JsonValue }>): Map<string, number> {
-        const multipliers = new Map<string, number>();
-        for (const adjustment of adjustments) {
-            for (const change of this._readAdjustmentChanges(adjustment.changes)) {
-                const key = `${change.familyId}:${change.ingredientId}`;
-                multipliers.set(key, (multipliers.get(key) ?? 1) * change.multiplier);
-            }
-        }
-        return multipliers;
-    }
-
-    private _applyAdjustmentsToComponentGroups(
-        groups: ComponentGroup[],
-        multipliers: Map<string, number>,
-    ): ComponentGroup[] {
-        for (const group of groups) {
-            let weightDifference = 0;
-            for (const ingredient of group.baseComponentIngredients) {
-                if (ingredient.isRecipe) continue;
-                const multiplier = multipliers.get(`${group.familyId}:${ingredient.id}`);
-                if (multiplier === undefined || Math.abs(multiplier - 1) < 0.000001) continue;
-
-                const baselineWeight = ingredient.weightInGrams;
-                ingredient.baselineWeightInGrams = baselineWeight;
-                ingredient.weightInGrams = new Prisma.Decimal(baselineWeight).mul(multiplier).toDP(2).toNumber();
-                ingredient.isAdjusted = true;
-                weightDifference += ingredient.weightInGrams - baselineWeight;
-            }
-            group.totalComponentWeight = new Prisma.Decimal(group.totalComponentWeight)
-                .add(weightDifference)
-                .toDP(2)
-                .toNumber();
-
-            for (const ingredient of group.adjustableIngredients) {
-                const multiplier = multipliers.get(`${group.familyId}:${ingredient.id}`);
-                if (multiplier === undefined || Math.abs(multiplier - 1) < 0.000001) continue;
-                ingredient.baselineWeightInGrams = ingredient.weightInGrams;
-                ingredient.weightInGrams = new Prisma.Decimal(ingredient.weightInGrams)
-                    .mul(multiplier)
-                    .toDP(2)
-                    .toNumber();
-                ingredient.isAdjusted = true;
-            }
-        }
-        return groups;
-    }
-
-    private _applyAdjustmentsToConsumptions<T extends { ingredientId: string; totalConsumed: number }>(
-        consumptions: T[],
-        familyId: string,
-        multipliers: Map<string, number>,
-    ): T[] {
-        return consumptions.map((consumption) => {
-            const multiplier = multipliers.get(`${familyId}:${consumption.ingredientId}`) ?? 1;
-            return {
-                ...consumption,
-                totalConsumed: new Prisma.Decimal(consumption.totalConsumed).mul(multiplier).toNumber(),
-            };
-        });
     }
 
     private _sortTaskIngredients(
@@ -2194,21 +2107,12 @@ export class ProductionTasksService {
         const totalConsumptionMap = new Map<string, Prisma.Decimal>();
 
         for (const task of tasks) {
-            const adjustments = await this.prisma.productionTaskAdjustment.findMany({
-                where: { taskId: task.id },
-                orderBy: { revision: 'asc' },
-                select: { changes: true },
-            });
-            const adjustmentMultipliers = this._buildAdjustmentMultiplierMap(adjustments);
-
             for (const item of task.items) {
                 if (item.product.deletedAt) continue;
                 const consumptions = this._getTheoreticalMaterialRequirement(item.product);
-                const familyId = item.product.recipeVersion.family.id;
 
                 for (const [ingredientId, weight] of consumptions.entries()) {
-                    const multiplier = adjustmentMultipliers.get(`${familyId}:${ingredientId}`) ?? 1;
-                    const totalRequiredForItem = weight.mul(item.quantity).mul(multiplier);
+                    const totalRequiredForItem = weight.mul(item.quantity);
                     const existing = totalConsumptionMap.get(ingredientId) || new Prisma.Decimal(0);
                     totalConsumptionMap.set(ingredientId, existing.add(totalRequiredForItem));
                 }
@@ -2332,17 +2236,6 @@ export class ProductionTasksService {
                 status: true,
                 notes: true,
                 executionStartedAt: true,
-                executionRevision: true,
-                adjustments: {
-                    orderBy: { revision: 'asc' },
-                    select: {
-                        revision: true,
-                        reason: true,
-                        changes: true,
-                        createdAt: true,
-                        createdBy: { select: { name: true } },
-                    },
-                },
                 items: {
                     where: {
                         role: { not: TaskItemRole.PREP_INGREDIENT },
@@ -2390,11 +2283,7 @@ export class ProductionTasksService {
             product: { id: item.product.id },
         }));
 
-        const adjustmentMultipliers = this._buildAdjustmentMultiplierMap(task.adjustments);
-        const componentGroups = this._applyAdjustmentsToComponentGroups(
-            this._calculateComponentGroups(taskDataForCalc, query, mappedOriginalItems),
-            adjustmentMultipliers,
-        );
+        const componentGroups = this._calculateComponentGroups(taskDataForCalc, query, mappedOriginalItems);
 
         const recipeVersionMap = new Map<string, TaskRecipeVersionStatus>();
         for (const item of task.items) {
@@ -2428,28 +2317,6 @@ export class ProductionTasksService {
             })),
             recipeVersions: Array.from(recipeVersionMap.values()),
             executionStartedAt: task.executionStartedAt,
-            executionRevision: task.executionRevision,
-            latestAdjustment:
-                task.adjustments.length > 0
-                    ? {
-                          revision: task.adjustments[task.adjustments.length - 1].revision,
-                          reason: task.adjustments[task.adjustments.length - 1].reason,
-                          createdAt: task.adjustments[task.adjustments.length - 1].createdAt,
-                          createdByName: task.adjustments[task.adjustments.length - 1].createdBy.name,
-                      }
-                    : null,
-            adjustmentHistory: [...task.adjustments].reverse().map((adjustment) => ({
-                revision: adjustment.revision,
-                reason: adjustment.reason,
-                createdAt: adjustment.createdAt,
-                createdByName: adjustment.createdBy.name,
-                changes: this._readAdjustmentChanges(adjustment.changes).map((change) => ({
-                    familyId: change.familyId,
-                    ingredientName: change.ingredientName,
-                    beforeWeightInGrams: change.beforeWeightInGrams,
-                    afterWeightInGrams: change.afterWeightInGrams,
-                })),
-            })),
         };
     }
 
@@ -2571,7 +2438,7 @@ export class ProductionTasksService {
         for (const [familyId, data] of componentsMap.entries()) {
             const firstItem = data.items[0];
 
-            const versionNotes = (firstItem.product.recipeVersion as unknown as { notes: string | null }).notes;
+            const versionNumber = (firstItem.product.recipeVersion as unknown as { version: number }).version;
 
             const baseComponentInfo = firstItem.product.recipeVersion.components[0];
 
@@ -2855,34 +2722,10 @@ export class ProductionTasksService {
                 });
             });
 
-            const adjustableIngredientsMap = new Map<string, Prisma.Decimal>();
-            for (const item of data.items) {
-                const originalItem = originalItemsMap.get(item.productId);
-                const quantity = originalItem?.quantity ?? 0;
-                const requirements = this._getTheoreticalMaterialRequirement(item.product);
-                for (const [ingredientId, weight] of requirements) {
-                    const current = adjustableIngredientsMap.get(ingredientId) ?? new Prisma.Decimal(0);
-                    adjustableIngredientsMap.set(ingredientId, current.add(weight.mul(quantity)));
-                }
-            }
-
-            const adjustableIngredients: TaskIngredientDetail[] = Array.from(adjustableIngredientsMap.entries())
-                .map(([ingredientId, weight]) => {
-                    const ingredient = this._findIngredientInSnapshot(task, ingredientId);
-                    return {
-                        id: ingredientId,
-                        name: ingredient?.name ?? '未知原料',
-                        brand: null,
-                        weightInGrams: weight.toDP(2).toNumber(),
-                        isRecipe: false,
-                    };
-                })
-                .sort((a, b) => b.weightInGrams - a.weightInGrams);
-
             componentGroups.push({
                 familyId,
                 familyName: data.familyName,
-                note: versionNotes,
+                version: versionNumber,
                 category: data.category,
                 productsDescription: data.items
                     .map((i: TaskItemWithDetails) => {
@@ -2900,7 +2743,6 @@ export class ProductionTasksService {
                     data.category,
                     data.type,
                 ),
-                adjustableIngredients,
                 baseComponentProcedure: processedProcedure,
                 productDetails,
             });
@@ -3413,7 +3255,6 @@ export class ProductionTasksService {
                         executionStartedAt: startedAt,
                         executionStartedById: userId,
                         executionBaseline: baseline,
-                        executionRevision: 0,
                     },
                 });
                 if (updated.count !== 1) {
@@ -3507,90 +3348,6 @@ export class ProductionTasksService {
         return this.findOne(tenantId, id, {});
     }
 
-    async createAdjustment(
-        tenantId: string,
-        userId: string,
-        id: string,
-        dto: CreateTaskAdjustmentDto,
-    ): Promise<TaskDetailResponseDto> {
-        const task = await this.prisma.productionTask.findFirst({
-            where: { id, tenantId, deletedAt: null },
-            select: { status: true, executionRevision: true },
-        });
-        if (!task) throw new NotFoundException('生产任务不存在');
-        if (task.status !== ProductionTaskStatus.IN_PROGRESS) {
-            throw new BadRequestException('只有进行中的任务可以调整本批次用量');
-        }
-
-        const detail = await this.findOne(tenantId, id, {});
-        const adjustableIngredients = new Map<string, TaskIngredientDetail>();
-        for (const group of detail.componentGroups) {
-            for (const ingredient of group.adjustableIngredients) {
-                adjustableIngredients.set(`${group.familyId}:${ingredient.id}`, ingredient);
-            }
-        }
-
-        const seen = new Set<string>();
-        const changes: StoredTaskAdjustmentChange[] = [];
-        for (const requested of dto.changes) {
-            const key = `${requested.familyId}:${requested.ingredientId}`;
-            if (seen.has(key)) {
-                throw new BadRequestException('同一种原料不能在一次调整中重复提交');
-            }
-            seen.add(key);
-
-            const ingredient = adjustableIngredients.get(key);
-            if (!ingredient || ingredient.weightInGrams <= 0) {
-                throw new BadRequestException('调整项不存在或不是可直接调整的基础原料');
-            }
-
-            const beforeWeight = ingredient.weightInGrams;
-            const afterWeight = new Prisma.Decimal(requested.afterWeightInGrams).toDP(2).toNumber();
-            if (new Prisma.Decimal(afterWeight).sub(beforeWeight).abs().lt(0.01)) continue;
-
-            changes.push({
-                familyId: requested.familyId,
-                ingredientId: requested.ingredientId,
-                ingredientName: ingredient.name,
-                beforeWeightInGrams: beforeWeight,
-                afterWeightInGrams: afterWeight,
-                multiplier: new Prisma.Decimal(afterWeight).div(beforeWeight).toNumber(),
-            });
-        }
-
-        if (changes.length === 0) {
-            throw new BadRequestException('没有检测到有效的用量变化');
-        }
-
-        await this.prisma.$transaction(async (tx) => {
-            const nextRevision = task.executionRevision + 1;
-            const updated = await tx.productionTask.updateMany({
-                where: {
-                    id,
-                    tenantId,
-                    status: ProductionTaskStatus.IN_PROGRESS,
-                    executionRevision: task.executionRevision,
-                },
-                data: { executionRevision: nextRevision },
-            });
-            if (updated.count !== 1) {
-                throw new BadRequestException('批次用量已被其他人调整，请刷新后重试');
-            }
-
-            await tx.productionTaskAdjustment.create({
-                data: {
-                    taskId: id,
-                    revision: nextRevision,
-                    reason: dto.reason.trim(),
-                    changes: changes as unknown as Prisma.JsonArray,
-                    createdById: userId,
-                },
-            });
-        });
-
-        return this.findOne(tenantId, id, {});
-    }
-
     async remove(tenantId: string, id: string) {
         const task = await this.prisma.productionTask.findFirst({
             where: {
@@ -3632,13 +3389,8 @@ export class ProductionTasksService {
                     },
                 },
                 recipeSnapshot: true,
-                adjustments: {
-                    orderBy: { revision: 'asc' },
-                    select: { changes: true },
-                },
                 status: true,
                 id: true,
-                executionRevision: true,
             },
         });
 
@@ -3650,7 +3402,6 @@ export class ProductionTasksService {
         const finalSnapshot = await this._fetchAndSerializeSnapshot(id);
         const snapshot = finalSnapshot as unknown as TaskWithDetails;
         const snapshotProductMap = new Map(snapshot.items.map((i) => [i.product.id, i.product]));
-        const adjustmentMultipliers = this._buildAdjustmentMultiplierMap(task.adjustments);
 
         const { notes, completedItems } = completeDto;
 
@@ -3670,10 +3421,9 @@ export class ProductionTasksService {
                 }
 
                 // calculateProductConsumptionsFromSnapshot 计算的是“含损耗”的总投入量
-                const consumptions = this._applyAdjustmentsToConsumptions(
-                    this.costingService.calculateProductConsumptionsFromSnapshot(snapshotProduct, plannedQuantity),
-                    snapshotProduct.recipeVersion.family.id,
-                    adjustmentMultipliers,
+                const consumptions = this.costingService.calculateProductConsumptionsFromSnapshot(
+                    snapshotProduct,
+                    plannedQuantity,
                 );
                 for (const cons of consumptions) {
                     const existing = totalInputNeeded.get(cons.ingredientId);
@@ -3696,13 +3446,9 @@ export class ProductionTasksService {
             if (!snapshotProduct) continue;
 
             if (completedQuantity > 0) {
-                const successConsumptions = this._applyAdjustmentsToConsumptions(
-                    this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
-                        snapshotProduct,
-                        completedQuantity,
-                    ),
-                    snapshotProduct.recipeVersion.family.id,
-                    adjustmentMultipliers,
+                const successConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                    snapshotProduct,
+                    completedQuantity,
                 );
                 for (const cons of successConsumptions) {
                     uniqueIngredientIds.add(cons.ingredientId);
@@ -3711,13 +3457,9 @@ export class ProductionTasksService {
 
             const calculatedSpoilage = spoilageDetails?.reduce((sum, s) => sum + s.quantity, 0) || 0;
             if (calculatedSpoilage > 0) {
-                const spoiledConsumptions = this._applyAdjustmentsToConsumptions(
-                    this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
-                        snapshotProduct,
-                        calculatedSpoilage,
-                    ),
-                    snapshotProduct.recipeVersion.family.id,
-                    adjustmentMultipliers,
+                const spoiledConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                    snapshotProduct,
+                    calculatedSpoilage,
                 );
                 for (const cons of spoiledConsumptions) {
                     uniqueIngredientIds.add(cons.ingredientId);
@@ -3735,7 +3477,6 @@ export class ProductionTasksService {
                     id,
                     tenantId,
                     status: ProductionTaskStatus.IN_PROGRESS,
-                    executionRevision: task.executionRevision,
                 },
                 data: {
                     status: ProductionTaskStatus.COMPLETED,
@@ -3830,13 +3571,9 @@ export class ProductionTasksService {
 
                 // --- 步骤一：处理【成功产品】 ---
                 if (completedQuantity > 0) {
-                    const successConsumptions = this._applyAdjustmentsToConsumptions(
-                        this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
-                            snapshotProduct,
-                            completedQuantity,
-                        ),
-                        snapshotProduct.recipeVersion.family.id,
-                        adjustmentMultipliers,
+                    const successConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                        snapshotProduct,
+                        completedQuantity,
                     );
 
                     for (const cons of successConsumptions) {
@@ -3875,13 +3612,9 @@ export class ProductionTasksService {
                     }
 
                     // 计算报损品的理论消耗
-                    const spoiledConsumptions = this._applyAdjustmentsToConsumptions(
-                        this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
-                            snapshotProduct,
-                            calculatedSpoilage,
-                        ),
-                        snapshotProduct.recipeVersion.family.id,
-                        adjustmentMultipliers,
+                    const spoiledConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                        snapshotProduct,
+                        calculatedSpoilage,
                     );
 
                     for (const cons of spoiledConsumptions) {
@@ -4018,7 +3751,7 @@ export class ProductionTasksService {
             const topMargin = index > 0 ? 40 : 10;
 
             content.push({
-                text: `${group.familyName} ${group.note ? `(${group.note})` : ''}`,
+                text: `${group.familyName} (V${group.version})`,
                 style: 'groupTitle',
                 margin: [0, topMargin, 0, 5],
             });

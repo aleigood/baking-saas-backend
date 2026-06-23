@@ -139,7 +139,6 @@ model User {
   priceRecords    PriceRecord[]
   createdTasks    ProductionTask[]           @relation("TaskCreator")
   startedTasks    ProductionTask[]           @relation("TaskStarter")
-  taskAdjustments ProductionTaskAdjustment[] @relation("TaskAdjustmentActor")
   paymentOrders   PaymentOrder[]
 }
 
@@ -333,7 +332,7 @@ model RecipeVersion {
   version              Int // 版本号
   notes                String?
   // 版本备注，如“夏季版，减少水量”
-  changeSummary        String?
+  changeSummary        Json?
   // 相对来源版本自动生成的修改摘要
   isActive             Boolean               @default(true) // 是否为当前激活版本
   createdAt            DateTime              @default(now())
@@ -527,7 +526,6 @@ model ProductionTask {
   executionStartedAt   DateTime?
   executionStartedById String?
   executionBaseline    Json?
-  executionRevision    Int                        @default(0)
   createdAt            DateTime                   @default(now())
   updatedAt            DateTime                   @updatedAt
   deletedAt            DateTime?
@@ -537,7 +535,6 @@ model ProductionTask {
   tenant               Tenant                     @relation(fields: [tenantId], references: [id])
   log                  ProductionLog?
   items                ProductionTaskItem[]
-  adjustments          ProductionTaskAdjustment[]
 
   @@index([tenantId])
   @@index([createdById]) // [核心新增] 为创建者ID添加索引
@@ -556,22 +553,6 @@ model ProductionTaskItem {
 
   @@index([taskId])
   @@index([productId])
-}
-
-model ProductionTaskAdjustment {
-  id          String         @id @default(uuid())
-  taskId      String
-  revision    Int
-  reason      String
-  changes     Json
-  createdById String
-  createdAt   DateTime       @default(now())
-  task        ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  createdBy   User           @relation("TaskAdjustmentActor", fields: [createdById], references: [id], onDelete: Restrict)
-
-  @@unique([taskId, revision])
-  @@index([taskId, createdAt])
-  @@index([createdById])
 }
 
 // ================================================================= //

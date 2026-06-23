@@ -204,7 +204,7 @@ CREATE TABLE "RecipeVersion" (
     "familyId" TEXT NOT NULL,
     "version" INTEGER NOT NULL,
     "notes" TEXT,
-    "changeSummary" TEXT,
+    "changeSummary" JSONB,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -323,7 +323,6 @@ CREATE TABLE "ProductionTask" (
     "executionStartedAt" TIMESTAMP(3),
     "executionStartedById" TEXT,
     "executionBaseline" JSONB,
-    "executionRevision" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
@@ -341,19 +340,6 @@ CREATE TABLE "ProductionTaskItem" (
     "role" "TaskItemRole" NOT NULL DEFAULT 'FINAL_PRODUCT',
 
     CONSTRAINT "ProductionTaskItem_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "ProductionTaskAdjustment" (
-    "id" TEXT NOT NULL,
-    "taskId" TEXT NOT NULL,
-    "revision" INTEGER NOT NULL,
-    "reason" TEXT NOT NULL,
-    "changes" JSONB NOT NULL,
-    "createdById" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "ProductionTaskAdjustment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -534,15 +520,6 @@ CREATE INDEX "ProductionTaskItem_taskId_idx" ON "ProductionTaskItem"("taskId");
 CREATE INDEX "ProductionTaskItem_productId_idx" ON "ProductionTaskItem"("productId");
 
 -- CreateIndex
-CREATE INDEX "ProductionTaskAdjustment_taskId_createdAt_idx" ON "ProductionTaskAdjustment"("taskId", "createdAt");
-
--- CreateIndex
-CREATE INDEX "ProductionTaskAdjustment_createdById_idx" ON "ProductionTaskAdjustment"("createdById");
-
--- CreateIndex
-CREATE UNIQUE INDEX "ProductionTaskAdjustment_taskId_revision_key" ON "ProductionTaskAdjustment"("taskId", "revision");
-
--- CreateIndex
 CREATE UNIQUE INDEX "ProductionLog_taskId_key" ON "ProductionLog"("taskId");
 
 -- CreateIndex
@@ -673,12 +650,6 @@ ALTER TABLE "ProductionTaskItem" ADD CONSTRAINT "ProductionTaskItem_taskId_fkey"
 
 -- AddForeignKey
 ALTER TABLE "ProductionTaskItem" ADD CONSTRAINT "ProductionTaskItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ProductionTaskAdjustment" ADD CONSTRAINT "ProductionTaskAdjustment_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "ProductionTask"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ProductionTaskAdjustment" ADD CONSTRAINT "ProductionTaskAdjustment_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductionLog" ADD CONSTRAINT "ProductionLog_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "ProductionTask"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

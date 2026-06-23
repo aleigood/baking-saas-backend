@@ -154,6 +154,42 @@ type RecipeFamilyForExport = Prisma.RecipeFamilyGetPayload<{
 type RecipeVersionForExport = RecipeFamilyForExport['versions'][0];
 type ComponentIngredientForExport = RecipeVersionForExport['components'][0]['ingredients'][0];
 
+type RecipeVersionChangeItem = {
+    kind:
+        | 'INITIAL_VERSION'
+        | 'NO_CHANGES'
+        | 'LEGACY_TEXT'
+        | 'INGREDIENT_ADDED'
+        | 'INGREDIENT_REMOVED'
+        | 'INGREDIENT_RATIO_CHANGED'
+        | 'DEPENDENCY_VERSION_CHANGED'
+        | 'PRODUCT_ADDED'
+        | 'PRODUCT_REMOVED'
+        | 'PRODUCT_WEIGHT_CHANGED'
+        | 'PRODUCT_INGREDIENT_ADDED'
+        | 'PRODUCT_INGREDIENT_REMOVED'
+        | 'PRODUCT_INGREDIENT_AMOUNT_CHANGED'
+        | 'PROCEDURE_CHANGED'
+        | 'FIELD_CHANGED';
+    name?: string;
+    productName?: string;
+    ingredientType?: 'MIX_IN' | 'FILLING' | 'TOPPING';
+    basis?: 'FLOUR_SHARE' | 'RECIPE_RATIO';
+    field?: string;
+    scope?: 'RECIPE' | 'PRODUCT';
+    before?: number;
+    after?: number;
+    beforeVersion?: number;
+    afterVersion?: number;
+    unit?: 'RATIO' | 'GRAM' | 'CELSIUS' | 'PERCENT';
+    text?: string;
+};
+
+type RecipeVersionChangeSummary = {
+    schemaVersion: 1;
+    items: RecipeVersionChangeItem[];
+};
+
 @Injectable()
 export class RecipesService {
     constructor(private prisma: PrismaService) {}
@@ -863,7 +899,7 @@ export class RecipesService {
         const sourceVersionId = createRecipeDto.sourceVersionId ?? recipeFamily.versions[0]?.id;
         const changeSummary = sourceVersionId
             ? await this._buildVersionChangeSummary(tenantId, familyId, sourceVersionId, createRecipeDto)
-            : '初始版本';
+            : { schemaVersion: 1 as const, items: [{ kind: 'INITIAL_VERSION' as const }] };
         return this.createVersionInternal(tenantId, familyId, createRecipeDto, false, changeSummary);
     }
 
@@ -890,67 +926,109 @@ export class RecipesService {
         familyId: string,
         sourceVersionId: string,
         recipe: CreateRecipeDto,
-    ): Promise<string> {
+    ): Promise<RecipeVersionChangeSummary> {
         const source = await this.getRecipeVersionFormTemplate(tenantId, familyId, sourceVersionId);
-        const changes: string[] = [];
+        const items: RecipeVersionChangeItem[] = [];
+        const dependencyChanges: Array<{
+            item: RecipeVersionChangeItem;
+            beforeVersionId?: string;
+            afterVersionId?: string;
+        }> = [];
         const sourceMainComponent =
             source.components.find(
                 (component) => component.type === 'MAIN_DOUGH' || component.type === 'BASE_COMPONENT',
             ) ?? source.components[0];
 
-        const sourceIngredients = new Map<string, { value: number | null; versionId?: string }>();
+        const fromPercentage = (value: number | null | undefined): number | null =>
+            value === null || value === undefined ? null : new Prisma.Decimal(value).div(100).toNumber();
+
+        const sourceIngredients = new Map<
+            string,
+            { value: number | null; versionId?: string; basis: 'FLOUR_SHARE' | 'RECIPE_RATIO' }
+        >();
         for (const ingredient of sourceMainComponent?.ingredients ?? []) {
             sourceIngredients.set(ingredient.name, {
-                value: ingredient.ratio,
+                value: fromPercentage(ingredient.ratio),
                 versionId: ingredient.recipeVersionId,
+                basis: 'RECIPE_RATIO',
             });
         }
         for (const component of source.components.filter((item) => item.type === 'PRE_DOUGH')) {
             sourceIngredients.set(component.name, {
-                value: component.flourRatioInMainDough ?? null,
+                value: fromPercentage(component.flourRatioInMainDough),
                 versionId: component.recipeVersionId,
+                basis: 'FLOUR_SHARE',
             });
         }
 
-        const nextIngredients = new Map(
+        const nextIngredients = new Map<
+            string,
+            { value: number | null; versionId?: string; basis: 'FLOUR_SHARE' | 'RECIPE_RATIO' }
+        >(
             recipe.ingredients.map((ingredient) => [
                 ingredient.name,
                 {
                     value: ingredient.flourRatio ?? ingredient.ratio ?? null,
                     versionId: ingredient.recipeVersionId,
+                    basis:
+                        ingredient.flourRatio !== null && ingredient.flourRatio !== undefined
+                            ? 'FLOUR_SHARE'
+                            : 'RECIPE_RATIO',
                 },
             ]),
         );
         const addedIngredients = [...nextIngredients.keys()].filter((name) => !sourceIngredients.has(name));
         const removedIngredients = [...sourceIngredients.keys()].filter((name) => !nextIngredients.has(name));
-        if (addedIngredients.length > 0) changes.push(`新增原料：${addedIngredients.join('、')}`);
-        if (removedIngredients.length > 0) changes.push(`移除原料：${removedIngredients.join('、')}`);
+        items.push(
+            ...addedIngredients.map((name) => ({
+                kind: 'INGREDIENT_ADDED' as const,
+                name,
+                after: nextIngredients.get(name)?.value ?? undefined,
+                unit: 'RATIO' as const,
+                basis: nextIngredients.get(name)?.basis,
+            })),
+        );
+        items.push(
+            ...removedIngredients.map((name) => ({
+                kind: 'INGREDIENT_REMOVED' as const,
+                name,
+                before: sourceIngredients.get(name)?.value ?? undefined,
+                unit: 'RATIO' as const,
+                basis: sourceIngredients.get(name)?.basis,
+            })),
+        );
 
-        const ratioChanges: string[] = [];
-        const dependencyChanges: string[] = [];
         for (const [name, next] of nextIngredients) {
             const previous = sourceIngredients.get(name);
             if (!previous) continue;
-            if (previous.value !== null && next.value !== null && Math.abs(previous.value - next.value) >= 0.001) {
-                ratioChanges.push(`${name} ${previous.value}%→${next.value}%`);
+            if (previous.value !== null && next.value !== null && Math.abs(previous.value - next.value) >= 0.000001) {
+                items.push({
+                    kind: 'INGREDIENT_RATIO_CHANGED',
+                    name,
+                    before: previous.value,
+                    after: next.value,
+                    unit: 'RATIO',
+                    basis: next.basis,
+                });
             }
             if (previous.versionId && next.versionId && previous.versionId !== next.versionId) {
-                dependencyChanges.push(name);
+                const item: RecipeVersionChangeItem = { kind: 'DEPENDENCY_VERSION_CHANGED', name };
+                items.push(item);
+                dependencyChanges.push({
+                    item,
+                    beforeVersionId: previous.versionId,
+                    afterVersionId: next.versionId,
+                });
             }
         }
-        if (ratioChanges.length > 0) changes.push(`调整比例：${ratioChanges.join('、')}`);
-        if (dependencyChanges.length > 0) changes.push(`升级依赖：${dependencyChanges.join('、')}`);
 
         const sourceProducts = new Map((source.products ?? []).map((product) => [product.name, product]));
         const nextProducts = new Map((recipe.products ?? []).map((product) => [product.name, product]));
         const addedProducts = [...nextProducts.keys()].filter((name) => !sourceProducts.has(name));
         const removedProducts = [...sourceProducts.keys()].filter((name) => !nextProducts.has(name));
-        if (addedProducts.length > 0) changes.push(`新增产品：${addedProducts.join('、')}`);
-        if (removedProducts.length > 0) changes.push(`移除产品：${removedProducts.join('、')}`);
+        items.push(...addedProducts.map((name) => ({ kind: 'PRODUCT_ADDED' as const, name })));
+        items.push(...removedProducts.map((name) => ({ kind: 'PRODUCT_REMOVED' as const, name })));
 
-        const productWeightChanges: string[] = [];
-        let productIngredientsChanged = false;
-        let productProcedureChanged = false;
         const normalizeProductIngredients = (
             ingredients: Array<{
                 name: string;
@@ -958,55 +1036,191 @@ export class RecipesService {
                 weightInGrams?: number | null;
                 recipeVersionId?: string;
             }>,
+            ratiosArePercentages: boolean,
         ) =>
             ingredients
                 .map((ingredient) => ({
                     name: ingredient.name,
-                    ratio: ingredient.ratio ?? null,
+                    ratio:
+                        ingredient.ratio === null || ingredient.ratio === undefined
+                            ? null
+                            : ratiosArePercentages
+                              ? fromPercentage(ingredient.ratio)
+                              : ingredient.ratio,
                     weightInGrams: ingredient.weightInGrams ?? null,
                     recipeVersionId: ingredient.recipeVersionId ?? null,
                 }))
                 .sort((a, b) => a.name.localeCompare(b.name));
+
+        type NormalizedProductIngredient = ReturnType<typeof normalizeProductIngredients>[number];
+        const compareProductIngredients = (
+            productName: string,
+            ingredientType: 'MIX_IN' | 'FILLING' | 'TOPPING',
+            previousIngredients: NormalizedProductIngredient[],
+            nextIngredientsForProduct: NormalizedProductIngredient[],
+        ) => {
+            const previousMap = new Map(previousIngredients.map((ingredient) => [ingredient.name, ingredient]));
+            const nextMap = new Map(nextIngredientsForProduct.map((ingredient) => [ingredient.name, ingredient]));
+
+            for (const [ingredientName, nextIngredient] of nextMap) {
+                const previousIngredient = previousMap.get(ingredientName);
+                const usesRatio =
+                    nextIngredient.ratio !== null || (previousIngredient ? previousIngredient.ratio !== null : false);
+                const unit: RecipeVersionChangeItem['unit'] = usesRatio ? 'RATIO' : 'GRAM';
+                const after = usesRatio ? (nextIngredient.ratio ?? 0) : (nextIngredient.weightInGrams ?? 0);
+
+                if (!previousIngredient) {
+                    items.push({
+                        kind: 'PRODUCT_INGREDIENT_ADDED',
+                        name: ingredientName,
+                        productName,
+                        ingredientType,
+                        after,
+                        unit,
+                    });
+                    continue;
+                }
+
+                const before = usesRatio ? (previousIngredient.ratio ?? 0) : (previousIngredient.weightInGrams ?? 0);
+                if (Math.abs(before - after) >= 0.000001) {
+                    items.push({
+                        kind: 'PRODUCT_INGREDIENT_AMOUNT_CHANGED',
+                        name: ingredientName,
+                        productName,
+                        ingredientType,
+                        before,
+                        after,
+                        unit,
+                    });
+                }
+
+                if (
+                    previousIngredient.recipeVersionId &&
+                    nextIngredient.recipeVersionId &&
+                    previousIngredient.recipeVersionId !== nextIngredient.recipeVersionId
+                ) {
+                    const item: RecipeVersionChangeItem = {
+                        kind: 'DEPENDENCY_VERSION_CHANGED',
+                        name: ingredientName,
+                        productName,
+                        ingredientType,
+                    };
+                    items.push(item);
+                    dependencyChanges.push({
+                        item,
+                        beforeVersionId: previousIngredient.recipeVersionId,
+                        afterVersionId: nextIngredient.recipeVersionId,
+                    });
+                }
+            }
+
+            for (const [ingredientName, previousIngredient] of previousMap) {
+                if (nextMap.has(ingredientName)) continue;
+                const usesRatio = previousIngredient.ratio !== null;
+                items.push({
+                    kind: 'PRODUCT_INGREDIENT_REMOVED',
+                    name: ingredientName,
+                    productName,
+                    ingredientType,
+                    before: usesRatio ? (previousIngredient.ratio ?? 0) : (previousIngredient.weightInGrams ?? 0),
+                    unit: usesRatio ? 'RATIO' : 'GRAM',
+                });
+            }
+        };
+
         for (const [name, next] of nextProducts) {
             const previous = sourceProducts.get(name);
             if (!previous) continue;
             if (Math.abs(previous.baseDoughWeight - next.weight) >= 0.01) {
-                productWeightChanges.push(`${name} ${previous.baseDoughWeight}g→${next.weight}g`);
+                items.push({
+                    kind: 'PRODUCT_WEIGHT_CHANGED',
+                    name,
+                    before: previous.baseDoughWeight,
+                    after: next.weight,
+                    unit: 'GRAM',
+                });
             }
-            const sourceIngredientSignature = JSON.stringify({
-                mixIn: normalizeProductIngredients(previous.mixIns),
-                fillings: normalizeProductIngredients(previous.fillings),
-                toppings: normalizeProductIngredients(previous.toppings),
-            });
-            const nextIngredientSignature = JSON.stringify({
-                mixIn: normalizeProductIngredients(next.mixIn ?? []),
-                fillings: normalizeProductIngredients(next.fillings ?? []),
-                toppings: normalizeProductIngredients(next.toppings ?? []),
-            });
-            productIngredientsChanged ||= sourceIngredientSignature !== nextIngredientSignature;
-            productProcedureChanged ||=
-                JSON.stringify(previous.procedure ?? []) !== JSON.stringify(next.procedure ?? []);
+            compareProductIngredients(
+                name,
+                'MIX_IN',
+                normalizeProductIngredients(previous.mixIns, true),
+                normalizeProductIngredients(next.mixIn ?? [], false),
+            );
+            compareProductIngredients(
+                name,
+                'FILLING',
+                normalizeProductIngredients(previous.fillings, true),
+                normalizeProductIngredients(next.fillings ?? [], false),
+            );
+            compareProductIngredients(
+                name,
+                'TOPPING',
+                normalizeProductIngredients(previous.toppings, true),
+                normalizeProductIngredients(next.toppings ?? [], false),
+            );
+            if (JSON.stringify(previous.procedure ?? []) !== JSON.stringify(next.procedure ?? [])) {
+                items.push({ kind: 'PROCEDURE_CHANGED', scope: 'PRODUCT', name });
+            }
         }
-        if (productWeightChanges.length > 0) changes.push(`调整产品克重：${productWeightChanges.join('、')}`);
-        if (productIngredientsChanged) changes.push('调整产品辅料');
-        if (productProcedureChanged) changes.push('调整产品制作步骤');
 
-        const scalarChanges: string[] = [];
-        const addScalarChange = (label: string, previous: number | undefined, next: number | undefined) => {
-            if (previous === undefined && next === undefined) return;
-            if (Math.abs((previous ?? 0) - (next ?? 0)) >= 0.001) scalarChanges.push(label);
+        const addFieldChange = (
+            field: string,
+            previous: number | null | undefined,
+            next: number | null | undefined,
+            unit?: RecipeVersionChangeItem['unit'],
+        ) => {
+            const before = previous ?? null;
+            const after = next ?? null;
+            if (before === null && after === null) return;
+            if (Math.abs((before ?? 0) - (after ?? 0)) < 0.000001) return;
+            items.push({
+                kind: 'FIELD_CHANGED',
+                field,
+                before: before ?? 0,
+                after: after ?? 0,
+                unit,
+            });
         };
-        addScalarChange('目标温度', source.targetTemp, recipe.targetTemp);
-        addScalarChange('损耗率', sourceMainComponent?.lossRatio, recipe.lossRatio);
-        addScalarChange('分割损耗', sourceMainComponent?.divisionLoss, recipe.divisionLoss);
-        addScalarChange('含水量', sourceMainComponent?.customWaterContent, recipe.customWaterContent);
-        if (scalarChanges.length > 0) changes.push(`调整${scalarChanges.join('、')}`);
+        addFieldChange('targetTemp', source.targetTemp, recipe.targetTemp, 'CELSIUS');
+        addFieldChange('lossRatio', fromPercentage(sourceMainComponent?.lossRatio), recipe.lossRatio, 'RATIO');
+        addFieldChange('divisionLoss', sourceMainComponent?.divisionLoss, recipe.divisionLoss, 'GRAM');
+        addFieldChange(
+            'customWaterContent',
+            sourceMainComponent?.customWaterContent,
+            recipe.customWaterContent,
+            'PERCENT',
+        );
         if (JSON.stringify(sourceMainComponent?.procedure ?? []) !== JSON.stringify(recipe.procedure ?? [])) {
-            changes.push('调整配方制作步骤');
+            items.push({ kind: 'PROCEDURE_CHANGED', scope: 'RECIPE' });
         }
 
-        const summary = changes.length > 0 ? changes.join('；') : '内容未发生变化';
-        return summary.length > 180 ? `${summary.slice(0, 177)}...` : summary;
+        if (dependencyChanges.length > 0) {
+            const versionIds = Array.from(
+                new Set(
+                    dependencyChanges
+                        .flatMap((change) => [change.beforeVersionId, change.afterVersionId])
+                        .filter((id): id is string => !!id),
+                ),
+            );
+            const versions = await this.prisma.recipeVersion.findMany({
+                where: { id: { in: versionIds } },
+                select: { id: true, version: true },
+            });
+            const versionNumberMap = new Map(versions.map((version) => [version.id, version.version]));
+            for (const change of dependencyChanges) {
+                change.item.beforeVersion = change.beforeVersionId
+                    ? versionNumberMap.get(change.beforeVersionId)
+                    : undefined;
+                change.item.afterVersion = change.afterVersionId
+                    ? versionNumberMap.get(change.afterVersionId)
+                    : undefined;
+            }
+        }
+
+        return {
+            schemaVersion: 1,
+            items: items.length > 0 ? items : [{ kind: 'NO_CHANGES' }],
+        };
     }
 
     private async _createProductIngredients(
@@ -1075,7 +1289,10 @@ export class RecipesService {
         familyId: string | null,
         createRecipeDto: CreateRecipeDto,
         activateNewVersion = false,
-        changeSummary = '初始版本',
+        changeSummary: RecipeVersionChangeSummary = {
+            schemaVersion: 1,
+            items: [{ kind: 'INITIAL_VERSION' }],
+        },
     ) {
         const { name, type = 'MAIN', category } = createRecipeDto;
 
@@ -1169,7 +1386,7 @@ export class RecipesService {
                         familyId: recipeFamily.id,
                         version: nextVersionNumber,
                         notes: createRecipeDto.notes || `版本 ${nextVersionNumber}`,
-                        changeSummary,
+                        changeSummary: changeSummary as unknown as Prisma.InputJsonValue,
                         isActive: activateNewVersion || !hasActiveVersion,
                     },
                 });
@@ -2339,7 +2556,10 @@ export class RecipesService {
                 familyId: planItem.familyId,
                 version: nextVersion,
                 notes: source.notes ? `${source.notes}；依赖升级` : `版本 ${nextVersion}；依赖升级`,
-                changeSummary: `升级“${planItem.familyName}”的子配方依赖版本`,
+                changeSummary: {
+                    schemaVersion: 1,
+                    items: [{ kind: 'DEPENDENCY_VERSION_CHANGED', name: '子配方' }],
+                },
                 isActive: true,
             },
         });
