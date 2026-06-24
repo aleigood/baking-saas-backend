@@ -158,6 +158,7 @@ export class EntitlementsService {
                     id: true,
                     trialStartedAt: true,
                     trialEndsAt: true,
+                    freeTierResetAt: true,
                     trialEntitlementPolicy: true,
                 },
             }),
@@ -211,8 +212,24 @@ export class EntitlementsService {
 
         const policyConfig = this.parseConfig(policy.config);
         const freeRecipeLimit = this.parseConfig(freePolicy.config).limits.mainRecipes;
-        if (state === 'FREE' && freeRecipeLimit !== null)
-            await this.normalizeFreeRecipeSelection(tenantId, freeRecipeLimit);
+        const freeTierBoundary = latestExpiredSubscription ? graceEndsAt : tenant.trialEndsAt;
+        if (
+            state === 'FREE' &&
+            freeTierBoundary &&
+            freeTierBoundary <= now &&
+            (!tenant.freeTierResetAt || tenant.freeTierResetAt < freeTierBoundary)
+        ) {
+            await this.prisma.$transaction([
+                this.prisma.recipeFamily.updateMany({
+                    where: { tenantId, type: RecipeType.MAIN },
+                    data: { freeTierEnabled: false },
+                }),
+                this.prisma.tenant.update({
+                    where: { id: tenantId },
+                    data: { freeTierResetAt: now },
+                }),
+            ]);
+        }
 
         const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
         const [mainRecipes, monthlyTasks, activeMembers, pendingInvitations, recipeSelection] = await Promise.all([
@@ -284,43 +301,49 @@ export class EntitlementsService {
         return this.getSummary(tenantId);
     }
 
-    async selectFreeRecipes(tenantId: string, userId: string, tenantRole: TenantRole, recipeIds: string[]) {
-        if (tenantRole !== TenantRole.OWNER) throw new ForbiddenException('只有店主可以选择免费版启用配方');
-        const freePolicy = await this.getDefaultPolicy(EntitlementTier.FREE);
-        const recipeLimit = this.parseConfig(freePolicy.config).limits.mainRecipes;
-        if (recipeLimit !== null && recipeIds.length > recipeLimit) {
-            throw new BadRequestException(`免费版最多启用 ${recipeLimit} 个主配方`);
+    async unrestrictFreeRecipe(tenantId: string, tenantRole: TenantRole, recipeId: string) {
+        if (tenantRole !== TenantRole.OWNER && tenantRole !== TenantRole.ADMIN) {
+            throw new ForbiddenException('您没有管理配方的权限');
         }
 
-        const ownedRecipes = await this.prisma.recipeFamily.count({
-            where: { id: { in: recipeIds }, tenantId, type: RecipeType.MAIN, deletedAt: null },
-        });
-        if (ownedRecipes !== recipeIds.length) throw new BadRequestException('包含无效的配方');
+        const summary = await this.getSummary(tenantId);
+        if (summary.fullAccess) throw new BadRequestException('当前订阅下配方未受限');
+        const limit = summary.limits.mainRecipes;
 
-        const membership = await this.prisma.tenantUser.findUnique({
-            where: { userId_tenantId: { userId, tenantId } },
-            select: { role: true },
-        });
-        if (membership?.role !== TenantRole.OWNER) throw new ForbiddenException('您不拥有该店铺');
+        const remaining = await this.prisma.$transaction(
+            async (tx) => {
+                const recipe = await tx.recipeFamily.findFirst({
+                    where: { id: recipeId, tenantId, type: RecipeType.MAIN, deletedAt: null },
+                    select: { id: true, freeTierEnabled: true },
+                });
+                if (!recipe) throw new BadRequestException('配方不存在或无法解除受限');
 
-        await this.prisma.$transaction([
-            this.prisma.recipeFamily.updateMany({
-                where: { tenantId, type: RecipeType.MAIN, deletedAt: null },
-                data: { freeTierEnabled: false },
-            }),
-            this.prisma.recipeFamily.updateMany({
-                where: { id: { in: recipeIds }, tenantId, type: RecipeType.MAIN, deletedAt: null },
-                data: { freeTierEnabled: true },
-            }),
-        ]);
-        return this.getSummary(tenantId);
+                const enabledCount = await tx.recipeFamily.count({
+                    where: { tenantId, type: RecipeType.MAIN, freeTierEnabled: true },
+                });
+                if (recipe.freeTierEnabled) return limit === null ? null : Math.max(limit - enabledCount, 0);
+                if (limit !== null && enabledCount >= limit) {
+                    throw new BadRequestException(`免费版最多只能启用 ${limit} 个配方`);
+                }
+
+                await tx.recipeFamily.update({ where: { id: recipeId }, data: { freeTierEnabled: true } });
+                return limit === null ? null : Math.max(limit - enabledCount - 1, 0);
+            },
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+
+        return { remaining };
     }
 
     async assertCanCreateRecipe(tenantId: string, type: RecipeType = RecipeType.MAIN) {
         if (type !== RecipeType.MAIN) return;
         const summary = await this.getSummary(tenantId);
         const limit = summary.limits.mainRecipes;
-        if (limit === null || summary.usage.mainRecipes < limit) return;
+        if (summary.fullAccess || limit === null) return;
+        const enabledCount = await this.prisma.recipeFamily.count({
+            where: { tenantId, type: RecipeType.MAIN, freeTierEnabled: true },
+        });
+        if (enabledCount < limit) return;
         this.limitExceeded('RECIPE_LIMIT', `当前权益最多创建 ${limit} 个主配方`);
     }
 
@@ -333,7 +356,7 @@ export class EntitlementsService {
         });
         if (!family) throw new BadRequestException('配方不存在');
         if (family.type !== RecipeType.MAIN || family.freeTierEnabled) return;
-        this.limitExceeded('RECIPE_READ_ONLY', '该配方超出免费版额度，目前为只读状态');
+        this.limitExceeded('RECIPE_READ_ONLY', '该配方当前使用受限');
     }
 
     async assertCanCreateProductionTask(tenantId: string, productIds: string[]) {
@@ -348,7 +371,7 @@ export class EntitlementsService {
                 recipeVersion: { family: { tenantId, type: RecipeType.MAIN, freeTierEnabled: false } },
             },
         });
-        if (disabledRecipes > 0) this.limitExceeded('RECIPE_READ_ONLY', '生产任务包含免费版未启用的配方');
+        if (disabledRecipes > 0) this.limitExceeded('RECIPE_READ_ONLY', '生产任务包含使用受限的配方');
     }
 
     async assertCanInviteMember(tenantId: string) {
@@ -362,20 +385,6 @@ export class EntitlementsService {
         const summary = await this.getSummary(tenantId);
         if (summary.features[feature]) return;
         this.limitExceeded('FEATURE_NOT_INCLUDED', '当前权益不包含此功能');
-    }
-
-    private async normalizeFreeRecipeSelection(tenantId: string, recipeLimit: number) {
-        const enabled = await this.prisma.recipeFamily.findMany({
-            where: { tenantId, type: RecipeType.MAIN, deletedAt: null, freeTierEnabled: true },
-            select: { id: true },
-            orderBy: { updatedAt: 'desc' },
-        });
-        if (enabled.length <= recipeLimit) return;
-        const keepIds = enabled.slice(0, recipeLimit).map((item) => item.id);
-        await this.prisma.recipeFamily.updateMany({
-            where: { tenantId, type: RecipeType.MAIN, deletedAt: null, id: { notIn: keepIds } },
-            data: { freeTierEnabled: false },
-        });
     }
 
     private limitExceeded(code: string, message: string): never {

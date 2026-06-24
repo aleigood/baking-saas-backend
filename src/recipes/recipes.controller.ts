@@ -251,9 +251,8 @@ export class RecipesController {
      * @param id 配方族ID
      */
     @Get(':id')
-    async findOne(@Param('id') id: string) {
-        // [修复] 调用 service 的 findOne 方法时只传递一个参数
-        const recipe = await this.recipesService.findOne(id);
+    async findOne(@GetUser() user: UserPayload, @Param('id') id: string) {
+        const recipe = await this.recipesService.findOne(user.tenantId, id);
         if (!recipe) {
             throw new NotFoundException(`ID为 ${id} 的配方未找到`);
         }
@@ -265,8 +264,8 @@ export class RecipesController {
      * @param id 配方族ID
      */
     @Delete(':id')
-    remove(@Param('id') id: string) {
-        return this.recipesService.remove(id);
+    remove(@GetUser() user: UserPayload, @Param('id') id: string) {
+        return this.recipesService.remove(user.tenantId, id);
     }
 
     /**

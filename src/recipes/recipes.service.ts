@@ -1926,7 +1926,7 @@ export class RecipesService {
     }
 
     async findAll(tenantId: string) {
-        await this.entitlements.getSummary(tenantId);
+        const entitlement = await this.entitlements.getSummary(tenantId);
         // 1. 数据库查询：必须查出 ingredients 及其嵌套关系，否则无法计算
         // 注意：为了支持递归，这里嵌套了多层 include
         const queryInclude = {
@@ -2102,6 +2102,8 @@ export class RecipesService {
                 referencedByNames: family.referencedByNames,
                 versionCount: family.versionCount,
                 activeVersion: family.activeVersion,
+                freeTierEnabled: family.freeTierEnabled,
+                readOnly: !entitlement.fullAccess && family.type === RecipeType.MAIN && !family.freeTierEnabled,
             };
         });
 
@@ -2255,10 +2257,12 @@ export class RecipesService {
         return groupedByCategory;
     }
 
-    async findOne(familyId: string) {
+    async findOne(tenantId: string, familyId: string) {
+        const entitlement = await this.entitlements.getSummary(tenantId);
         const family = await this.prisma.recipeFamily.findFirst({
             where: {
                 id: familyId,
+                tenantId,
                 deletedAt: null,
             },
             include: {
@@ -2315,7 +2319,13 @@ export class RecipesService {
             }),
         };
 
-        return this._sanitizeFamily(processedFamily as RecipeFamilyWithDetails);
+        const sanitizedFamily = this._sanitizeFamily(processedFamily as RecipeFamilyWithDetails);
+        return sanitizedFamily
+            ? {
+                  ...sanitizedFamily,
+                  readOnly: !entitlement.fullAccess && family.type === RecipeType.MAIN && !family.freeTierEnabled,
+              }
+            : null;
     }
 
     private _processProcedureNotes(procedure: string[] | undefined | null): {
@@ -3230,9 +3240,9 @@ export class RecipesService {
         });
     }
 
-    async remove(familyId: string) {
-        const family = await this.prisma.recipeFamily.findUnique({
-            where: { id: familyId },
+    async remove(tenantId: string, familyId: string) {
+        const family = await this.prisma.recipeFamily.findFirst({
+            where: { id: familyId, tenantId },
             select: { id: true },
         });
 
@@ -3240,11 +3250,18 @@ export class RecipesService {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
-        throw new BadRequestException('配方及历史版本不可物理删除，请使用“停用配方”。');
+        try {
+            await this.prisma.recipeFamily.delete({ where: { id: familyId } });
+            return { success: true };
+        } catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+                throw new BadRequestException('该配方已有生产记录、配方依赖或自制原料关联，请使用“停用配方”');
+            }
+            throw error;
+        }
     }
 
     async discontinue(tenantId: string, familyId: string, actorUserId: string) {
-        await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const family = await this.prisma.recipeFamily.findFirst({
             where: { id: familyId, tenantId },
         });
@@ -3280,8 +3297,6 @@ export class RecipesService {
         if (family.deletedAt === null) {
             throw new BadRequestException('该配方未被弃用，无需恢复。');
         }
-
-        await this.entitlements.assertCanCreateRecipe(tenantId, family.type);
 
         return this.prisma.$transaction(async (tx) => {
             const updated = await tx.recipeFamily.update({

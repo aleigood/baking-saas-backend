@@ -5,7 +5,6 @@ import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { BillingService } from './billing.service';
 import { CreatePaymentOrderDto } from './dto/billing.dto';
-import { SelectFreeRecipesDto } from './dto/free-tier.dto';
 import { EntitlementsService } from './entitlements.service';
 
 @Controller('billing')
@@ -43,9 +42,9 @@ export class BillingController {
     }
 
     @UseGuards(AuthGuard('jwt'))
-    @Post('free-tier/recipes')
-    selectFreeRecipes(@GetUser() user: UserPayload, @Body() dto: SelectFreeRecipesDto) {
-        return this.entitlementsService.selectFreeRecipes(user.tenantId, user.sub, user.tenantRole, dto.recipeIds);
+    @Post('free-tier/recipes/:recipeId/unrestrict')
+    unrestrictFreeRecipe(@GetUser() user: UserPayload, @Param('recipeId') recipeId: string) {
+        return this.entitlementsService.unrestrictFreeRecipe(user.tenantId, user.tenantRole, recipeId);
     }
 
     @UseGuards(AuthGuard('jwt'))

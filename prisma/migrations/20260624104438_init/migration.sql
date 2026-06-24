@@ -75,6 +75,7 @@ CREATE TABLE "Tenant" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "trialStartedAt" TIMESTAMP(3),
     "trialEndsAt" TIMESTAMP(3),
+    "freeTierResetAt" TIMESTAMP(3),
     "trialEntitlementPolicyId" TEXT,
 
     CONSTRAINT "Tenant_pkey" PRIMARY KEY ("id")

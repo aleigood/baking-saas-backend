@@ -169,6 +169,7 @@ model Tenant {
   updatedAt           DateTime             @updatedAt
   trialStartedAt      DateTime?
   trialEndsAt         DateTime?
+  freeTierResetAt     DateTime?
   trialEntitlementPolicyId String?
   members             TenantUser[]
   invitations         Invitation[]
