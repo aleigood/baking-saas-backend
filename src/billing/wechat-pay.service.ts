@@ -1,11 +1,36 @@
 import { BadGatewayException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { createDecipheriv, createSign, createVerify, randomBytes } from 'crypto';
 
-interface WechatNotificationResource {
+export interface WechatNotificationResource {
     algorithm: string;
     ciphertext: string;
     associated_data?: string;
     nonce: string;
+}
+
+export interface WechatTransaction {
+    out_trade_no: string;
+    transaction_id?: string;
+    trade_state: string;
+    trade_state_desc?: string;
+    success_time?: string;
+    amount?: { total: number; payer_total?: number; currency?: string };
+}
+
+export interface WechatRefundResponse {
+    refund_id: string;
+    status: string;
+}
+
+export interface WechatRefundNotification {
+    out_refund_no: string;
+    refund_id: string;
+    refund_status: string;
+    success_time?: string;
+}
+
+export interface WechatNotificationEnvelope {
+    resource: WechatNotificationResource;
 }
 
 @Injectable()
@@ -59,7 +84,9 @@ export class WechatPayService {
             body: body || undefined,
         });
         const text = await response.text();
-        const data: T & { message?: string } = text ? (JSON.parse(text) as T & { message?: string }) : ({} as T & { message?: string });
+        const data: T & { message?: string } = text
+            ? (JSON.parse(text) as T & { message?: string })
+            : ({} as T & { message?: string });
         if (!response.ok) {
             throw new BadGatewayException(data.message || `微信支付接口调用失败 (${response.status})`);
         }
@@ -92,19 +119,29 @@ export class WechatPayService {
         };
     }
 
-    queryOrder(orderNo: string) {
+    queryOrder(orderNo: string): Promise<WechatTransaction> {
         if (this.isMockMode()) {
-            return Promise.resolve({ out_trade_no: orderNo, trade_state: 'NOTPAY', trade_state_desc: '模拟订单未自动支付' });
+            return Promise.resolve({
+                out_trade_no: orderNo,
+                trade_state: 'NOTPAY',
+                trade_state_desc: '模拟订单未自动支付',
+            });
         }
         const path = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderNo)}?mchid=${encodeURIComponent(this.required('WECHAT_PAY_MCH_ID'))}`;
-        return this.request<any>('GET', path);
+        return this.request<WechatTransaction>('GET', path);
     }
 
-    createRefund(input: { orderNo: string; refundNo: string; refundAmount: number; totalAmount: number; reason?: string }) {
+    createRefund(input: {
+        orderNo: string;
+        refundNo: string;
+        refundAmount: number;
+        totalAmount: number;
+        reason?: string;
+    }): Promise<WechatRefundResponse> {
         if (this.isMockMode()) {
             return Promise.resolve({ refund_id: `MOCK_REFUND_${input.refundNo}`, status: 'SUCCESS' });
         }
-        return this.request<any>('POST', '/v3/refund/domestic/refunds', {
+        return this.request<WechatRefundResponse>('POST', '/v3/refund/domestic/refunds', {
             out_trade_no: input.orderNo,
             out_refund_no: input.refundNo,
             reason: input.reason,
@@ -126,7 +163,11 @@ export class WechatPayService {
         const encrypted = Buffer.from(resource.ciphertext, 'base64');
         const authTag = encrypted.subarray(encrypted.length - 16);
         const ciphertext = encrypted.subarray(0, encrypted.length - 16);
-        const decipher = createDecipheriv('aes-256-gcm', Buffer.from(this.required('WECHAT_PAY_API_V3_KEY')), Buffer.from(resource.nonce));
+        const decipher = createDecipheriv(
+            'aes-256-gcm',
+            Buffer.from(this.required('WECHAT_PAY_API_V3_KEY')),
+            Buffer.from(resource.nonce),
+        );
         decipher.setAuthTag(authTag);
         decipher.setAAD(Buffer.from(resource.associated_data || ''));
         return JSON.parse(Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8')) as T;

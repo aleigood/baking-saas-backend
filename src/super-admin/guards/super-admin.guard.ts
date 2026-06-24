@@ -1,7 +1,7 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { UserPayload } from '../../auth/interfaces/user-payload.interface';
-import { Role } from '@prisma/client';
+import { GlobalRole } from '@prisma/client';
 import { Request } from 'express';
 
 @Injectable()
@@ -11,6 +11,6 @@ export class SuperAdminGuard implements CanActivate {
         const request = context.switchToHttp().getRequest<Request>();
         const user = request.user as UserPayload;
         // 修复：使用 globalRole 进行判断，并确保 user 对象存在
-        return !!user && user.globalRole === Role.SUPER_ADMIN;
+        return !!user && user.globalRole === GlobalRole.SUPER_ADMIN;
     }
 }

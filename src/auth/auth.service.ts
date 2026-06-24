@@ -12,7 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthDto, RegisterDto, WechatLoginDto, LoginResponseDto } from './dto/auth.dto'; // [核心修正] 更新导入
 import * as bcrypt from 'bcrypt';
-import { Role, TenantStatus } from '@prisma/client'; // [核心新增] 导入 TenantStatus
+import { GlobalRole, TenantRole, TenantStatus } from '@prisma/client';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 // [核心删除] 不再需要单独导入 LoginResponseDto
 
@@ -26,13 +26,13 @@ export class AuthService {
     private generateJwtToken(
         userId: string,
         tenantId: string,
-        roleInTenant: Role,
-        globalRole?: Role,
+        tenantRole: TenantRole,
+        globalRole: GlobalRole,
     ): { accessToken: string } {
         const payload: JwtPayload = {
             sub: userId,
             tenantId,
-            role: roleInTenant,
+            tenantRole,
             globalRole,
         };
         return {
@@ -60,7 +60,7 @@ export class AuthService {
             },
         });
         return {
-            ...this.generateJwtToken(user.id, '', Role.MEMBER, user.role),
+            ...this.generateJwtToken(user.id, '', TenantRole.MEMBER, user.globalRole),
             redirectTo: '/pages/onboarding/store-access',
         };
     }
@@ -83,15 +83,15 @@ export class AuthService {
             throw new UnauthorizedException('手机号或密码错误');
         }
 
-        if (user.role === Role.SUPER_ADMIN) {
-            const token = this.generateJwtToken(user.id, '', user.role, user.role);
+        if (user.globalRole === GlobalRole.SUPER_ADMIN) {
+            const token = this.generateJwtToken(user.id, '', TenantRole.MEMBER, user.globalRole);
             return { accessToken: token.accessToken };
         }
 
         const firstTenantUser = user.tenants[0];
         if (!firstTenantUser) {
             return {
-                ...this.generateJwtToken(user.id, '', Role.MEMBER, user.role),
+                ...this.generateJwtToken(user.id, '', TenantRole.MEMBER, user.globalRole),
                 redirectTo: '/pages/onboarding/store-access',
             };
         }
@@ -101,10 +101,10 @@ export class AuthService {
             throw new UnauthorizedException('您所在的店铺已被停用，无法登录。');
         }
 
-        const token = this.generateJwtToken(user.id, firstTenantUser.tenantId, firstTenantUser.role, user.role);
+        const token = this.generateJwtToken(user.id, firstTenantUser.tenantId, firstTenantUser.role, user.globalRole);
 
         // [核心修正] 如果用户在店铺中的角色是普通成员（即面包师），则添加重定向路径
-        if (firstTenantUser.role === Role.MEMBER) {
+        if (firstTenantUser.role === TenantRole.MEMBER) {
             return {
                 accessToken: token.accessToken,
                 redirectTo: '/pages/baker/main',
@@ -139,7 +139,7 @@ export class AuthService {
             throw new UnauthorizedException('目标店铺已被停用，无法切换。');
         }
 
-        return this.generateJwtToken(userId, tenantId, tenantUser.role, tenantUser.user.role);
+        return this.generateJwtToken(userId, tenantId, tenantUser.role, tenantUser.user.globalRole);
     }
 
     async getProfile(userId: string) {
@@ -152,7 +152,7 @@ export class AuthService {
                 avatarUrl: true, // [核心新增] 查询头像
                 wechatOpenId: true,
                 wechatUnionId: true,
-                role: true,
+                globalRole: true,
                 status: true,
                 createdAt: true,
                 tenants: {

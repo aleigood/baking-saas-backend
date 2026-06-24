@@ -2,12 +2,13 @@ import { Global, Module } from '@nestjs/common';
 import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
 import { WechatPayService } from './wechat-pay.service';
-import { SubscriptionGuard } from './subscription.guard';
+import { EntitlementsService } from './entitlements.service';
+import { FeatureGuard } from './feature.guard';
 
 @Global()
 @Module({
     controllers: [BillingController],
-    providers: [BillingService, WechatPayService, SubscriptionGuard],
-    exports: [BillingService, SubscriptionGuard],
+    providers: [BillingService, WechatPayService, EntitlementsService, FeatureGuard],
+    exports: [BillingService, EntitlementsService, FeatureGuard],
 })
 export class BillingModule {}

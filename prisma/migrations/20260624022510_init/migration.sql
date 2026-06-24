@@ -2,7 +2,10 @@
 CREATE TYPE "RecipeCategory" AS ENUM ('BREAD', 'PASTRY', 'DESSERT', 'DRINK', 'OTHER');
 
 -- CreateEnum
-CREATE TYPE "Role" AS ENUM ('OWNER', 'ADMIN', 'MEMBER', 'SUPER_ADMIN');
+CREATE TYPE "GlobalRole" AS ENUM ('USER', 'SUPER_ADMIN');
+
+-- CreateEnum
+CREATE TYPE "TenantRole" AS ENUM ('OWNER', 'ADMIN', 'MEMBER');
 
 -- CreateEnum
 CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'PENDING');
@@ -35,6 +38,12 @@ CREATE TYPE "TaskItemRole" AS ENUM ('FINAL_PRODUCT', 'PREP_INGREDIENT');
 CREATE TYPE "SubscriptionStatus" AS ENUM ('ACTIVE', 'EXPIRED', 'CANCELED');
 
 -- CreateEnum
+CREATE TYPE "EntitlementTier" AS ENUM ('FREE', 'PRO');
+
+-- CreateEnum
+CREATE TYPE "EntitlementPolicyStatus" AS ENUM ('DRAFT', 'PUBLISHED', 'RETIRED');
+
+-- CreateEnum
 CREATE TYPE "PaymentOrderStatus" AS ENUM ('PENDING', 'PAID', 'CLOSED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'FAILED');
 
 -- CreateEnum
@@ -49,7 +58,7 @@ CREATE TABLE "User" (
     "password" TEXT,
     "wechatOpenId" TEXT,
     "wechatUnionId" TEXT,
-    "role" "Role" NOT NULL DEFAULT 'MEMBER',
+    "globalRole" "GlobalRole" NOT NULL DEFAULT 'USER',
     "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -64,6 +73,9 @@ CREATE TABLE "Tenant" (
     "status" "TenantStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "trialStartedAt" TIMESTAMP(3),
+    "trialEndsAt" TIMESTAMP(3),
+    "trialEntitlementPolicyId" TEXT,
 
     CONSTRAINT "Tenant_pkey" PRIMARY KEY ("id")
 );
@@ -72,7 +84,7 @@ CREATE TABLE "Tenant" (
 CREATE TABLE "TenantUser" (
     "userId" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
-    "role" "Role" NOT NULL DEFAULT 'MEMBER',
+    "role" "TenantRole" NOT NULL DEFAULT 'MEMBER',
     "status" "UserStatus" NOT NULL DEFAULT 'PENDING',
 
     CONSTRAINT "TenantUser_pkey" PRIMARY KEY ("userId","tenantId")
@@ -83,7 +95,7 @@ CREATE TABLE "Invitation" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
-    "role" "Role" NOT NULL,
+    "role" "TenantRole" NOT NULL,
     "status" "InvitationStatus" NOT NULL DEFAULT 'PENDING',
     "expiresAt" TIMESTAMP(3) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -102,6 +114,7 @@ CREATE TABLE "SubscriptionPlan" (
     "originalPriceInCents" INTEGER,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "tier" "EntitlementTier" NOT NULL DEFAULT 'PRO',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -109,10 +122,38 @@ CREATE TABLE "SubscriptionPlan" (
 );
 
 -- CreateTable
+CREATE TABLE "EntitlementPolicy" (
+    "id" TEXT NOT NULL,
+    "tier" "EntitlementTier" NOT NULL,
+    "version" INTEGER NOT NULL,
+    "name" TEXT NOT NULL,
+    "status" "EntitlementPolicyStatus" NOT NULL DEFAULT 'DRAFT',
+    "isDefault" BOOLEAN NOT NULL DEFAULT false,
+    "config" JSONB NOT NULL,
+    "publishedAt" TIMESTAMP(3),
+    "retiredAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "EntitlementPolicy_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "BillingSettings" (
+    "id" TEXT NOT NULL DEFAULT 'default',
+    "trialDays" INTEGER NOT NULL DEFAULT 14,
+    "graceDays" INTEGER NOT NULL DEFAULT 7,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "BillingSettings_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "TenantSubscription" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
     "planId" TEXT NOT NULL,
+    "entitlementPolicyId" TEXT NOT NULL,
     "status" "SubscriptionStatus" NOT NULL DEFAULT 'ACTIVE',
     "startsAt" TIMESTAMP(3) NOT NULL,
     "expiresAt" TIMESTAMP(3) NOT NULL,
@@ -131,6 +172,7 @@ CREATE TABLE "PaymentOrder" (
     "tenantId" TEXT NOT NULL,
     "userId" TEXT,
     "planId" TEXT NOT NULL,
+    "entitlementPolicyId" TEXT NOT NULL,
     "subscriptionId" TEXT,
     "amountInCents" INTEGER NOT NULL,
     "status" "PaymentOrderStatus" NOT NULL DEFAULT 'PENDING',
@@ -194,6 +236,7 @@ CREATE TABLE "RecipeFamily" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
+    "freeTierEnabled" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "RecipeFamily_pkey" PRIMARY KEY ("id")
 );
@@ -425,6 +468,12 @@ CREATE UNIQUE INDEX "SubscriptionPlan_code_key" ON "SubscriptionPlan"("code");
 CREATE INDEX "SubscriptionPlan_isActive_sortOrder_idx" ON "SubscriptionPlan"("isActive", "sortOrder");
 
 -- CreateIndex
+CREATE INDEX "EntitlementPolicy_tier_status_isDefault_idx" ON "EntitlementPolicy"("tier", "status", "isDefault");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "EntitlementPolicy_tier_version_key" ON "EntitlementPolicy"("tier", "version");
+
+-- CreateIndex
 CREATE INDEX "TenantSubscription_tenantId_status_idx" ON "TenantSubscription"("tenantId", "status");
 
 -- CreateIndex
@@ -459,6 +508,9 @@ CREATE INDEX "AuditLog_action_createdAt_idx" ON "AuditLog"("action", "createdAt"
 
 -- CreateIndex
 CREATE INDEX "RecipeFamily_tenantId_idx" ON "RecipeFamily"("tenantId");
+
+-- CreateIndex
+CREATE INDEX "RecipeFamily_tenantId_type_freeTierEnabled_idx" ON "RecipeFamily"("tenantId", "type", "freeTierEnabled");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "RecipeFamily_tenantId_name_deletedAt_key" ON "RecipeFamily"("tenantId", "name", "deletedAt");
@@ -575,6 +627,9 @@ CREATE INDEX "IngredientConsumptionLog_ingredientId_idx" ON "IngredientConsumpti
 CREATE INDEX "IngredientConsumptionLog_skuId_idx" ON "IngredientConsumptionLog"("skuId");
 
 -- AddForeignKey
+ALTER TABLE "Tenant" ADD CONSTRAINT "Tenant_trialEntitlementPolicyId_fkey" FOREIGN KEY ("trialEntitlementPolicyId") REFERENCES "EntitlementPolicy"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "TenantUser" ADD CONSTRAINT "TenantUser_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -590,6 +645,9 @@ ALTER TABLE "TenantSubscription" ADD CONSTRAINT "TenantSubscription_tenantId_fke
 ALTER TABLE "TenantSubscription" ADD CONSTRAINT "TenantSubscription_planId_fkey" FOREIGN KEY ("planId") REFERENCES "SubscriptionPlan"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "TenantSubscription" ADD CONSTRAINT "TenantSubscription_entitlementPolicyId_fkey" FOREIGN KEY ("entitlementPolicyId") REFERENCES "EntitlementPolicy"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "PaymentOrder" ADD CONSTRAINT "PaymentOrder_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -597,6 +655,9 @@ ALTER TABLE "PaymentOrder" ADD CONSTRAINT "PaymentOrder_userId_fkey" FOREIGN KEY
 
 -- AddForeignKey
 ALTER TABLE "PaymentOrder" ADD CONSTRAINT "PaymentOrder_planId_fkey" FOREIGN KEY ("planId") REFERENCES "SubscriptionPlan"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PaymentOrder" ADD CONSTRAINT "PaymentOrder_entitlementPolicyId_fkey" FOREIGN KEY ("entitlementPolicyId") REFERENCES "EntitlementPolicy"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PaymentOrder" ADD CONSTRAINT "PaymentOrder_subscriptionId_fkey" FOREIGN KEY ("subscriptionId") REFERENCES "TenantSubscription"("id") ON DELETE SET NULL ON UPDATE CASCADE;

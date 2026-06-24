@@ -4,7 +4,7 @@ import { Strategy, ExtractJwt } from 'passport-jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { UserPayload } from './interfaces/user-payload.interface';
-import { Role, TenantStatus } from '@prisma/client'; // [核心新增] 导入 TenantStatus
+import { GlobalRole, TenantStatus, UserStatus } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -22,34 +22,41 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     async validate(payload: JwtPayload & { iat: number; exp: number }): Promise<UserPayload> {
+        if (!payload.tenantRole || !payload.globalRole) {
+            throw new UnauthorizedException('登录凭证版本已更新，请重新登录');
+        }
+
         const user = await this.prisma.user.findUnique({
             where: { id: payload.sub },
+            select: { globalRole: true, status: true },
         });
 
-        if (!user) {
+        if (!user || user.status !== UserStatus.ACTIVE) {
             throw new UnauthorizedException('用户不存在或令牌无效');
         }
 
-        // [核心新增] 增加对店铺状态的校验
-        // 超级管理员不受店铺状态限制
-        if (payload.globalRole !== Role.SUPER_ADMIN && payload.tenantId) {
-            const tenant = await this.prisma.tenant.findUnique({
-                where: { id: payload.tenantId },
-                select: { status: true },
+        let tenantRole = payload.tenantRole;
+        if (user.globalRole !== GlobalRole.SUPER_ADMIN && payload.tenantId) {
+            const membership = await this.prisma.tenantUser.findUnique({
+                where: { userId_tenantId: { userId: payload.sub, tenantId: payload.tenantId } },
+                select: { role: true, status: true, tenant: { select: { status: true } } },
             });
 
-            // 如果店铺不存在或已被停用，则拒绝访问
-            if (!tenant || tenant.status === TenantStatus.INACTIVE) {
-                throw new UnauthorizedException('该店铺已被停用，无法进行操作。');
+            if (!membership || membership.status !== UserStatus.ACTIVE) {
+                throw new UnauthorizedException('您已不属于当前店铺，请重新登录');
             }
+            if (membership.tenant.status === TenantStatus.INACTIVE) {
+                throw new UnauthorizedException('该店铺已被停用，无法进行操作');
+            }
+            tenantRole = membership.role;
         }
 
         // 返回的用户信息将附加到 Express 的 request.user 对象上
         return {
             sub: payload.sub,
             tenantId: payload.tenantId,
-            role: payload.role,
-            globalRole: payload.globalRole,
+            tenantRole,
+            globalRole: user.globalRole,
             iat: payload.iat,
             exp: payload.exp,
         };

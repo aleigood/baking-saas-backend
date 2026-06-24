@@ -1,10 +1,10 @@
 import { IsEnum, IsOptional } from 'class-validator';
-import { Role, UserStatus } from '@prisma/client';
+import { TenantRole, UserStatus } from '@prisma/client';
 
 export class UpdateMemberDto {
-    @IsEnum(Role)
+    @IsEnum(TenantRole)
     @IsOptional()
-    role?: Role;
+    role?: TenantRole;
 
     @IsEnum(UserStatus)
     @IsOptional()

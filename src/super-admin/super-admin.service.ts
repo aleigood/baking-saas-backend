@@ -3,7 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { PaymentOrderStatus, Prisma, Role, SubscriptionStatus } from '@prisma/client';
+import {
+    EntitlementTier,
+    GlobalRole,
+    PaymentOrderStatus,
+    Prisma,
+    SubscriptionStatus,
+    TenantRole,
+} from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { QueryDto } from './dto/query.dto';
 // [G-Code-Note] [核心修改] 导入批量导入 DTO
@@ -16,12 +23,14 @@ import { UpdateTenantStatusDto } from './dto/update-tenant-status.dto';
 import { UpsertSubscriptionPlanDto } from './dto/upsert-subscription-plan.dto';
 import { CreateTenantSubscriptionDto } from './dto/create-tenant-subscription.dto';
 import { UpdateTenantSubscriptionDto } from './dto/update-tenant-subscription.dto';
+import { EntitlementsService } from '../billing/entitlements.service';
 
 @Injectable()
 export class SuperAdminService {
     constructor(
         private prisma: PrismaService,
         private recipesService: RecipesService,
+        private entitlementsService: EntitlementsService,
     ) {}
 
     // --- Dashboard ---
@@ -30,7 +39,7 @@ export class SuperAdminService {
             await Promise.all([
                 this.prisma.tenant.count(),
                 this.prisma.user.count({
-                    where: { role: { not: Role.SUPER_ADMIN } },
+                    where: { globalRole: { not: GlobalRole.SUPER_ADMIN } },
                 }),
                 this.prisma.recipeFamily.count({
                     where: { deletedAt: null },
@@ -118,7 +127,7 @@ export class SuperAdminService {
                     tenant: {
                         include: {
                             members: {
-                                where: { role: Role.OWNER },
+                                where: { role: TenantRole.OWNER },
                                 include: {
                                     user: {
                                         select: {
@@ -152,9 +161,10 @@ export class SuperAdminService {
     }
 
     async createTenantSubscription(dto: CreateTenantSubscriptionDto) {
-        const [tenant, plan] = await Promise.all([
+        const [tenant, plan, entitlementPolicy] = await Promise.all([
             this.prisma.tenant.findUnique({ where: { id: dto.tenantId } }),
             this.prisma.subscriptionPlan.findUnique({ where: { id: dto.planId } }),
+            this.entitlementsService.getDefaultPolicyForTier(EntitlementTier.PRO),
         ]);
 
         if (!tenant) {
@@ -171,6 +181,7 @@ export class SuperAdminService {
             data: {
                 tenantId: tenant.id,
                 planId: plan.id,
+                entitlementPolicyId: entitlementPolicy.id,
                 status: SubscriptionStatus.ACTIVE,
                 startsAt,
                 expiresAt,
@@ -319,19 +330,24 @@ export class SuperAdminService {
         const total = await this.prisma.tenant.count({ where });
 
         // 在返回的数据中加入配方数量
-        const data = tenants.map((tenant) => {
-            const ownerInfo = tenant.members[0]?.user;
-            return {
-                id: tenant.id,
-                name: tenant.name,
-                status: tenant.status,
-                recipeCount: tenant._count.recipeFamilies,
-                createdAt: tenant.createdAt,
-                updatedAt: tenant.updatedAt,
-                ownerName: ownerInfo?.phone || 'N/A',
-                ownerId: ownerInfo?.id,
-            };
-        });
+        const data = await Promise.all(
+            tenants.map(async (tenant) => {
+                const ownerInfo = tenant.members[0]?.user;
+                const entitlement = await this.entitlementsService.getSummary(tenant.id);
+                return {
+                    id: tenant.id,
+                    name: tenant.name,
+                    status: tenant.status,
+                    recipeCount: tenant._count.recipeFamilies,
+                    createdAt: tenant.createdAt,
+                    updatedAt: tenant.updatedAt,
+                    ownerName: ownerInfo?.phone || 'N/A',
+                    ownerId: ownerInfo?.id,
+                    subscriptionState: entitlement.state,
+                    entitledUntil: entitlement.entitledUntil,
+                };
+            }),
+        );
 
         return {
             data,
@@ -358,7 +374,7 @@ export class SuperAdminService {
                 members: {
                     create: {
                         userId: ownerId,
-                        role: Role.OWNER,
+                        role: TenantRole.OWNER,
                         status: 'ACTIVE',
                     },
                 },
@@ -412,7 +428,7 @@ export class SuperAdminService {
             id: user.id,
             name: user.name, // [新增] 返回用户姓名
             phone: user.phone,
-            role: user.role,
+            globalRole: user.globalRole,
             status: user.status,
             createdAt: user.createdAt,
             updatedAt: user.updatedAt,
@@ -452,7 +468,7 @@ export class SuperAdminService {
         const data: Prisma.UserUpdateInput = {};
         if (dto.name) data.name = dto.name; // [修改] 允许更新 name
         // [修改] 移除 phone 的更新逻辑
-        if (dto.role) data.role = dto.role;
+        if (dto.globalRole) data.globalRole = dto.globalRole;
         if (dto.status) data.status = dto.status;
         if (dto.password) {
             data.password = await bcrypt.hash(dto.password, 10);
@@ -486,7 +502,7 @@ export class SuperAdminService {
         const tenantOwner = await this.prisma.tenantUser.findFirst({
             where: {
                 tenantId: tenantId,
-                role: Role.OWNER,
+                role: TenantRole.OWNER,
             },
             select: {
                 userId: true,

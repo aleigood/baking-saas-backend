@@ -25,7 +25,7 @@ export class UsersService {
                 phone: true,
                 name: true,
                 avatarUrl: true,
-                role: true,
+                globalRole: true,
                 status: true,
                 createdAt: true,
             },

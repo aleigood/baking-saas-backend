@@ -1,11 +1,10 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { AuthGuard } from '@nestjs/passport';
-import { SubscriptionGuard } from '../billing/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 
-@UseGuards(AuthGuard('jwt'), SubscriptionGuard)
+@UseGuards(AuthGuard('jwt'))
 @Controller('dashboard')
 export class DashboardController {
     constructor(private readonly dashboardService: DashboardService) {}

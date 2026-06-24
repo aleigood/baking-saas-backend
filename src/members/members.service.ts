@@ -8,14 +8,18 @@ import {
     ConflictException,
 } from '@nestjs/common';
 import { PrismaService as PrismaServiceMembers } from '../prisma/prisma.service';
-import { InvitationStatus, Role as RoleMembers } from '@prisma/client';
+import { InvitationStatus, TenantRole } from '@prisma/client';
 import { UpdateMemberDto as UpdateMemberDtoMembers } from './dto/update-member.dto';
 import { UserPayload as UserPayloadMembers } from 'src/auth/interfaces/user-payload.interface';
 import { CreateMemberDto } from './dto/create-member.dto'; // [核心新增] 导入CreateMemberDto
+import { EntitlementsService } from '../billing/entitlements.service';
 
 @InjectableMembers()
 export class MembersService {
-    constructor(private prisma: PrismaServiceMembers) {}
+    constructor(
+        private prisma: PrismaServiceMembers,
+        private readonly entitlements: EntitlementsService,
+    ) {}
 
     /**
      * [核心新增] 在指定店铺中创建一个新成员
@@ -24,22 +28,24 @@ export class MembersService {
      * @param currentUser 当前操作用户
      */
     async create(tenantId: string, dto: CreateMemberDto, currentUser: UserPayloadMembers) {
-        if (currentUser.role === RoleMembers.MEMBER) {
+        if (currentUser.tenantRole === TenantRole.MEMBER) {
             throw new ForbiddenExceptionMembers('您没有权限创建新成员。');
         }
 
         // [核心新增] 权限校验：管理员不能创建管理员或所有者
         if (
-            currentUser.role === RoleMembers.ADMIN &&
-            (dto.role === RoleMembers.ADMIN || dto.role === RoleMembers.OWNER)
+            currentUser.tenantRole === TenantRole.ADMIN &&
+            (dto.role === TenantRole.ADMIN || dto.role === TenantRole.OWNER)
         ) {
             throw new ForbiddenExceptionMembers('管理员只能创建普通员工。');
         }
 
         // [核心新增] 权限校验：所有者不能直接创建另一个所有者
-        if (dto.role === RoleMembers.OWNER) {
+        if (dto.role === TenantRole.OWNER) {
             throw new ForbiddenExceptionMembers('不能直接创建所有者角色。');
         }
+
+        await this.entitlements.assertCanInviteMember(tenantId);
 
         const existingUser = await this.prisma.user.findUnique({ where: { phone: dto.phone }, select: { id: true } });
         if (existingUser) {
@@ -67,7 +73,7 @@ export class MembersService {
         const ownerTenants = await this.prisma.tenantUser.findMany({
             where: {
                 userId: ownerId,
-                role: RoleMembers.OWNER,
+                role: TenantRole.OWNER,
             },
             select: {
                 tenantId: true,
@@ -128,7 +134,7 @@ export class MembersService {
      */
     getTargetTenantIdForOwner(currentUser: UserPayloadMembers, requestedTenantId?: string): string {
         // 如果用户是所有者并且提供了一个租户ID，则使用该ID
-        if (currentUser.role === RoleMembers.OWNER && requestedTenantId) {
+        if (currentUser.tenantRole === TenantRole.OWNER && requestedTenantId) {
             // 在生产环境中，这里应该增加一步校验：
             // 确认 requestedTenantId 确实是该 currentUser 拥有的店铺之一
             return requestedTenantId;
@@ -191,11 +197,11 @@ export class MembersService {
             throw new NotFoundExceptionMembers('该成员不存在');
         }
 
-        if (currentUser.role === RoleMembers.MEMBER) {
+        if (currentUser.tenantRole === TenantRole.MEMBER) {
             throw new ForbiddenExceptionMembers('您没有权限修改成员信息。');
         }
-        if (currentUser.role === RoleMembers.ADMIN) {
-            if (memberToUpdate.role === RoleMembers.ADMIN || memberToUpdate.role === RoleMembers.OWNER) {
+        if (currentUser.tenantRole === TenantRole.ADMIN) {
+            if (memberToUpdate.role === TenantRole.ADMIN || memberToUpdate.role === TenantRole.OWNER) {
                 throw new ForbiddenExceptionMembers('管理员不能修改其他管理员或所有者。');
             }
         }
@@ -221,13 +227,13 @@ export class MembersService {
             throw new NotFoundExceptionMembers('该成员不存在');
         }
 
-        if (memberToRemove.role === RoleMembers.OWNER) {
+        if (memberToRemove.role === TenantRole.OWNER) {
             throw new ForbiddenExceptionMembers('不能移除店铺所有者。');
         }
 
         if (
-            currentUser.role === RoleMembers.MEMBER ||
-            (currentUser.role === RoleMembers.ADMIN && memberToRemove.role === RoleMembers.ADMIN)
+            currentUser.tenantRole === TenantRole.MEMBER ||
+            (currentUser.tenantRole === TenantRole.ADMIN && memberToRemove.role === TenantRole.ADMIN)
         ) {
             throw new ForbiddenExceptionMembers('您没有权限移除该成员。');
         }

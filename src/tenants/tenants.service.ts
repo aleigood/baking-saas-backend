@@ -1,7 +1,7 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantDataDto } from './dto/tenant-data.dto';
-import { Role } from '@prisma/client';
+import { TenantRole } from '@prisma/client';
 
 @Injectable()
 export class TenantsService {
@@ -64,7 +64,7 @@ export class TenantsService {
             },
         });
 
-        if (!tenantUser || tenantUser.role !== Role.OWNER) {
+        if (!tenantUser || tenantUser.role !== TenantRole.OWNER) {
             throw new ForbiddenException('只有店铺所有者才能修改店铺信息。');
         }
 

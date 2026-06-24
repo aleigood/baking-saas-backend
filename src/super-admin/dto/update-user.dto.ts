@@ -1,5 +1,5 @@
 import { IsEnum, IsOptional, IsString as IsStringForUpdate } from 'class-validator';
-import { Role, UserStatus } from '@prisma/client';
+import { GlobalRole, UserStatus } from '@prisma/client';
 
 export class UpdateUserDto {
     @IsStringForUpdate()
@@ -14,9 +14,9 @@ export class UpdateUserDto {
     @IsOptional()
     password?: string;
 
-    @IsEnum(Role)
+    @IsEnum(GlobalRole)
     @IsOptional()
-    role?: Role;
+    globalRole?: GlobalRole;
 
     @IsEnum(UserStatus)
     @IsOptional()

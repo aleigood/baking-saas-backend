@@ -19,6 +19,8 @@ import { BillingService } from '../billing/billing.service';
 import { CreateRefundDto } from '../billing/dto/billing.dto';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
+import { UpdateBillingSettingsDto, UpsertEntitlementPolicyDto } from './dto/entitlement-policy.dto';
+import { EntitlementsService } from '../billing/entitlements.service';
 
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
 @Controller('super-admin')
@@ -26,6 +28,7 @@ export class SuperAdminController {
     constructor(
         private readonly superAdminService: SuperAdminService,
         private readonly billingService: BillingService,
+        private readonly entitlementsService: EntitlementsService,
     ) {}
 
     @Get('dashboard-stats')
@@ -47,6 +50,49 @@ export class SuperAdminController {
     @Patch('subscription-plans/:id')
     updateSubscriptionPlan(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpsertSubscriptionPlanDto) {
         return this.superAdminService.updateSubscriptionPlan(id, dto);
+    }
+
+    @Get('entitlement-policies')
+    findEntitlementPolicies() {
+        return this.entitlementsService.listPolicies();
+    }
+
+    @Get('billing-settings')
+    getBillingSettings() {
+        return this.entitlementsService.getBillingSettings();
+    }
+
+    @Patch('billing-settings')
+    updateBillingSettings(@Body() dto: UpdateBillingSettingsDto) {
+        return this.entitlementsService.updateBillingSettings(dto.trialDays, dto.graceDays);
+    }
+
+    @Post('entitlement-policies')
+    createEntitlementPolicy(@Body() dto: UpsertEntitlementPolicyDto) {
+        return this.entitlementsService.createPolicyDraft(dto.tier, dto.name, {
+            limits: dto.limits,
+            features: dto.features,
+        });
+    }
+
+    @Patch('entitlement-policies/:id')
+    updateEntitlementPolicy(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpsertEntitlementPolicyDto) {
+        return this.entitlementsService.updatePolicyDraft(id, dto.name, { limits: dto.limits, features: dto.features });
+    }
+
+    @Post('entitlement-policies/:id/clone')
+    cloneEntitlementPolicy(@Param('id', ParseUUIDPipe) id: string) {
+        return this.entitlementsService.clonePolicyDraft(id);
+    }
+
+    @Post('entitlement-policies/:id/publish')
+    publishEntitlementPolicy(@Param('id', ParseUUIDPipe) id: string) {
+        return this.entitlementsService.publishPolicy(id);
+    }
+
+    @Post('entitlement-policies/:id/retire')
+    retireEntitlementPolicy(@Param('id', ParseUUIDPipe) id: string) {
+        return this.entitlementsService.retirePolicy(id);
     }
 
     // --- Subscription endpoints ---

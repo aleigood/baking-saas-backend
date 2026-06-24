@@ -31,6 +31,7 @@ import {
 import { UpdateTaskDetailsDto } from './dto/update-task-details.dto';
 import { BillOfMaterialsResponseDto, BillOfMaterialsItem, PrepTask } from './dto/preparation.dto';
 import { TogglePrepItemDto } from './dto/toggle-prep-item.dto';
+import { EntitlementsService } from '../billing/entitlements.service';
 import { getUtcDayBounds } from '../common/utils/timezone.util';
 import * as path from 'path';
 
@@ -513,6 +514,7 @@ export class ProductionTasksService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly costingService: CostingService,
+        private readonly entitlements: EntitlementsService,
     ) {}
 
     // 辅助函数：批量递归获取所有 RecipeVersion
@@ -981,6 +983,8 @@ export class ProductionTasksService {
         }
 
         const productIds = products.map((p) => p.productId);
+
+        await this.entitlements.assertCanCreateProductionTask(tenantId, productIds);
 
         const existingProducts = await this.prisma.product.findMany({
             where: {

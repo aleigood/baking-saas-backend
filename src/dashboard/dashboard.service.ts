@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
-import { Role } from '@prisma/client';
+import { TenantRole } from '@prisma/client';
 import { AppDashboardDto } from './dto/app-dashboard.dto';
 
 @Injectable()
@@ -10,12 +10,12 @@ export class DashboardService {
 
     async getAppDashboardStats(currentUser: UserPayload): Promise<AppDashboardDto> {
         // 如果是老板角色，执行跨店铺统计
-        if (currentUser.role === Role.OWNER) {
+        if (currentUser.tenantRole === TenantRole.OWNER) {
             // 1. 找出老板拥有的所有店铺ID
             const ownerTenants = await this.prisma.tenantUser.findMany({
                 where: {
                     userId: currentUser.sub,
-                    role: Role.OWNER,
+                    role: TenantRole.OWNER,
                 },
                 select: {
                     tenantId: true,

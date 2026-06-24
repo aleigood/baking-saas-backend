@@ -1,10 +1,10 @@
-import { Role } from '@prisma/client';
+import { GlobalRole, TenantRole } from '@prisma/client';
 
 export interface UserPayload {
     sub: string;
     tenantId: string;
-    role: Role;
-    globalRole?: Role;
+    tenantRole: TenantRole;
+    globalRole: GlobalRole;
     iat: number;
     exp: number;
 }

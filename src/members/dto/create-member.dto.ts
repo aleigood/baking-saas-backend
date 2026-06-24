@@ -1,5 +1,5 @@
 import { IsNotEmpty, IsString, IsEnum } from 'class-validator';
-import { Role } from '@prisma/client';
+import { TenantRole } from '@prisma/client';
 import { Matches } from 'class-validator';
 import { Transform } from 'class-transformer';
 
@@ -10,7 +10,7 @@ export class CreateMemberDto {
     @Matches(/^1\d{10}$/, { message: '请输入正确的11位手机号' })
     phone!: string;
 
-    @IsEnum(Role)
+    @IsEnum(TenantRole)
     @IsNotEmpty()
-    role!: Role; // [核心新增] 新增角色字段
+    role!: TenantRole;
 }

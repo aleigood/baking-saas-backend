@@ -27,11 +27,15 @@ enum RecipeCategory {
   OTHER // 其他
 }
 
-enum Role {
+enum GlobalRole {
+  USER
+  SUPER_ADMIN
+}
+
+enum TenantRole {
   OWNER
   ADMIN
   MEMBER
-  SUPER_ADMIN
 }
 
 enum UserStatus {
@@ -100,6 +104,17 @@ enum SubscriptionStatus {
   CANCELED
 }
 
+enum EntitlementTier {
+  FREE
+  PRO
+}
+
+enum EntitlementPolicyStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
 enum PaymentOrderStatus {
   PENDING
   PAID
@@ -131,7 +146,7 @@ model User {
   password              String?
   wechatOpenId          String?              @unique
   wechatUnionId         String?              @unique
-  role                  Role                 @default(MEMBER) // Global role, SUPER_ADMIN is highest
+  globalRole            GlobalRole           @default(USER)
   status                UserStatus           @default(ACTIVE)
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
@@ -152,6 +167,9 @@ model Tenant {
   status              TenantStatus         @default(ACTIVE)
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+  trialStartedAt      DateTime?
+  trialEndsAt         DateTime?
+  trialEntitlementPolicyId String?
   members             TenantUser[]
   invitations         Invitation[]
   ingredients         Ingredient[]
@@ -160,13 +178,14 @@ model Tenant {
   productionTasks     ProductionTask[] // 一个店铺可以有多个生产任务
   subscriptions       TenantSubscription[]
   paymentOrders       PaymentOrder[]
+  trialEntitlementPolicy EntitlementPolicy? @relation("TenantTrialPolicy", fields: [trialEntitlementPolicyId], references: [id])
 }
 
 // 用户与租户的多对多关系表
 model TenantUser {
   userId   String
   tenantId String
-  role     Role       @default(MEMBER) // Role within the tenant
+  role     TenantRole @default(MEMBER)
   status   UserStatus @default(PENDING) // Status within the tenant
   user     User       @relation(fields: [userId], references: [id])
   tenant   Tenant     @relation(fields: [tenantId], references: [id])
@@ -180,7 +199,7 @@ model Invitation {
   tenantId  String
   tenant    Tenant           @relation(fields: [tenantId], references: [id])
   phone     String
-  role      Role
+  role      TenantRole
   status    InvitationStatus @default(PENDING)
   expiresAt DateTime
   createdAt DateTime         @default(now())
@@ -202,6 +221,7 @@ model SubscriptionPlan {
   originalPriceInCents Int?
   isActive             Boolean              @default(true)
   sortOrder            Int                  @default(0)
+  tier                 EntitlementTier      @default(PRO)
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
   subscriptions        TenantSubscription[]
@@ -210,10 +230,38 @@ model SubscriptionPlan {
   @@index([isActive, sortOrder])
 }
 
+model EntitlementPolicy {
+  id            String                  @id @default(uuid())
+  tier          EntitlementTier
+  version       Int
+  name          String
+  status        EntitlementPolicyStatus @default(DRAFT)
+  isDefault     Boolean                 @default(false)
+  config        Json
+  publishedAt   DateTime?
+  retiredAt     DateTime?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  subscriptions TenantSubscription[]
+  paymentOrders PaymentOrder[]
+  trialTenants  Tenant[]                @relation("TenantTrialPolicy")
+
+  @@unique([tier, version])
+  @@index([tier, status, isDefault])
+}
+
+model BillingSettings {
+  id        String   @id @default("default")
+  trialDays Int      @default(14)
+  graceDays Int      @default(7)
+  updatedAt DateTime @updatedAt
+}
+
 model TenantSubscription {
   id        String             @id @default(uuid())
   tenantId  String
   planId    String
+  entitlementPolicyId String
   status    SubscriptionStatus @default(ACTIVE)
   startsAt  DateTime
   expiresAt DateTime
@@ -223,6 +271,7 @@ model TenantSubscription {
   updatedAt DateTime           @updatedAt
   tenant    Tenant             @relation(fields: [tenantId], references: [id])
   plan      SubscriptionPlan   @relation(fields: [planId], references: [id])
+  entitlementPolicy EntitlementPolicy @relation(fields: [entitlementPolicyId], references: [id])
   orders    PaymentOrder[]
 
   @@index([tenantId, status])
@@ -235,6 +284,7 @@ model PaymentOrder {
   tenantId            String
   userId              String?
   planId              String
+  entitlementPolicyId String
   subscriptionId      String?
   amountInCents       Int
   status              PaymentOrderStatus  @default(PENDING)
@@ -252,6 +302,7 @@ model PaymentOrder {
   tenant              Tenant              @relation(fields: [tenantId], references: [id])
   user                User?               @relation(fields: [userId], references: [id])
   plan                SubscriptionPlan    @relation(fields: [planId], references: [id])
+  entitlementPolicy   EntitlementPolicy   @relation(fields: [entitlementPolicyId], references: [id])
   subscription        TenantSubscription? @relation(fields: [subscriptionId], references: [id])
   refunds             PaymentRefund[]
 
@@ -311,6 +362,7 @@ model RecipeFamily {
   createdAt                  DateTime              @default(now())
   updatedAt                  DateTime              @updatedAt
   deletedAt                  DateTime?
+  freeTierEnabled            Boolean               @default(true)
   tenant                     Tenant                @relation(fields: [tenantId], references: [id])
   versions                   RecipeVersion[] // 一个配方族包含多个版本
   operationLogs              RecipeOperationLog[]
@@ -327,6 +379,7 @@ model RecipeFamily {
 
   @@unique([tenantId, name, deletedAt])
   @@index([tenantId])
+  @@index([tenantId, type, freeTierEnabled])
 }
 
 // 配方版本：记录配方的具体版本信息

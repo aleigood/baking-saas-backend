@@ -18,7 +18,7 @@ import {
     ComponentIngredient,
     RecipeCategory,
     Ingredient,
-    Role,
+    TenantRole,
 } from '@prisma/client';
 import { RecipeFormTemplateDto, ComponentTemplate } from './dto/recipe-form-template.dto';
 import {
@@ -34,6 +34,7 @@ import {
     DependencyUpgradePlanDto,
     PendingDependencyUpgradePlanDto,
 } from './dto/dependency-upgrade.dto';
+import { EntitlementsService } from '../billing/entitlements.service';
 
 // [新增] 单一递归类型定义
 type WaterCalcFamily = {
@@ -204,7 +205,10 @@ type RecipeOperationAction =
 
 @Injectable()
 export class RecipesService {
-    constructor(private prisma: PrismaService) {}
+    constructor(
+        private prisma: PrismaService,
+        private readonly entitlements: EntitlementsService,
+    ) {}
 
     private async _recordOperation(
         tx: Prisma.TransactionClient,
@@ -540,7 +544,7 @@ export class RecipesService {
                     members: {
                         some: {
                             userId,
-                            role: Role.OWNER,
+                            role: TenantRole.OWNER,
                         },
                     },
                 },
@@ -557,7 +561,7 @@ export class RecipesService {
                     members: {
                         some: {
                             userId,
-                            role: Role.OWNER,
+                            role: TenantRole.OWNER,
                         },
                     },
                 },
@@ -713,7 +717,7 @@ export class RecipesService {
             where: {
                 tenantId: tenantId,
                 userId: userId,
-                role: Role.OWNER,
+                role: TenantRole.OWNER,
             },
         });
 
@@ -909,6 +913,8 @@ export class RecipesService {
     async create(tenantId: string, actorUserId: string, createRecipeDto: CreateRecipeDto) {
         const { name } = createRecipeDto;
 
+        await this.entitlements.assertCanCreateRecipe(tenantId, createRecipeDto.type ?? RecipeType.MAIN);
+
         const existingFamily = await this.prisma.recipeFamily.findFirst({
             where: {
                 tenantId,
@@ -933,6 +939,7 @@ export class RecipesService {
     }
 
     async createVersion(tenantId: string, familyId: string, actorUserId: string, createRecipeDto: CreateRecipeDto) {
+        await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const recipeFamily = await this.prisma.recipeFamily.findFirst({
             where: { id: familyId, tenantId, deletedAt: null },
             include: {
@@ -966,6 +973,7 @@ export class RecipesService {
         actorUserId: string,
         updateRecipeDto: CreateRecipeDto,
     ) {
+        await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const latestVersion = await this.prisma.recipeVersion.findFirst({
             where: {
                 familyId,
@@ -1001,6 +1009,7 @@ export class RecipesService {
         actorUserId: string,
         notes: string,
     ) {
+        await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const version = await this.prisma.recipeVersion.findFirst({
             where: { id: versionId, familyId, family: { tenantId } },
             select: { id: true, version: true, notes: true },
@@ -1917,6 +1926,7 @@ export class RecipesService {
     }
 
     async findAll(tenantId: string) {
+        await this.entitlements.getSummary(tenantId);
         // 1. 数据库查询：必须查出 ingredients 及其嵌套关系，否则无法计算
         // 注意：为了支持递归，这里嵌套了多层 include
         const queryInclude = {
@@ -2109,10 +2119,14 @@ export class RecipesService {
     // [核心修改] 实现 findProductsForTasks 的新逻辑
     // 修复了 any 类型错误，并增加了自制原料和默认产品的惰性补全
     async findProductsForTasks(tenantId: string) {
+        const entitlement = await this.entitlements.getSummary(tenantId);
         const recipeFamilies = await this.prisma.recipeFamily.findMany({
             where: {
                 tenantId,
                 deletedAt: null,
+                ...(entitlement.fullAccess
+                    ? {}
+                    : { OR: [{ type: { not: RecipeType.MAIN } }, { freeTierEnabled: true }] }),
                 versions: {
                     some: {
                         isActive: true,
@@ -2875,6 +2889,7 @@ export class RecipesService {
         familyId: string,
         actorUserId: string,
     ): Promise<ApplyDependencyUpgradeResultDto> {
+        await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const plan = await this.getPendingDependencyUpgrades(tenantId, familyId);
         if (plan.dependencies.length === 0) return { upgradedRecipes: [] };
 
@@ -3101,6 +3116,7 @@ export class RecipesService {
         versionId: string,
         actorUserId: string,
     ): Promise<ApplyDependencyUpgradeResultDto> {
+        await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const plan = await this.buildDependencyUpgradePlan(tenantId, familyId, versionId);
         if (plan.affectedRecipes.length === 0) {
             return { upgradedRecipes: [] };
@@ -3155,6 +3171,7 @@ export class RecipesService {
     }
 
     async activateVersion(tenantId: string, familyId: string, versionId: string, actorUserId: string) {
+        await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const versionToActivate = await this.prisma.recipeVersion.findFirst({
             where: {
                 id: versionId,
@@ -3227,6 +3244,7 @@ export class RecipesService {
     }
 
     async discontinue(tenantId: string, familyId: string, actorUserId: string) {
+        await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const family = await this.prisma.recipeFamily.findFirst({
             where: { id: familyId, tenantId },
         });
@@ -3252,7 +3270,7 @@ export class RecipesService {
     async restore(tenantId: string, familyId: string, actorUserId: string) {
         const family = await this.prisma.recipeFamily.findFirst({
             where: { id: familyId, tenantId },
-            select: { id: true, deletedAt: true },
+            select: { id: true, deletedAt: true, type: true },
         });
 
         if (!family) {
@@ -3262,6 +3280,8 @@ export class RecipesService {
         if (family.deletedAt === null) {
             throw new BadRequestException('该配方未被弃用，无需恢复。');
         }
+
+        await this.entitlements.assertCanCreateRecipe(tenantId, family.type);
 
         return this.prisma.$transaction(async (tx) => {
             const updated = await tx.recipeFamily.update({
@@ -3280,6 +3300,7 @@ export class RecipesService {
     }
 
     async deleteVersion(tenantId: string, familyId: string, versionId: string) {
+        await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const version = await this.prisma.recipeVersion.findFirst({
             where: {
                 id: versionId,

@@ -1,4 +1,4 @@
-import { PrismaClient, Role } from '@prisma/client';
+import { EntitlementPolicyStatus, EntitlementTier, GlobalRole, PrismaClient, TenantRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -26,19 +26,20 @@ async function main() {
         where: { phone: adminPhone },
         update: {
             name: '超级管理员',
-            role: Role.SUPER_ADMIN,
+            globalRole: GlobalRole.SUPER_ADMIN,
             status: 'ACTIVE',
         },
         create: {
             name: '超级管理员',
             phone: adminPhone,
             password: hashedAdminPassword,
-            role: Role.SUPER_ADMIN,
+            globalRole: GlobalRole.SUPER_ADMIN,
             status: 'ACTIVE',
         },
     });
     console.log(`超级管理员已创建/确认存在: ${adminPhone}`);
 
+    await seedEntitlementPolicies();
     await seedSubscriptionPlans();
 
     if (isProduction) {
@@ -59,7 +60,7 @@ async function main() {
             name: 'Leo',
             phone: leoPhone,
             password: hashedLeoPassword,
-            role: Role.OWNER, // 角色为店主
+            globalRole: GlobalRole.USER,
             status: 'ACTIVE',
         },
     });
@@ -71,7 +72,7 @@ async function main() {
             members: {
                 some: {
                     userId: leo.id,
-                    role: Role.OWNER,
+                    role: TenantRole.OWNER,
                 },
             },
         },
@@ -84,7 +85,7 @@ async function main() {
                 members: {
                     create: {
                         userId: leo.id,
-                        role: Role.OWNER,
+                        role: TenantRole.OWNER,
                         status: 'ACTIVE',
                     },
                 },
@@ -152,6 +153,48 @@ async function seedSubscriptionPlans() {
     }
 
     console.log('订阅套餐已创建/确认存在。');
+}
+
+async function seedEntitlementPolicies() {
+    await prisma.billingSettings.upsert({
+        where: { id: 'default' },
+        update: {},
+        create: { id: 'default', trialDays: 14, graceDays: 7 },
+    });
+    const policies = [
+        {
+            id: '00000000-0000-4000-8000-00000000f001',
+            tier: EntitlementTier.FREE,
+            name: '免费版权益 V1',
+            config: {
+                limits: { mainRecipes: 3, productionTasksPerMonth: 10, members: 2 },
+                features: { costing: true, statistics: true, batchImport: true, export: true },
+            },
+        },
+        {
+            id: '00000000-0000-4000-8000-00000000f002',
+            tier: EntitlementTier.PRO,
+            name: '专业版权益 V1',
+            config: {
+                limits: { mainRecipes: null, productionTasksPerMonth: null, members: null },
+                features: { costing: true, statistics: true, batchImport: true, export: true },
+            },
+        },
+    ];
+    for (const policy of policies) {
+        await prisma.entitlementPolicy.upsert({
+            where: { id: policy.id },
+            update: {},
+            create: {
+                ...policy,
+                version: 1,
+                status: EntitlementPolicyStatus.PUBLISHED,
+                isDefault: true,
+                publishedAt: new Date(),
+            },
+        });
+    }
+    console.log('默认权益版本已创建/确认存在。');
 }
 
 main()

@@ -1,8 +1,8 @@
-import { Role } from '@prisma/client';
+import { TenantRole } from '@prisma/client';
 
 export class MemberDto {
     id!: string;
     name!: string;
-    role!: Role;
+    role!: TenantRole;
     joinDate!: string;
 }

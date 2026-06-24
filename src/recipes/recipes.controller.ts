@@ -18,12 +18,10 @@ import {
     ParseFilePipe,
     MaxFileSizeValidator,
     BadRequestException,
-    ForbiddenException, // [新增] 导入 ForbiddenException
 } from '@nestjs/common';
 import { RecipesService } from './recipes.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { AuthGuard } from '@nestjs/passport';
-import { SubscriptionGuard } from '../billing/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -31,10 +29,11 @@ import { BatchImportRecipeDto } from './dto/batch-import-recipe.dto';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { BatchImportRequestDto } from './dto/batch-import-request.dto'; // [新增] 导入新的 DTO
-import { Role } from '@prisma/client'; // [新增] 导入 Role 枚举
 import { UpdateRecipeVersionNotesDto } from './dto/update-recipe-version-notes.dto';
+import { FeatureGuard } from '../billing/feature.guard';
+import { RequiresFeature } from '../billing/requires-feature.decorator';
 
-@UseGuards(AuthGuard('jwt'), SubscriptionGuard)
+@UseGuards(AuthGuard('jwt'))
 @Controller('recipes')
 export class RecipesController {
     constructor(private readonly recipesService: RecipesService) {}
@@ -43,6 +42,8 @@ export class RecipesController {
      * [修改] 批量导入配方，增加多店铺支持和权限控制
      */
     @Post('batch-import')
+    @RequiresFeature('batchImport')
+    @UseGuards(FeatureGuard)
     @UseInterceptors(FileInterceptor('file'))
     async batchImport(
         @UploadedFile(
@@ -55,11 +56,6 @@ export class RecipesController {
         @GetUser() user: UserPayload,
         @Body() batchImportRequestDto: BatchImportRequestDto, // [修改] 接收 tenantIds
     ) {
-        // [新增] 检查用户角色是否为 OWNER
-        if (user.role !== Role.OWNER) {
-            throw new ForbiddenException('只有店主才能执行此操作。');
-        }
-
         if (file.mimetype !== 'application/json') {
             throw new BadRequestException('文件类型错误，请上传正确的 JSON 文件。');
         }
@@ -99,6 +95,8 @@ export class RecipesController {
      * [G-Code-Note] 【新增】导出指定店铺的所有配方
      */
     @Get('export/:tenantId')
+    @RequiresFeature('export')
+    @UseGuards(FeatureGuard)
     // [G-Code-Note] 修复 Prettier 格式问题
     // [G-Code-Note] 移除 async，因为权限检查已移入 service，修复 @typescript-eslint/require-await
     exportRecipes(@GetUser() user: UserPayload, @Param('tenantId') tenantId: string) {

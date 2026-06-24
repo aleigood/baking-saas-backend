@@ -19,6 +19,6 @@ export class AppService {
      */
     getProfile(user: UserPayload): string {
         // 修复：JWT payload中的用户ID是 'sub'
-        return `欢迎回来！您的用户ID是 ${user.sub}，您当前正在管理的门店ID是 ${user.tenantId}，您的角色是 ${user.role}。`;
+        return `欢迎回来！您的用户ID是 ${user.sub}，您当前正在管理的门店ID是 ${user.tenantId}，您的店铺角色是 ${user.tenantRole}。`;
     }
 }
