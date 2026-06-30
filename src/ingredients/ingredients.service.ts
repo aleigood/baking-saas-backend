@@ -248,6 +248,33 @@ export class IngredientsService {
         };
     }
 
+    async getEditorCatalog(tenantId: string) {
+        const [presets, ingredients] = await Promise.all([
+            this.prisma.ingredientPreset.findMany({
+                where: { isActive: true },
+                orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+            }),
+            this.prisma.ingredient.findMany({
+                where: { tenantId, deletedAt: null },
+                select: { id: true, name: true, isFlour: true, waterContent: true, type: true },
+                orderBy: { name: 'asc' },
+            }),
+        ]);
+
+        return {
+            presets: presets.map((preset) => ({
+                id: preset.id,
+                name: preset.name,
+                isFlour: preset.isFlour,
+                waterContent: preset.waterContent.toNumber(),
+            })),
+            ingredients: ingredients.map((ingredient) => ({
+                ...ingredient,
+                waterContent: ingredient.waterContent.toNumber(),
+            })),
+        };
+    }
+
     async findOne(tenantId: string, id: string) {
         const ingredient = await this.prisma.ingredient.findFirst({
             where: {

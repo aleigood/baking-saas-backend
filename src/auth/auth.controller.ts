@@ -1,6 +1,7 @@
-import { Controller, Post, Body, UseGuards, Get, Param } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Get, Param, Req } from '@nestjs/common';
+import { Request } from 'express';
 import { AuthService } from './auth.service';
-import { AuthDto, BindWechatDto, RegisterDto, WechatLoginDto } from './dto/auth.dto';
+import { AuthDto, BindWechatDto, RegisterDto, SendRegistrationCodeDto, WechatLoginDto } from './dto/auth.dto';
 import { GetUser } from './decorators/get-user.decorator';
 import { UserPayload } from './interfaces/user-payload.interface';
 import { AuthGuard } from '@nestjs/passport';
@@ -8,6 +9,11 @@ import { AuthGuard } from '@nestjs/passport';
 @Controller('auth')
 export class AuthController {
     constructor(private authService: AuthService) {}
+
+    @Post('sms-codes')
+    sendRegistrationCode(@Body() dto: SendRegistrationCodeDto, @Req() request: Request) {
+        return this.authService.sendRegistrationCode(dto.phone, request.ip);
+    }
 
     @Post('register')
     register(@Body() registerDto: RegisterDto) {

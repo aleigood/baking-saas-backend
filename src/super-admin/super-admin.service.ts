@@ -24,6 +24,7 @@ import { UpsertSubscriptionPlanDto } from './dto/upsert-subscription-plan.dto';
 import { CreateTenantSubscriptionDto } from './dto/create-tenant-subscription.dto';
 import { UpdateTenantSubscriptionDto } from './dto/update-tenant-subscription.dto';
 import { EntitlementsService } from '../billing/entitlements.service';
+import { UpsertIngredientPresetDto } from './dto/upsert-ingredient-preset.dto';
 
 @Injectable()
 export class SuperAdminService {
@@ -103,6 +104,51 @@ export class SuperAdminService {
                 sortOrder: dto.sortOrder,
             },
         });
+    }
+
+    async findAllIngredientPresets() {
+        const presets = await this.prisma.ingredientPreset.findMany({
+            orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        });
+        return presets.map((preset) => ({
+            ...preset,
+            waterContent: preset.waterContent.toNumber(),
+        }));
+    }
+
+    async createIngredientPreset(dto: UpsertIngredientPresetDto) {
+        const name = dto.name.trim();
+        const existing = await this.prisma.ingredientPreset.findUnique({ where: { name } });
+        if (existing) throw new BadRequestException(`预设原料“${name}”已存在`);
+        const preset = await this.prisma.ingredientPreset.create({
+            data: {
+                name,
+                isFlour: dto.isFlour,
+                waterContent: new Prisma.Decimal(dto.waterContent),
+                isActive: dto.isActive ?? true,
+                sortOrder: dto.sortOrder ?? 0,
+            },
+        });
+        return { ...preset, waterContent: preset.waterContent.toNumber() };
+    }
+
+    async updateIngredientPreset(id: string, dto: UpsertIngredientPresetDto) {
+        const preset = await this.prisma.ingredientPreset.findUnique({ where: { id }, select: { id: true } });
+        if (!preset) throw new NotFoundException('预设原料不存在');
+        const name = dto.name.trim();
+        const duplicate = await this.prisma.ingredientPreset.findFirst({ where: { name, id: { not: id } } });
+        if (duplicate) throw new BadRequestException(`预设原料“${name}”已存在`);
+        const updated = await this.prisma.ingredientPreset.update({
+            where: { id },
+            data: {
+                name,
+                isFlour: dto.isFlour,
+                waterContent: new Prisma.Decimal(dto.waterContent),
+                isActive: dto.isActive ?? true,
+                sortOrder: dto.sortOrder ?? 0,
+            },
+        });
+        return { ...updated, waterContent: updated.waterContent.toNumber() };
     }
 
     // --- Subscription Management ---

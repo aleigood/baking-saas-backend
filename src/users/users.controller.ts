@@ -1,4 +1,4 @@
-import { Controller, Body, Patch, UseGuards } from '@nestjs/common';
+import { Controller, Body, Get, Patch, UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -10,6 +10,11 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 @Controller('users')
 export class UsersController {
     constructor(private readonly usersService: UsersService) {}
+
+    @Get('avatars')
+    listAvatars() {
+        return this.usersService.listAvatars();
+    }
 
     @Patch('me/profile')
     updateProfile(@GetUser() user: UserPayload, @Body() updateProfileDto: UpdateProfileDto) {

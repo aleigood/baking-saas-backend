@@ -19,6 +19,7 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditInterceptor } from './audit/audit.interceptor';
 import { ConfigModule } from '@nestjs/config';
 import { OnboardingModule } from './onboarding/onboarding.module';
+import { RecipeEditorModule } from './recipe-editor/recipe-editor.module';
 
 @Module({
     imports: [
@@ -41,6 +42,7 @@ import { OnboardingModule } from './onboarding/onboarding.module';
         DashboardModule,
         BillingModule,
         OnboardingModule,
+        RecipeEditorModule,
     ],
     controllers: [AppController],
     providers: [AppService, { provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

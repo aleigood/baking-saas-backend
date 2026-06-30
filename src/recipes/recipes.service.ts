@@ -1,10 +1,4 @@
-import {
-    Injectable,
-    NotFoundException,
-    ConflictException,
-    BadRequestException,
-    ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRecipeDto, ComponentIngredientDto, ProductDto, ProductIngredientDto } from './dto/create-recipe.dto';
 import {
@@ -150,6 +144,16 @@ const recipeFamilyForExportInclude = {
         orderBy: { version: 'asc' },
     },
 } satisfies Prisma.RecipeFamilyInclude;
+
+const recipeFamilyForEditorInclude = {
+    versions: {
+        ...recipeFamilyForExportInclude.versions,
+        orderBy: { version: 'desc' as const },
+        take: 1,
+    },
+} satisfies Prisma.RecipeFamilyInclude;
+
+const recipeVersionForEditorInclude = recipeFamilyForExportInclude.versions.include;
 
 type RecipeFamilyForExport = Prisma.RecipeFamilyGetPayload<{
     include: typeof recipeFamilyForExportInclude;
@@ -535,6 +539,7 @@ export class RecipesService {
         tenantIds?: string[],
         actorUserId = userId,
     ): Promise<BatchImportResultDto> {
+        const orderedRecipesDto = this.sortRecipesForInitialization(recipesDto);
         let targetTenants: { id: string; name: string }[];
 
         if (tenantIds && tenantIds.length > 0) {
@@ -575,7 +580,7 @@ export class RecipesService {
         }
 
         const overallResult: BatchImportResultDto = {
-            totalCount: recipesDto.length * targetTenants.length,
+            totalCount: orderedRecipesDto.length * targetTenants.length,
             importedCount: 0,
             skippedCount: 0,
             skippedRecipes: [],
@@ -585,7 +590,7 @@ export class RecipesService {
             const tenantId = tenant.id;
             const tenantName = tenant.name;
 
-            for (const recipeDto of recipesDto) {
+            for (const recipeDto of orderedRecipesDto) {
                 try {
                     const existingFamily = await this.prisma.recipeFamily.findFirst({
                         where: {
@@ -607,6 +612,7 @@ export class RecipesService {
                             targetTemp: versionDto.targetTemp,
                             lossRatio: versionDto.lossRatio,
                             divisionLoss: versionDto.divisionLoss,
+                            customWaterContent: versionDto.customWaterContent,
                             procedure: versionDto.procedure,
                             ingredients: versionDto.ingredients.map(
                                 (ing: BatchComponentIngredientDto): ComponentIngredientDto => ({
@@ -649,6 +655,7 @@ export class RecipesService {
 
                     if (!existingFamily) {
                         let familyId: string | null = null;
+                        let latestCreatedVersionId: string | null = null;
                         let versionsCreatedCount = 0;
 
                         for (const versionDto of recipeDto.versions) {
@@ -661,13 +668,23 @@ export class RecipesService {
                                     throw new Error(`创建配方族 "${recipeDto.name}" 失败，_sanitizeFamily 返回 null`);
                                 }
                                 familyId = createdFamily.id;
+                                latestCreatedVersionId = createdFamily.versions[0]?.id ?? null;
                                 versionsCreatedCount++;
                             } else {
-                                await this.createVersion(tenantId, familyId, actorUserId, createDto);
+                                const createdFamily = await this.createVersion(
+                                    tenantId,
+                                    familyId,
+                                    actorUserId,
+                                    createDto,
+                                );
+                                latestCreatedVersionId = createdFamily?.versions[0]?.id ?? latestCreatedVersionId;
                                 versionsCreatedCount++;
                             }
                         }
                         if (versionsCreatedCount > 0) {
+                            if (familyId && latestCreatedVersionId) {
+                                await this.activateVersion(tenantId, familyId, latestCreatedVersionId, actorUserId);
+                            }
                             overallResult.importedCount++;
                         } else {
                             overallResult.skippedCount++;
@@ -678,6 +695,7 @@ export class RecipesService {
                     } else {
                         const existingVersionNotes = new Set(existingFamily.versions.map((v) => v.notes));
                         let newVersionsAdded = 0;
+                        let latestCreatedVersionId: string | null = null;
 
                         for (const versionDto of recipeDto.versions) {
                             if (existingVersionNotes.has(versionDto.notes)) {
@@ -685,11 +703,25 @@ export class RecipesService {
                             }
 
                             const createDto = convertVersionToCreateDto(versionDto);
-                            await this.createVersion(tenantId, existingFamily.id, actorUserId, createDto);
+                            const createdFamily = await this.createVersion(
+                                tenantId,
+                                existingFamily.id,
+                                actorUserId,
+                                createDto,
+                            );
+                            latestCreatedVersionId = createdFamily?.versions[0]?.id ?? latestCreatedVersionId;
                             newVersionsAdded++;
                         }
 
                         if (newVersionsAdded > 0) {
+                            if (latestCreatedVersionId) {
+                                await this.activateVersion(
+                                    tenantId,
+                                    existingFamily.id,
+                                    latestCreatedVersionId,
+                                    actorUserId,
+                                );
+                            }
                             overallResult.importedCount++;
                         } else {
                             overallResult.skippedCount++;
@@ -712,50 +744,137 @@ export class RecipesService {
         return overallResult;
     }
 
-    async exportRecipes(tenantId: string, userId: string): Promise<BatchImportRecipeDto[]> {
-        const tenantAccess = await this.prisma.tenantUser.findFirst({
-            where: {
-                tenantId: tenantId,
-                userId: userId,
-                role: TenantRole.OWNER,
-            },
-        });
+    private sortRecipesForInitialization(recipes: BatchImportRecipeDto[]) {
+        const recipeByName = new Map(recipes.map((recipe) => [recipe.name, recipe]));
+        const visited = new Set<string>();
+        const visiting = new Set<string>();
+        const ordered: BatchImportRecipeDto[] = [];
 
-        if (!tenantAccess) {
-            throw new ForbiddenException('您没有权限导出该店铺的配方。');
-        }
+        const dependenciesOf = (recipe: BatchImportRecipeDto) =>
+            Array.from(
+                new Set(
+                    recipe.versions.flatMap((version) => [
+                        ...version.ingredients.map((ingredient) => ingredient.name),
+                        ...(version.products ?? []).flatMap((product) => [
+                            ...(product.mixIn ?? []).map((ingredient) => ingredient.name),
+                            ...(product.fillings ?? []).map((ingredient) => ingredient.name),
+                            ...(product.toppings ?? []).map((ingredient) => ingredient.name),
+                        ]),
+                    ]),
+                ),
+            ).filter((name) => name !== recipe.name && recipeByName.has(name));
 
-        const families = await this.prisma.recipeFamily.findMany({
-            where: {
-                tenantId: tenantId,
-                deletedAt: null,
-            },
-            include: recipeFamilyForExportInclude,
-        });
+        const visit = (recipe: BatchImportRecipeDto) => {
+            if (visited.has(recipe.name)) return;
+            if (visiting.has(recipe.name)) {
+                throw new BadRequestException(`初始化数据中存在循环引用：${recipe.name}`);
+            }
+            visiting.add(recipe.name);
+            dependenciesOf(recipe).forEach((name) => visit(recipeByName.get(name)!));
+            visiting.delete(recipe.name);
+            visited.add(recipe.name);
+            ordered.push(recipe);
+        };
 
-        const exportableFamilies: BatchImportRecipeDto[] = families.map((family) => {
-            // 【修改】：给 _exportVersion 增加 family.category 参数
-            const exportableVersions = family.versions.map((version) =>
-                this._exportVersion(version, family.type, family.category),
-            );
+        recipes.forEach(visit);
+        return ordered;
+    }
 
-            return {
-                name: family.name,
-                type: family.type,
-                category: family.category,
-                versions: exportableVersions,
-            };
-        });
+    async getRecipeEditorCatalog(tenantId: string) {
+        const [families, activeVersions] = await Promise.all([
+            this.prisma.recipeFamily.findMany({
+                where: {
+                    tenantId,
+                    deletedAt: null,
+                },
+                include: recipeFamilyForEditorInclude,
+            }),
+            this.prisma.recipeVersion.findMany({
+                where: { isActive: true, family: { tenantId, deletedAt: null } },
+                select: { id: true, familyId: true, version: true },
+            }),
+        ]);
+        const activeVersionByFamilyId = new Map(activeVersions.map((version) => [version.familyId, version]));
 
-        // 核心同步逻辑：1. 按配方类型排序(面种->自制->产品) 2. 同类型下按中文名称拼音排序
         const order: Record<string, number> = { PRE_DOUGH: 1, EXTRA: 2, MAIN: 3 };
-        exportableFamilies.sort((a, b) => {
-            const typeDiff = order[a.type] - order[b.type];
-            if (typeDiff !== 0) return typeDiff;
-            return a.name.localeCompare(b.name, 'zh-CN');
+        const recipes = families
+            .filter((family) => family.versions.length > 0)
+            .map((family) => {
+                const latestVersion = family.versions[0];
+                const activeVersion = activeVersionByFamilyId.get(family.id);
+                return {
+                    familyId: family.id,
+                    versionId: latestVersion.id,
+                    version: latestVersion.version,
+                    isActive: latestVersion.isActive,
+                    activeVersionId: activeVersion?.id,
+                    activeVersion: activeVersion?.version,
+                    recipe: {
+                        name: family.name,
+                        type: family.type,
+                        category: family.category,
+                        versions: [this._exportVersion(latestVersion, family.type, family.category)],
+                    },
+                };
+            })
+            .sort((a, b) => {
+                const typeDiff = order[a.recipe.type] - order[b.recipe.type];
+                if (typeDiff !== 0) return typeDiff;
+                return a.recipe.name.localeCompare(b.recipe.name, 'zh-CN');
+            });
+
+        const pinnedVersionIds = new Set<string>();
+        families.forEach((family) => {
+            const latestVersion = family.versions[0];
+            latestVersion?.components.forEach((component) =>
+                component.ingredients.forEach((ingredient) => {
+                    if (ingredient.preDoughVersionId) pinnedVersionIds.add(ingredient.preDoughVersionId);
+                    if (ingredient.extraVersionId) pinnedVersionIds.add(ingredient.extraVersionId);
+                }),
+            );
+            latestVersion?.products.forEach((product) =>
+                product.ingredients.forEach((ingredient) => {
+                    if (ingredient.linkedExtraVersionId) pinnedVersionIds.add(ingredient.linkedExtraVersionId);
+                }),
+            );
         });
 
-        return exportableFamilies;
+        const referenceVersions = await this.prisma.recipeVersion.findMany({
+            where: {
+                family: { tenantId, deletedAt: null },
+                OR: [{ isActive: true }, { id: { in: Array.from(pinnedVersionIds) } }],
+            },
+            include: {
+                ...recipeVersionForEditorInclude,
+                family: true,
+            },
+            orderBy: [{ familyId: 'asc' }, { version: 'desc' }],
+        });
+
+        return {
+            recipes,
+            referenceVersions: referenceVersions.map((version) => ({
+                familyId: version.familyId,
+                familyName: version.family.name,
+                type: version.family.type,
+                category: version.family.category,
+                versionId: version.id,
+                version: version.version,
+                isActive: version.isActive,
+                recipe: {
+                    name: version.family.name,
+                    type: version.family.type,
+                    category: version.family.category,
+                    versions: [
+                        this._exportVersion(
+                            version as unknown as RecipeVersionForExport,
+                            version.family.type,
+                            version.family.category,
+                        ),
+                    ],
+                },
+            })),
+        };
     }
 
     // 【修改】：增加 category 参数
@@ -781,11 +900,13 @@ export class RecipesService {
             ratio?: number,
             isFlour?: boolean,
             waterContent?: number,
+            recipeVersionId?: string,
         ): BatchComponentIngredientDto => {
             const r: BatchComponentIngredientDto = { name: ingName };
             if (ratio !== undefined && ratio !== null) r.ratio = ratio;
             if (isFlour) r.isFlour = true;
             if (waterContent && waterContent > 0) r.waterContent = waterContent;
+            if (recipeVersionId) r.recipeVersionId = recipeVersionId;
             return r;
         };
 
@@ -795,10 +916,17 @@ export class RecipesService {
                 return {
                     name: ing.linkedPreDough.name,
                     flourRatio: toNum(ing.flourRatio),
+                    recipeVersionId: ing.preDoughVersionId ?? undefined,
                 };
             }
             if (ing.linkedExtra) {
-                return formatIng(ing.linkedExtra.name, toNum(ing.ratio));
+                return formatIng(
+                    ing.linkedExtra.name,
+                    toNum(ing.ratio),
+                    false,
+                    undefined,
+                    ing.extraVersionId ?? undefined,
+                );
             }
             if (ing.ingredient) {
                 return formatIng(
@@ -857,7 +985,14 @@ export class RecipesService {
                         mixIn: p.ingredients
                             .filter((i) => i.type === 'MIX_IN' && (i.ingredient || i.linkedExtra))
                             .map((i) => {
-                                if (i.linkedExtra) return formatIng(i.linkedExtra.name, toNum(i.ratio));
+                                if (i.linkedExtra)
+                                    return formatIng(
+                                        i.linkedExtra.name,
+                                        toNum(i.ratio),
+                                        false,
+                                        undefined,
+                                        i.linkedExtraVersionId ?? undefined,
+                                    );
                                 return formatIng(
                                     i.ingredient!.name,
                                     toNum(i.ratio),
@@ -870,12 +1005,14 @@ export class RecipesService {
                             .map((i) => ({
                                 name: i.ingredient?.name || i.linkedExtra!.name,
                                 weightInGrams: toNum(i.weightInGrams),
+                                recipeVersionId: i.linkedExtraVersionId ?? undefined,
                             })),
                         toppings: p.ingredients
                             .filter((i) => i.type === 'TOPPING' && (i.ingredient || i.linkedExtra))
                             .map((i) => ({
                                 name: i.ingredient?.name || i.linkedExtra!.name,
                                 weightInGrams: toNum(i.weightInGrams),
+                                recipeVersionId: i.linkedExtraVersionId ?? undefined,
                             })),
                     };
                 }),
@@ -927,11 +1064,13 @@ export class RecipesService {
             throw new ConflictException(`名为 "${name}" 的配方已存在。`);
         }
 
+        const resolvedRecipeDto = await this.resolveActiveDependencyVersions(tenantId, createRecipeDto);
+
         return this.createVersionInternal(
             tenantId,
             null,
             actorUserId,
-            createRecipeDto,
+            resolvedRecipeDto,
             false,
             undefined,
             'RECIPE_CREATED',
@@ -951,15 +1090,16 @@ export class RecipesService {
             throw new NotFoundException(`ID为 "${familyId}" 的配方不存在`);
         }
 
+        const resolvedRecipeDto = await this.resolveActiveDependencyVersions(tenantId, createRecipeDto);
         const latestVersionId = recipeFamily.versions[0]?.id;
         const changeSummary = latestVersionId
-            ? await this._buildVersionChangeSummary(tenantId, familyId, latestVersionId, createRecipeDto)
+            ? await this._buildVersionChangeSummary(tenantId, familyId, latestVersionId, resolvedRecipeDto)
             : { schemaVersion: 1 as const, items: [{ kind: 'INITIAL_VERSION' as const }] };
         return this.createVersionInternal(
             tenantId,
             familyId,
             actorUserId,
-            createRecipeDto,
+            resolvedRecipeDto,
             false,
             changeSummary,
             'VERSION_CREATED',
@@ -990,16 +1130,96 @@ export class RecipesService {
             throw new BadRequestException('只能基于最新版本新建配方版本，请刷新后重试。');
         }
 
-        const changeSummary = await this._buildVersionChangeSummary(tenantId, familyId, versionId, updateRecipeDto);
+        const resolvedRecipeDto = await this.resolveActiveDependencyVersions(tenantId, updateRecipeDto);
+        const changeSummary = await this._buildVersionChangeSummary(tenantId, familyId, versionId, resolvedRecipeDto);
         return this.createVersionInternal(
             tenantId,
             familyId,
             actorUserId,
-            updateRecipeDto,
+            resolvedRecipeDto,
             false,
             changeSummary,
             'VERSION_UPDATED',
         );
+    }
+
+    private async resolveActiveDependencyVersions(
+        tenantId: string,
+        recipeDto: CreateRecipeDto,
+    ): Promise<CreateRecipeDto> {
+        const componentIngredients = recipeDto.ingredients.map((ingredient) => ({ ...ingredient }));
+        const products = recipeDto.products?.map((product) => ({
+            ...product,
+            mixIn: product.mixIn?.map((ingredient) => ({ ...ingredient })),
+            fillings: product.fillings?.map((ingredient) => ({ ...ingredient })),
+            toppings: product.toppings?.map((ingredient) => ({ ...ingredient })),
+            procedure: [...(product.procedure ?? [])],
+        }));
+        const productIngredients = (products ?? []).flatMap((product) => [
+            ...(product.mixIn ?? []),
+            ...(product.fillings ?? []),
+            ...(product.toppings ?? []),
+        ]);
+        const names = Array.from(
+            new Set([...componentIngredients, ...productIngredients].map((ingredient) => ingredient.name.trim())),
+        ).filter(Boolean);
+
+        if (names.length === 0) {
+            return { ...recipeDto, ingredients: componentIngredients, products };
+        }
+
+        const families = await this.prisma.recipeFamily.findMany({
+            where: {
+                tenantId,
+                deletedAt: null,
+                type: { in: [RecipeType.PRE_DOUGH, RecipeType.EXTRA] },
+                name: { in: names },
+            },
+            select: {
+                id: true,
+                name: true,
+                type: true,
+                versions: {
+                    where: { isActive: true },
+                    take: 1,
+                    select: { id: true },
+                },
+            },
+        });
+        const familyByName = new Map(families.map((family) => [family.name, family]));
+
+        const resolveIngredient = <T extends ComponentIngredientDto | ProductIngredientDto>(
+            ingredient: T,
+            scope: 'COMPONENT' | 'PRODUCT',
+        ): T => {
+            const name = ingredient.name.trim();
+            const family = familyByName.get(name);
+            if (!family) return { ...ingredient, name };
+            if (scope === 'PRODUCT' && family.type !== RecipeType.EXTRA) {
+                throw new BadRequestException(`产品附加原料不能引用面种配方“${name}”。`);
+            }
+            const activeVersion = family.versions[0];
+            if (!activeVersion) {
+                throw new BadRequestException(`关联配方“${name}”没有使用中的版本，无法保存。`);
+            }
+            return {
+                ...ingredient,
+                name,
+                ingredientId: undefined,
+                recipeVersionId: activeVersion.id,
+            };
+        };
+
+        return {
+            ...recipeDto,
+            ingredients: componentIngredients.map((ingredient) => resolveIngredient(ingredient, 'COMPONENT')),
+            products: products?.map((product) => ({
+                ...product,
+                mixIn: product.mixIn?.map((ingredient) => resolveIngredient(ingredient, 'PRODUCT')),
+                fillings: product.fillings?.map((ingredient) => resolveIngredient(ingredient, 'PRODUCT')),
+                toppings: product.toppings?.map((ingredient) => resolveIngredient(ingredient, 'PRODUCT')),
+            })),
+        };
     }
 
     async updateVersionNotes(
@@ -1069,7 +1289,7 @@ export class RecipesService {
         sourceVersionId: string,
         recipe: CreateRecipeDto,
     ): Promise<RecipeVersionChangeSummary> {
-        const source = await this.getRecipeVersionFormTemplate(tenantId, familyId, sourceVersionId);
+        const source = await this.getRecipeVersionFormTemplate(tenantId, familyId, sourceVersionId, false);
         const items: RecipeVersionChangeItem[] = [];
         const dependencyChanges: Array<{
             item: RecipeVersionChangeItem;
@@ -1490,20 +1710,21 @@ export class RecipesService {
                 },
                 include: {
                     versions: {
-                        where: pIngredientDto.recipeVersionId
-                            ? { OR: [{ id: pIngredientDto.recipeVersionId }, { isActive: true }] }
-                            : { isActive: true },
-                        select: { id: true },
+                        where: { isActive: true },
+                        select: { id: true, isActive: true },
                     },
                 },
             });
 
-            const linkedExtraVersion = pIngredientDto.recipeVersionId
-                ? linkedExtra?.versions.find((version) => version.id === pIngredientDto.recipeVersionId)
-                : linkedExtra?.versions[0];
+            if (linkedExtra && !pIngredientDto.recipeVersionId) {
+                throw new BadRequestException(`关联配方 "${linkedExtra.name}" 缺少使用中版本信息。`);
+            }
+            const linkedExtraVersion = linkedExtra?.versions.find(
+                (version) => version.id === pIngredientDto.recipeVersionId,
+            );
 
             if (linkedExtra && !linkedExtraVersion) {
-                throw new BadRequestException(`关联配方 "${linkedExtra.name}" 没有正在使用的版本。`);
+                throw new BadRequestException(`关联配方 "${linkedExtra.name}" 的使用中版本已变化，请重新保存。`);
             }
 
             const ratioForDb =
@@ -1737,8 +1958,7 @@ export class RecipesService {
             data: { notes: recipeDto.notes },
         });
 
-        const targetTempForDb =
-            targetTemp === null || targetTemp === undefined ? undefined : new Prisma.Decimal(targetTemp);
+        const targetTempForDb = type === RecipeType.MAIN ? new Prisma.Decimal(targetTemp ?? 26) : undefined;
         const lossRatioForDb =
             lossRatio === null || lossRatio === undefined ? undefined : new Prisma.Decimal(lossRatio);
         const divisionLossForDb =
@@ -1763,12 +1983,15 @@ export class RecipesService {
         for (const ingredientDto of ingredients) {
             const linkedFamily = linkedFamilies.get(ingredientDto.name);
 
-            const linkedVersion = ingredientDto.recipeVersionId
-                ? linkedFamily?.versions.find((version) => version.id === ingredientDto.recipeVersionId)
-                : linkedFamily?.versions.find((version) => version.isActive);
+            if (linkedFamily && !ingredientDto.recipeVersionId) {
+                throw new BadRequestException(`关联配方 "${linkedFamily.name}" 缺少使用中版本信息。`);
+            }
+            const linkedVersion = linkedFamily?.versions.find(
+                (version) => version.id === ingredientDto.recipeVersionId && version.isActive,
+            );
 
             if (linkedFamily && !linkedVersion) {
-                throw new BadRequestException(`关联配方 "${linkedFamily.name}" 没有正在使用的版本。`);
+                throw new BadRequestException(`关联配方 "${linkedFamily.name}" 的使用中版本已变化，请重新保存。`);
             }
 
             const ingredientId = linkedFamily ? undefined : ingredientDto.ingredientId;
@@ -1834,6 +2057,10 @@ export class RecipesService {
             ...(products ?? []).flatMap((p) => [...(p.mixIn ?? []), ...(p.fillings ?? []), ...(p.toppings ?? [])]),
         ];
 
+        allRawIngredients.forEach((ingredient) => {
+            ingredient.name = ingredient.name.trim();
+        });
+
         const allIngredientNames = Array.from(new Set(allRawIngredients.map((ing) => ing.name)));
 
         if (allIngredientNames.length === 0) {
@@ -1857,6 +2084,11 @@ export class RecipesService {
             },
         });
         const existingFamilyNames = new Set(existingFamilies.map((f) => f.name));
+        const activePresets = await tx.ingredientPreset.findMany({
+            where: { name: { in: allIngredientNames }, isActive: true },
+            select: { name: true, isFlour: true, waterContent: true },
+        });
+        const presetMap = new Map(activePresets.map((preset) => [preset.name, preset]));
         const ingredientsToCreate: Prisma.IngredientCreateManyInput[] = [];
 
         const isWaterName = (n: string) => ['水', 'water', '冰水', '温水', '纯净水'].includes(n.toLowerCase());
@@ -1866,16 +2098,21 @@ export class RecipesService {
                 const dto = allRawIngredients.find((ing) => ing.name === name);
                 if (!dto) continue;
 
+                const preset = presetMap.get(name);
+
                 let waterContentForDb = 0;
                 let isFlourForDb = false;
 
-                if ('waterContent' in dto && dto.waterContent !== undefined) {
+                if (preset) {
+                    waterContentForDb = preset.waterContent.toNumber();
+                    isFlourForDb = preset.isFlour;
+                } else if ('waterContent' in dto && dto.waterContent !== undefined) {
                     waterContentForDb = dto.waterContent;
                 } else if (isWaterName(name)) {
                     waterContentForDb = 1;
                 }
 
-                if ('isFlour' in dto && dto.isFlour !== undefined) {
+                if (!preset && 'isFlour' in dto && dto.isFlour !== undefined) {
                     isFlourForDb = dto.isFlour;
                 }
 
@@ -2036,6 +2273,7 @@ export class RecipesService {
                     versionCount: family._count.versions,
                     activeVersion: activeVersion
                         ? {
+                              id: activeVersion.id,
                               version: activeVersion.version,
                               notes: activeVersion.notes,
                               changeSummary: activeVersion.changeSummary,
@@ -2365,6 +2603,7 @@ export class RecipesService {
         tenantId: string,
         familyId: string,
         versionId: string,
+        useActiveDependencies = true,
     ): Promise<RecipeFormTemplateDto> {
         const version = await this.prisma.recipeVersion.findFirst({
             where: {
@@ -2382,12 +2621,38 @@ export class RecipesService {
                         ingredients: {
                             include: {
                                 ingredient: true,
-                                linkedPreDough: true,
+                                linkedPreDough: {
+                                    include: {
+                                        versions: {
+                                            where: { isActive: true },
+                                            take: 1,
+                                            include: {
+                                                components: {
+                                                    include: {
+                                                        ingredients: {
+                                                            include: {
+                                                                ingredient: true,
+                                                                linkedPreDough: true,
+                                                                linkedExtra: true,
+                                                            },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
                                 linkedPreDoughVersion: {
                                     include: {
                                         components: {
                                             include: {
-                                                ingredients: { include: { ingredient: true } },
+                                                ingredients: {
+                                                    include: {
+                                                        ingredient: true,
+                                                        linkedPreDough: true,
+                                                        linkedExtra: true,
+                                                    },
+                                                },
                                             },
                                         },
                                     },
@@ -2502,28 +2767,47 @@ export class RecipesService {
             for (const ing of sortedIngredients) {
                 if (ing.linkedPreDough) {
                     const preDoughFamily = ing.linkedPreDough;
-                    const preDoughRecipe = ing.linkedPreDoughVersion?.components[0];
+                    const selectedPreDoughVersion = useActiveDependencies
+                        ? preDoughFamily.versions[0]
+                        : ing.linkedPreDoughVersion;
+                    const preDoughRecipe = selectedPreDoughVersion?.components[0];
 
                     if (preDoughRecipe) {
                         const flourRatioInMainDough = ing.flourRatio
                             ? new Prisma.Decimal(ing.flourRatio)
                             : new Prisma.Decimal(0);
                         const ingredientsForTemplate = preDoughRecipe.ingredients
-                            .filter((i) => i.ingredient !== null && i.ratio !== null)
-                            .map((i) => ({
-                                id: i.ingredient!.id,
-                                name: i.ingredient!.name,
-                                ratio: toCleanPercent(flourRatioInMainDough.mul(i.ratio!)),
-                                isRecipe: false,
-                                isFlour: i.ingredient!.isFlour,
-                                waterContent: i.ingredient!.waterContent.toNumber(),
-                            }));
+                            .map((i) => {
+                                const linkedRecipe = i.linkedPreDough || i.linkedExtra;
+                                const sourceRatio = i.linkedPreDough ? i.flourRatio : i.ratio;
+                                if (linkedRecipe && sourceRatio !== null) {
+                                    return {
+                                        id: linkedRecipe.id,
+                                        name: linkedRecipe.name,
+                                        ratio: toCleanPercent(flourRatioInMainDough.mul(sourceRatio)),
+                                        isRecipe: true,
+                                        isFlour: false,
+                                        waterContent: 0,
+                                        recipeVersionId: i.preDoughVersionId ?? i.extraVersionId ?? undefined,
+                                    };
+                                }
+                                if (!i.ingredient || i.ratio === null) return null;
+                                return {
+                                    id: i.ingredient.id,
+                                    name: i.ingredient.name,
+                                    ratio: toCleanPercent(flourRatioInMainDough.mul(i.ratio)),
+                                    isRecipe: false,
+                                    isFlour: i.ingredient.isFlour,
+                                    waterContent: i.ingredient.waterContent.toNumber(),
+                                };
+                            })
+                            .filter((ingredient): ingredient is NonNullable<typeof ingredient> => ingredient !== null);
 
                         preDoughComponentsForForm.push({
                             id: preDoughFamily.id,
                             name: preDoughFamily.name,
                             type: 'PRE_DOUGH',
-                            recipeVersionId: ing.preDoughVersionId ?? undefined,
+                            recipeVersionId: selectedPreDoughVersion?.id,
                             flourRatioInMainDough: toCleanPercent(flourRatioInMainDough) ?? undefined,
                             ingredients: ingredientsForTemplate,
                             procedure: preDoughRecipe.procedure,
@@ -3338,10 +3622,6 @@ export class RecipesService {
         tx: Prisma.TransactionClient,
     ): Promise<Map<string, PreloadedRecipeFamily>> {
         const linkedRecipeNames = ingredients.map((ing) => ing.name);
-        const requestedVersionIds = ingredients
-            .map((ingredient) => ingredient.recipeVersionId)
-            .filter((id): id is string => !!id);
-
         if (linkedRecipeNames.length === 0) {
             return new Map();
         }
@@ -3355,9 +3635,7 @@ export class RecipesService {
             },
             include: {
                 versions: {
-                    where: {
-                        OR: [{ isActive: true }, { id: { in: requestedVersionIds } }],
-                    },
+                    where: { isActive: true },
                     include: {
                         components: {
                             include: { ingredients: { include: { ingredient: true } } },

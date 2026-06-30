@@ -21,6 +21,7 @@ import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { UpdateBillingSettingsDto, UpsertEntitlementPolicyDto } from './dto/entitlement-policy.dto';
 import { EntitlementsService } from '../billing/entitlements.service';
+import { UpsertIngredientPresetDto } from './dto/upsert-ingredient-preset.dto';
 
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
 @Controller('super-admin')
@@ -50,6 +51,21 @@ export class SuperAdminController {
     @Patch('subscription-plans/:id')
     updateSubscriptionPlan(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpsertSubscriptionPlanDto) {
         return this.superAdminService.updateSubscriptionPlan(id, dto);
+    }
+
+    @Get('ingredient-presets')
+    findAllIngredientPresets() {
+        return this.superAdminService.findAllIngredientPresets();
+    }
+
+    @Post('ingredient-presets')
+    createIngredientPreset(@Body() dto: UpsertIngredientPresetDto) {
+        return this.superAdminService.createIngredientPreset(dto);
+    }
+
+    @Patch('ingredient-presets/:id')
+    updateIngredientPreset(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpsertIngredientPresetDto) {
+        return this.superAdminService.updateIngredientPreset(id, dto);
     }
 
     @Get('entitlement-policies')

@@ -48,6 +48,11 @@ export class IngredientsController {
         return this.ingredientsService.findAll(user.tenantId);
     }
 
+    @Get('editor-catalog')
+    getEditorCatalog(@GetUser() user: UserPayload) {
+        return this.ingredientsService.getEditorCatalog(user.tenantId);
+    }
+
     @Get(':id')
     @ApiOperation({ summary: 'Get a single ingredient by ID' })
     findOne(@GetUser() user: UserPayload, @Param('id') id: string) {

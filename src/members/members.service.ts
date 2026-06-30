@@ -13,6 +13,7 @@ import { UpdateMemberDto as UpdateMemberDtoMembers } from './dto/update-member.d
 import { UserPayload as UserPayloadMembers } from 'src/auth/interfaces/user-payload.interface';
 import { CreateMemberDto } from './dto/create-member.dto'; // [核心新增] 导入CreateMemberDto
 import { EntitlementsService } from '../billing/entitlements.service';
+import { getUserDisplayName } from '../common/utils/user-display.util';
 
 @InjectableMembers()
 export class MembersService {
@@ -100,6 +101,7 @@ export class MembersService {
                                 id: true,
                                 name: true,
                                 phone: true,
+                                avatarUrl: true,
                                 createdAt: true,
                             },
                         },
@@ -115,8 +117,10 @@ export class MembersService {
             tenantName: tenant.name,
             members: tenant.members.map((tu) => ({
                 id: tu.user.id,
-                name: tu.user.name || tu.user.phone,
+                name: tu.user.name,
+                displayName: getUserDisplayName(tu.user),
                 phone: tu.user.phone,
+                avatarUrl: tu.user.avatarUrl,
                 role: tu.role,
                 status: tu.status,
                 joinDate: tu.user.createdAt.toISOString().split('T')[0],
@@ -155,8 +159,10 @@ export class MembersService {
 
         return tenantUsers.map((tu) => ({
             id: tu.user.id,
-            name: tu.user.name || tu.user.phone, // [修改] 优先返回姓名
+            name: tu.user.name,
+            displayName: getUserDisplayName(tu.user),
             phone: tu.user.phone,
+            avatarUrl: tu.user.avatarUrl,
             role: tu.role,
             status: tu.status,
             joinDate: tu.user.createdAt.toISOString().split('T')[0],
@@ -179,8 +185,10 @@ export class MembersService {
         const { user } = tenantUser;
         return {
             id: user.id,
-            name: user.name || user.phone,
+            name: user.name,
+            displayName: getUserDisplayName(user),
             phone: user.phone,
+            avatarUrl: user.avatarUrl,
             role: tenantUser.role,
             status: tenantUser.status,
             joinDate: user.createdAt.toISOString().split('T')[0],

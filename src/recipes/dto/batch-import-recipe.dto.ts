@@ -10,6 +10,7 @@ import {
     IsNumber,
     IsEnum,
     IsBoolean,
+    IsUUID,
 } from 'class-validator';
 import { RecipeCategory, RecipeType } from '@prisma/client';
 
@@ -27,6 +28,10 @@ export class BatchProductIngredientDto {
     @IsNumber()
     @IsOptional()
     weightInGrams?: number;
+
+    @IsUUID()
+    @IsOptional()
+    recipeVersionId?: string;
 }
 
 // [核心修改] 导出, 之前是 'BatchProductDto'
@@ -84,6 +89,10 @@ export class BatchComponentIngredientDto {
     @IsNumber()
     @IsOptional()
     waterContent?: number;
+
+    @IsUUID()
+    @IsOptional()
+    recipeVersionId?: string;
 }
 
 // [核心新增] 创建 BatchImportVersionDto 来持有 "版本" 特定的数据
@@ -105,6 +114,10 @@ export class BatchImportVersionDto {
     @IsNumber()
     @IsOptional()
     divisionLoss?: number;
+
+    @IsNumber()
+    @IsOptional()
+    customWaterContent?: number;
 
     @IsArray()
     @ValidateNested({ each: true })

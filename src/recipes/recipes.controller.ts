@@ -2,108 +2,18 @@
 // 路径: src/recipes/recipes.controller.ts
 // [核心修改] 修复 Prettier 格式问题，并将 'exportRecipes' 的权限检查移至 Service
 
-import 'multer';
-import {
-    Controller,
-    Get,
-    Post,
-    Body,
-    Param,
-    Delete,
-    UseGuards,
-    NotFoundException,
-    Patch,
-    UseInterceptors,
-    UploadedFile,
-    ParseFilePipe,
-    MaxFileSizeValidator,
-    BadRequestException,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, UseGuards, NotFoundException, Patch } from '@nestjs/common';
 import { RecipesService } from './recipes.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { BatchImportRecipeDto } from './dto/batch-import-recipe.dto';
-import { validate } from 'class-validator';
-import { plainToInstance } from 'class-transformer';
-import { BatchImportRequestDto } from './dto/batch-import-request.dto'; // [新增] 导入新的 DTO
 import { UpdateRecipeVersionNotesDto } from './dto/update-recipe-version-notes.dto';
-import { FeatureGuard } from '../billing/feature.guard';
-import { RequiresFeature } from '../billing/requires-feature.decorator';
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('recipes')
 export class RecipesController {
     constructor(private readonly recipesService: RecipesService) {}
-
-    /**
-     * [修改] 批量导入配方，增加多店铺支持和权限控制
-     */
-    @Post('batch-import')
-    @RequiresFeature('batchImport')
-    @UseGuards(FeatureGuard)
-    @UseInterceptors(FileInterceptor('file'))
-    async batchImport(
-        @UploadedFile(
-            new ParseFilePipe({
-                validators: [new MaxFileSizeValidator({ maxSize: 1024 * 1024 * 5 })], // 5MB
-                fileIsRequired: true,
-            }),
-        )
-        file: Express.Multer.File,
-        @GetUser() user: UserPayload,
-        @Body() batchImportRequestDto: BatchImportRequestDto, // [修改] 接收 tenantIds
-    ) {
-        if (file.mimetype !== 'application/json') {
-            throw new BadRequestException('文件类型错误，请上传正确的 JSON 文件。');
-        }
-
-        let recipesDto: BatchImportRecipeDto[];
-        try {
-            const fileContent = file.buffer.toString('utf-8');
-            const parsedJson: unknown = JSON.parse(fileContent);
-
-            if (!Array.isArray(parsedJson)) {
-                throw new BadRequestException('JSON 文件内容必须是一个数组。');
-            }
-
-            recipesDto = plainToInstance(BatchImportRecipeDto, parsedJson, {
-                enableImplicitConversion: true,
-            });
-
-            for (const dto of recipesDto) {
-                const validationErrors = await validate(dto);
-                if (validationErrors.length > 0) {
-                    const errorMessages = validationErrors
-                        .map((err) => (err.constraints ? Object.values(err.constraints) : []))
-                        .flat();
-                    throw new Error(`配方 "${dto.name}" 数据格式不正确: ${errorMessages.join(', ')}`);
-                }
-            }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : '无效的JSON文件或文件内容格式错误';
-            throw new BadRequestException(message);
-        }
-
-        // [修改] 将 userId 和 tenantIds 传递给 service
-        return this.recipesService.batchImportRecipes(user.sub, recipesDto, batchImportRequestDto.tenantIds);
-    }
-
-    /**
-     * [G-Code-Note] 【新增】导出指定店铺的所有配方
-     */
-    @Get('export/:tenantId')
-    @RequiresFeature('export')
-    @UseGuards(FeatureGuard)
-    // [G-Code-Note] 修复 Prettier 格式问题
-    // [G-Code-Note] 移除 async，因为权限检查已移入 service，修复 @typescript-eslint/require-await
-    exportRecipes(@GetUser() user: UserPayload, @Param('tenantId') tenantId: string) {
-        // [G-Code-Note] 权限检查逻辑已移至 service
-        // [G-Code-Note] 修复 @typescript-eslint/no-unsafe-return 和 no-unsafe-call
-        return this.recipesService.exportRecipes(tenantId, user.sub);
-    }
 
     /**
      * [修改] 创建一个全新的配方族。

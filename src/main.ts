@@ -8,6 +8,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
     const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+    app.set('trust proxy', 1);
 
     // 新增：配置静态文件服务
     app.useStaticAssets(join(__dirname, '..', 'public'));

@@ -7,5 +7,6 @@ import { CostingModule } from '../costing/costing.module';
     imports: [CostingModule],
     controllers: [IngredientsController],
     providers: [IngredientsService],
+    exports: [IngredientsService],
 })
 export class IngredientsModule {}

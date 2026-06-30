@@ -14,6 +14,9 @@ import { AuthDto, RegisterDto, WechatLoginDto, LoginResponseDto } from './dto/au
 import * as bcrypt from 'bcrypt';
 import { GlobalRole, TenantRole, TenantStatus } from '@prisma/client';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
+import { SmsService } from '../sms/sms.service';
+import { getUserDisplayName } from '../common/utils/user-display.util';
+import { getAvatarIdFromPath, getRandomAvatarPath } from '../users/avatar-catalog';
 // [核心删除] 不再需要单独导入 LoginResponseDto
 
 @Injectable()
@@ -21,7 +24,12 @@ export class AuthService {
     constructor(
         private prisma: PrismaService,
         private jwtService: JwtService,
+        private smsService: SmsService,
     ) {}
+
+    sendRegistrationCode(phone: string, requestIp?: string) {
+        return this.smsService.sendRegistrationCode(phone, requestIp);
+    }
 
     private generateJwtToken(
         userId: string,
@@ -41,7 +49,7 @@ export class AuthService {
     }
 
     async register(registerDto: RegisterDto): Promise<LoginResponseDto> {
-        const { name, phone, password } = registerDto;
+        const { phone, password, verificationCode } = registerDto;
 
         const existingUser = await this.prisma.user.findUnique({
             where: { phone },
@@ -50,14 +58,20 @@ export class AuthService {
             throw new ConflictException('该手机号已被注册');
         }
 
+        const challengeId = await this.smsService.verifyRegistrationCode(phone, verificationCode);
         const hashedPassword = await bcrypt.hash(password, 10);
+        const verifiedAt = new Date();
 
-        const user = await this.prisma.user.create({
-            data: {
-                name,
-                phone,
-                password: hashedPassword,
-            },
+        const user = await this.prisma.$transaction(async (tx) => {
+            await this.smsService.consumeRegistrationCode(tx, challengeId);
+            return tx.user.create({
+                data: {
+                    phone,
+                    phoneVerifiedAt: verifiedAt,
+                    password: hashedPassword,
+                    avatarUrl: getRandomAvatarPath(),
+                },
+            });
         });
         return {
             ...this.generateJwtToken(user.id, '', TenantRole.MEMBER, user.globalRole),
@@ -148,6 +162,7 @@ export class AuthService {
             select: {
                 id: true,
                 phone: true,
+                phoneVerifiedAt: true,
                 name: true, // [修改] 查询姓名
                 avatarUrl: true, // [核心新增] 查询头像
                 wechatOpenId: true,
@@ -179,6 +194,8 @@ export class AuthService {
 
         return {
             ...profile,
+            avatarId: getAvatarIdFromPath(profile.avatarUrl),
+            displayName: getUserDisplayName(profile),
             hasWechatBinding: Boolean(wechatOpenId || wechatUnionId),
         };
     }

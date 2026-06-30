@@ -10,10 +10,12 @@ import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './jwt.strategy';
 // import { InvitationsModule } from '../invitations/invitations.module'; // [核心删除] 移除导入
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { SmsModule } from '../sms/sms.module';
 
 @Module({
     imports: [
         PassportModule,
+        SmsModule,
         JwtModule.registerAsync({
             imports: [ConfigModule],
             inject: [ConfigService],

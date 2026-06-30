@@ -11,6 +11,9 @@ CREATE TYPE "TenantRole" AS ENUM ('OWNER', 'ADMIN', 'MEMBER');
 CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'PENDING');
 
 -- CreateEnum
+CREATE TYPE "SmsPurpose" AS ENUM ('REGISTER');
+
+-- CreateEnum
 CREATE TYPE "TenantStatus" AS ENUM ('ACTIVE', 'INACTIVE');
 
 -- CreateEnum
@@ -49,10 +52,17 @@ CREATE TYPE "PaymentOrderStatus" AS ENUM ('PENDING', 'PAID', 'CLOSED', 'PARTIALL
 -- CreateEnum
 CREATE TYPE "PaymentRefundStatus" AS ENUM ('PENDING', 'SUCCESS', 'CLOSED', 'ABNORMAL');
 
+-- CreateEnum
+CREATE TYPE "RecipeEditorSessionStatus" AS ENUM ('PENDING', 'APPROVED', 'EXPIRED');
+
+-- CreateEnum
+CREATE TYPE "RecipeDraftStatus" AS ENUM ('DRAFT', 'SYNCED', 'ARCHIVED');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
+    "phoneVerifiedAt" TIMESTAMP(3),
     "name" TEXT,
     "avatarUrl" TEXT,
     "password" TEXT,
@@ -64,6 +74,22 @@ CREATE TABLE "User" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "SmsVerificationCode" (
+    "id" TEXT NOT NULL,
+    "phone" TEXT NOT NULL,
+    "purpose" "SmsPurpose" NOT NULL,
+    "codeHash" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "consumedAt" TIMESTAMP(3),
+    "attemptCount" INTEGER NOT NULL DEFAULT 0,
+    "requestIp" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "SmsVerificationCode_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -79,6 +105,39 @@ CREATE TABLE "Tenant" (
     "trialEntitlementPolicyId" TEXT,
 
     CONSTRAINT "Tenant_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RecipeEditorSession" (
+    "id" TEXT NOT NULL,
+    "token" TEXT NOT NULL,
+    "status" "RecipeEditorSessionStatus" NOT NULL DEFAULT 'PENDING',
+    "tenantId" TEXT,
+    "userId" TEXT,
+    "actorRole" TEXT NOT NULL DEFAULT 'USER',
+    "tenantRole" TEXT,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "approvedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RecipeEditorSession_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RecipeDraft" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "createdById" TEXT,
+    "actorRole" TEXT NOT NULL DEFAULT 'USER',
+    "title" TEXT NOT NULL,
+    "status" "RecipeDraftStatus" NOT NULL DEFAULT 'DRAFT',
+    "payload" JSONB NOT NULL,
+    "syncedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RecipeDraft_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -328,6 +387,20 @@ CREATE TABLE "ProductIngredient" (
 );
 
 -- CreateTable
+CREATE TABLE "IngredientPreset" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "isFlour" BOOLEAN NOT NULL DEFAULT false,
+    "waterContent" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "IngredientPreset_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Ingredient" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
@@ -460,6 +533,30 @@ CREATE UNIQUE INDEX "User_wechatOpenId_key" ON "User"("wechatOpenId");
 CREATE UNIQUE INDEX "User_wechatUnionId_key" ON "User"("wechatUnionId");
 
 -- CreateIndex
+CREATE INDEX "SmsVerificationCode_phone_purpose_createdAt_idx" ON "SmsVerificationCode"("phone", "purpose", "createdAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "SmsVerificationCode_requestIp_createdAt_idx" ON "SmsVerificationCode"("requestIp", "createdAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "SmsVerificationCode_expiresAt_idx" ON "SmsVerificationCode"("expiresAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "RecipeEditorSession_token_key" ON "RecipeEditorSession"("token");
+
+-- CreateIndex
+CREATE INDEX "RecipeEditorSession_status_expiresAt_idx" ON "RecipeEditorSession"("status", "expiresAt");
+
+-- CreateIndex
+CREATE INDEX "RecipeEditorSession_tenantId_createdAt_idx" ON "RecipeEditorSession"("tenantId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "RecipeDraft_tenantId_status_updatedAt_idx" ON "RecipeDraft"("tenantId", "status", "updatedAt");
+
+-- CreateIndex
+CREATE INDEX "RecipeDraft_createdById_createdAt_idx" ON "RecipeDraft"("createdById", "createdAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Invitation_tenantId_phone_key" ON "Invitation"("tenantId", "phone");
 
 -- CreateIndex
@@ -574,6 +671,12 @@ CREATE INDEX "ProductIngredient_linkedExtraVersionId_idx" ON "ProductIngredient"
 CREATE INDEX "ProductIngredient_ingredientId_idx" ON "ProductIngredient"("ingredientId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "IngredientPreset_name_key" ON "IngredientPreset"("name");
+
+-- CreateIndex
+CREATE INDEX "IngredientPreset_isActive_sortOrder_idx" ON "IngredientPreset"("isActive", "sortOrder");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Ingredient_recipeFamilyId_key" ON "Ingredient"("recipeFamilyId");
 
 -- CreateIndex
@@ -629,6 +732,18 @@ CREATE INDEX "IngredientConsumptionLog_skuId_idx" ON "IngredientConsumptionLog"(
 
 -- AddForeignKey
 ALTER TABLE "Tenant" ADD CONSTRAINT "Tenant_trialEntitlementPolicyId_fkey" FOREIGN KEY ("trialEntitlementPolicyId") REFERENCES "EntitlementPolicy"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecipeEditorSession" ADD CONSTRAINT "RecipeEditorSession_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecipeEditorSession" ADD CONSTRAINT "RecipeEditorSession_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecipeDraft" ADD CONSTRAINT "RecipeDraft_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecipeDraft" ADD CONSTRAINT "RecipeDraft_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "TenantUser" ADD CONSTRAINT "TenantUser_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

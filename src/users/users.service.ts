@@ -3,10 +3,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import * as bcrypt from 'bcrypt';
+import { getUserDisplayName } from '../common/utils/user-display.util';
+import { getAvatarIdFromPath, getAvatarPath, listAvatarOptions } from './avatar-catalog';
 
 @Injectable()
 export class UsersService {
     constructor(private prisma: PrismaService) {}
+
+    listAvatars() {
+        return listAvatarOptions();
+    }
 
     async updateProfile(userId: string, updateProfileDto: UpdateProfileDto) {
         const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -14,15 +20,16 @@ export class UsersService {
             throw new NotFoundException('用户不存在');
         }
 
-        return this.prisma.user.update({
+        const updatedUser = await this.prisma.user.update({
             where: { id: userId },
             data: {
-                name: updateProfileDto.name,
-                avatarUrl: updateProfileDto.avatarUrl,
+                name: updateProfileDto.name === undefined ? undefined : updateProfileDto.name.trim() || null,
+                avatarUrl: updateProfileDto.avatarId ? getAvatarPath(updateProfileDto.avatarId) : undefined,
             },
             select: {
                 id: true,
                 phone: true,
+                phoneVerifiedAt: true,
                 name: true,
                 avatarUrl: true,
                 globalRole: true,
@@ -30,6 +37,11 @@ export class UsersService {
                 createdAt: true,
             },
         });
+        return {
+            ...updatedUser,
+            avatarId: getAvatarIdFromPath(updatedUser.avatarUrl),
+            displayName: getUserDisplayName(updatedUser),
+        };
     }
 
     async changePassword(userId: string, changePasswordDto: ChangePasswordDto) {

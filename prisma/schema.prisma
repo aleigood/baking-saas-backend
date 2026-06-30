@@ -44,6 +44,10 @@ enum UserStatus {
   PENDING
 }
 
+enum SmsPurpose {
+  REGISTER
+}
+
 // 店铺状态枚举
 enum TenantStatus {
   ACTIVE
@@ -131,6 +135,18 @@ enum PaymentRefundStatus {
   ABNORMAL
 }
 
+enum RecipeEditorSessionStatus {
+  PENDING
+  APPROVED
+  EXPIRED
+}
+
+enum RecipeDraftStatus {
+  DRAFT
+  SYNCED
+  ARCHIVED
+}
+
 // ================================================================= //
 //                         CORE AUTH & TENANCY                       //
 // ================================================================= //
@@ -139,6 +155,7 @@ enum PaymentRefundStatus {
 model User {
   id                    String               @id @default(uuid())
   phone                 String               @unique
+  phoneVerifiedAt       DateTime?
   name                  String?
   // [新增] 用户姓名 (New: User's name)
   avatarUrl             String?
@@ -157,6 +174,25 @@ model User {
   paymentOrders         PaymentOrder[]
   createdRecipeVersions RecipeVersion[]      @relation("RecipeVersionCreator")
   recipeOperationLogs   RecipeOperationLog[] @relation("RecipeOperationActor")
+  recipeEditorSessions  RecipeEditorSession[]
+  recipeDrafts          RecipeDraft[]
+}
+
+model SmsVerificationCode {
+  id           String     @id @default(uuid())
+  phone        String
+  purpose      SmsPurpose
+  codeHash     String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  attemptCount Int        @default(0)
+  requestIp    String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([phone, purpose, createdAt(sort: Desc)])
+  @@index([requestIp, createdAt(sort: Desc)])
+  @@index([expiresAt])
 }
 
 // 租户/店铺模型
@@ -179,7 +215,46 @@ model Tenant {
   productionTasks     ProductionTask[] // 一个店铺可以有多个生产任务
   subscriptions       TenantSubscription[]
   paymentOrders       PaymentOrder[]
+  recipeEditorSessions RecipeEditorSession[]
+  recipeDrafts        RecipeDraft[]
   trialEntitlementPolicy EntitlementPolicy? @relation("TenantTrialPolicy", fields: [trialEntitlementPolicyId], references: [id])
+}
+
+model RecipeEditorSession {
+  id         String                    @id @default(uuid())
+  token      String                    @unique
+  status     RecipeEditorSessionStatus @default(PENDING)
+  tenantId   String?
+  userId     String?
+  actorRole  String                    @default("USER")
+  tenantRole String?
+  expiresAt  DateTime
+  approvedAt DateTime?
+  createdAt  DateTime                  @default(now())
+  updatedAt  DateTime                  @updatedAt
+  tenant     Tenant?                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, expiresAt])
+  @@index([tenantId, createdAt])
+}
+
+model RecipeDraft {
+  id          String            @id @default(uuid())
+  tenantId    String
+  createdById String?
+  actorRole   String            @default("USER")
+  title       String
+  status      RecipeDraftStatus @default(DRAFT)
+  payload     Json
+  syncedAt    DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy   User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, updatedAt])
+  @@index([createdById, createdAt])
 }
 
 // 用户与租户的多对多关系表
@@ -528,6 +603,19 @@ model ProductIngredient {
 // ================================================================= //
 //                  INGREDIENTS & PRICING                    //
 // ================================================================= //
+
+model IngredientPreset {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  isFlour      Boolean  @default(false)
+  waterContent Decimal  @default(0)
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+}
 
 // 原料品类模型
 model Ingredient {
