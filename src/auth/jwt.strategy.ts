@@ -4,7 +4,7 @@ import { Strategy, ExtractJwt } from 'passport-jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { UserPayload } from './interfaces/user-payload.interface';
-import { GlobalRole, TenantStatus, UserStatus } from '@prisma/client';
+import { TenantStatus, UserStatus } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -36,7 +36,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         }
 
         let tenantRole = payload.tenantRole;
-        if (user.globalRole !== GlobalRole.SUPER_ADMIN && payload.tenantId) {
+        if (payload.tenantId) {
             const membership = await this.prisma.tenantUser.findUnique({
                 where: { userId_tenantId: { userId: payload.sub, tenantId: payload.tenantId } },
                 select: { role: true, status: true, tenant: { select: { status: true } } },

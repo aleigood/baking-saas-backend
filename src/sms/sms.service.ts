@@ -34,7 +34,8 @@ export class SmsService implements OnModuleInit {
         private readonly config: ConfigService,
         @Inject(SMS_PROVIDER) private readonly provider: SmsProvider,
     ) {
-        this.providerName = this.config.get<string>('SMS_PROVIDER', 'mock').toLowerCase();
+        const fallbackProvider = this.config.get<string>('NODE_ENV') === 'production' ? 'disabled' : 'mock';
+        this.providerName = this.config.get<string>('SMS_PROVIDER', fallbackProvider).toLowerCase();
         this.testCode = this.config.get<string>('SMS_TEST_CODE')?.trim();
         this.expiresInSeconds = this.readPositiveInt('SMS_CODE_EXPIRES_SECONDS', 300);
         this.cooldownSeconds = this.readPositiveInt('SMS_CODE_COOLDOWN_SECONDS', 60);
@@ -55,28 +56,24 @@ export class SmsService implements OnModuleInit {
         const existingUser = await this.prisma.user.findUnique({ where: { phone }, select: { id: true } });
         if (existingUser) throw new ConflictException('该手机号已注册，请直接登录');
 
+        return this.sendCode(phone, requestIp);
+    }
+
+    sendProfileCode(phone: string, requestIp?: string): Promise<SmsCodeResponse> {
+        return this.sendCode(phone, requestIp);
+    }
+
+    async issueAssistedCode(phone: string, requestIp?: string): Promise<{ code: string; expiresInSeconds: number }> {
+        const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
+        await this.createChallenge(phone, code, requestIp);
+        return { code, expiresInSeconds: this.expiresInSeconds };
+    }
+
+    private async sendCode(phone: string, requestIp?: string): Promise<SmsCodeResponse> {
         await this.assertRateLimits(phone, requestIp);
 
         const code = this.testCode || randomInt(0, 1_000_000).toString().padStart(6, '0');
-        const codeHash = await bcrypt.hash(code, 10);
-        const now = new Date();
-        const expiresAt = new Date(now.getTime() + this.expiresInSeconds * 1000);
-
-        const challenge = await this.prisma.$transaction(async (tx) => {
-            await tx.smsVerificationCode.updateMany({
-                where: { phone, purpose: SmsPurpose.REGISTER, consumedAt: null },
-                data: { consumedAt: now },
-            });
-            return tx.smsVerificationCode.create({
-                data: {
-                    phone,
-                    purpose: SmsPurpose.REGISTER,
-                    codeHash,
-                    expiresAt,
-                    requestIp,
-                },
-            });
-        });
+        const challenge = await this.createChallenge(phone, code, requestIp);
 
         try {
             await this.provider.sendRegistrationCode(phone, code);
@@ -97,6 +94,21 @@ export class SmsService implements OnModuleInit {
             response.debugCode = code;
         }
         return response;
+    }
+
+    private async createChallenge(phone: string, code: string, requestIp?: string) {
+        const codeHash = await bcrypt.hash(code, 10);
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + this.expiresInSeconds * 1000);
+        return this.prisma.$transaction(async (tx) => {
+            await tx.smsVerificationCode.updateMany({
+                where: { phone, purpose: SmsPurpose.REGISTER, consumedAt: null },
+                data: { consumedAt: now },
+            });
+            return tx.smsVerificationCode.create({
+                data: { phone, purpose: SmsPurpose.REGISTER, codeHash, expiresAt, requestIp },
+            });
+        });
     }
 
     async verifyRegistrationCode(phone: string, code: string): Promise<string> {
@@ -145,7 +157,8 @@ export class SmsService implements OnModuleInit {
         });
         if (latest) {
             const retryAfter = this.cooldownSeconds - Math.floor((now - latest.createdAt.getTime()) / 1000);
-            if (retryAfter > 0) throw new HttpException(`请${retryAfter}秒后再获取验证码`, HttpStatus.TOO_MANY_REQUESTS);
+            if (retryAfter > 0)
+                throw new HttpException(`请${retryAfter}秒后再获取验证码`, HttpStatus.TOO_MANY_REQUESTS);
         }
 
         const hourAgo = new Date(now - 60 * 60 * 1000);

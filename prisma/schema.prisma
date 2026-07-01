@@ -61,6 +61,18 @@ enum InvitationStatus {
   EXPIRED
 }
 
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELED
+}
+
+enum JoinLinkStatus {
+  ACTIVE
+  REVOKED
+}
+
 enum ProductionTaskStatus {
   PENDING
   IN_PROGRESS
@@ -153,29 +165,38 @@ enum RecipeDraftStatus {
 
 // 用户账户模型
 model User {
-  id                    String               @id @default(uuid())
-  phone                 String               @unique
-  phoneVerifiedAt       DateTime?
-  name                  String?
+  id                             String                  @id @default(uuid())
+  phone                          String?                 @unique
+  phoneVerifiedAt                DateTime?
+  name                           String?
+  wechatNickname                 String?
+  profileCompletedAt             DateTime?
   // [新增] 用户姓名 (New: User's name)
-  avatarUrl             String?
+  avatarUrl                      String?
   // [核心新增] 用户头像URL
-  password              String?
-  wechatOpenId          String?              @unique
-  wechatUnionId         String?              @unique
-  globalRole            GlobalRole           @default(USER)
-  status                UserStatus           @default(ACTIVE)
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
-  tenants               TenantUser[] // User can belong to multiple tenants
-  priceRecords          PriceRecord[]
-  createdTasks          ProductionTask[]     @relation("TaskCreator")
-  startedTasks          ProductionTask[]     @relation("TaskStarter")
-  paymentOrders         PaymentOrder[]
-  createdRecipeVersions RecipeVersion[]      @relation("RecipeVersionCreator")
-  recipeOperationLogs   RecipeOperationLog[] @relation("RecipeOperationActor")
-  recipeEditorSessions  RecipeEditorSession[]
-  recipeDrafts          RecipeDraft[]
+  password                       String?
+  wechatOpenId                   String?                 @unique
+  wechatUnionId                  String?                 @unique
+  globalRole                     GlobalRole              @default(USER)
+  status                         UserStatus              @default(ACTIVE)
+  createdAt                      DateTime                @default(now())
+  updatedAt                      DateTime                @updatedAt
+  tenants                        TenantUser[] // User can belong to multiple tenants
+  priceRecords                   PriceRecord[]
+  createdTasks                   ProductionTask[]        @relation("TaskCreator")
+  startedTasks                   ProductionTask[]        @relation("TaskStarter")
+  paymentOrders                  PaymentOrder[]
+  createdRecipeVersions          RecipeVersion[]         @relation("RecipeVersionCreator")
+  recipeOperationLogs            RecipeOperationLog[]    @relation("RecipeOperationActor")
+  recipeEditorSessions           RecipeEditorSession[]
+  recipeDrafts                   RecipeDraft[]
+  storeApplications              StoreApplication[]      @relation("StoreApplicationApplicant")
+  reviewedStoreApplications      StoreApplication[]      @relation("StoreApplicationReviewer")
+  createdJoinLinks               TenantJoinLink[]        @relation("JoinLinkCreator")
+  membershipApplications         MembershipApplication[] @relation("MembershipApplicant")
+  reviewedMembershipApplications MembershipApplication[] @relation("MembershipReviewer")
+
+  @@index([profileCompletedAt, createdAt])
 }
 
 model SmsVerificationCode {
@@ -197,27 +218,96 @@ model SmsVerificationCode {
 
 // 租户/店铺模型
 model Tenant {
-  id                  String               @id @default(uuid())
-  name                String
+  id                       String                  @id @default(uuid())
+  name                     String
+  address                  String
   // status 字段来管理店铺状态
-  status              TenantStatus         @default(ACTIVE)
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  trialStartedAt      DateTime?
-  trialEndsAt         DateTime?
-  freeTierResetAt     DateTime?
+  status                   TenantStatus            @default(ACTIVE)
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+  trialStartedAt           DateTime?
+  trialEndsAt              DateTime?
+  freeTierResetAt          DateTime?
   trialEntitlementPolicyId String?
-  members             TenantUser[]
-  invitations         Invitation[]
-  ingredients         Ingredient[]
-  recipeFamilies      RecipeFamily[] // 一个店铺可以有多个配方族
-  recipeOperationLogs RecipeOperationLog[]
-  productionTasks     ProductionTask[] // 一个店铺可以有多个生产任务
-  subscriptions       TenantSubscription[]
-  paymentOrders       PaymentOrder[]
-  recipeEditorSessions RecipeEditorSession[]
-  recipeDrafts        RecipeDraft[]
-  trialEntitlementPolicy EntitlementPolicy? @relation("TenantTrialPolicy", fields: [trialEntitlementPolicyId], references: [id])
+  members                  TenantUser[]
+  invitations              Invitation[]
+  ingredients              Ingredient[]
+  recipeFamilies           RecipeFamily[] // 一个店铺可以有多个配方族
+  recipeOperationLogs      RecipeOperationLog[]
+  productionTasks          ProductionTask[] // 一个店铺可以有多个生产任务
+  subscriptions            TenantSubscription[]
+  paymentOrders            PaymentOrder[]
+  recipeEditorSessions     RecipeEditorSession[]
+  recipeDrafts             RecipeDraft[]
+  storeApplication         StoreApplication?
+  joinLinks                TenantJoinLink[]
+  membershipApplications   MembershipApplication[]
+  trialEntitlementPolicy   EntitlementPolicy?      @relation("TenantTrialPolicy", fields: [trialEntitlementPolicyId], references: [id])
+}
+
+model StoreApplication {
+  id              String            @id @default(uuid())
+  applicantId     String
+  storeName       String
+  address         String
+  description     String?
+  contactName     String
+  contactPhone    String
+  wechatNickname  String?
+  status          ApplicationStatus @default(PENDING)
+  reviewedById    String?
+  reviewNote      String?
+  reviewedAt      DateTime?
+  createdTenantId String?           @unique
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  applicant       User              @relation("StoreApplicationApplicant", fields: [applicantId], references: [id], onDelete: Cascade)
+  reviewer        User?             @relation("StoreApplicationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  createdTenant   Tenant?           @relation(fields: [createdTenantId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([applicantId, status])
+}
+
+model TenantJoinLink {
+  id           String                  @id @default(uuid())
+  tenantId     String
+  createdById  String
+  tokenHash    String                  @unique
+  role         TenantRole              @default(MEMBER)
+  status       JoinLinkStatus          @default(ACTIVE)
+  expiresAt    DateTime
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  tenant       Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy    User                    @relation("JoinLinkCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  applications MembershipApplication[]
+
+  @@index([tenantId, status, expiresAt])
+}
+
+model MembershipApplication {
+  id           String            @id @default(uuid())
+  joinLinkId   String
+  tenantId     String
+  applicantId  String
+  displayName  String
+  wechatNickname String?
+  message      String?
+  status       ApplicationStatus @default(PENDING)
+  reviewedById String?
+  reviewNote   String?
+  reviewedAt   DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  joinLink     TenantJoinLink    @relation(fields: [joinLinkId], references: [id], onDelete: Cascade)
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  applicant    User              @relation("MembershipApplicant", fields: [applicantId], references: [id], onDelete: Cascade)
+  reviewer     User?             @relation("MembershipReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([joinLinkId, applicantId])
+  @@index([tenantId, status, createdAt])
+  @@index([applicantId, status])
 }
 
 model RecipeEditorSession {
@@ -334,21 +424,21 @@ model BillingSettings {
 }
 
 model TenantSubscription {
-  id        String             @id @default(uuid())
-  tenantId  String
-  planId    String
+  id                  String             @id @default(uuid())
+  tenantId            String
+  planId              String
   entitlementPolicyId String
-  status    SubscriptionStatus @default(ACTIVE)
-  startsAt  DateTime
-  expiresAt DateTime
-  source    String             @default("manual")
-  notes     String?
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
-  tenant    Tenant             @relation(fields: [tenantId], references: [id])
-  plan      SubscriptionPlan   @relation(fields: [planId], references: [id])
-  entitlementPolicy EntitlementPolicy @relation(fields: [entitlementPolicyId], references: [id])
-  orders    PaymentOrder[]
+  status              SubscriptionStatus @default(ACTIVE)
+  startsAt            DateTime
+  expiresAt           DateTime
+  source              String             @default("manual")
+  notes               String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  tenant              Tenant             @relation(fields: [tenantId], references: [id])
+  plan                SubscriptionPlan   @relation(fields: [planId], references: [id])
+  entitlementPolicy   EntitlementPolicy  @relation(fields: [entitlementPolicyId], references: [id])
+  orders              PaymentOrder[]
 
   @@index([tenantId, status])
   @@index([expiresAt])

@@ -6,6 +6,10 @@ export class TenantDataDto {
     @IsNotEmpty()
     name!: string;
 
+    @IsString()
+    @IsNotEmpty()
+    address!: string;
+
     @IsEnum(TenantStatus)
     @IsOptional()
     status?: TenantStatus;

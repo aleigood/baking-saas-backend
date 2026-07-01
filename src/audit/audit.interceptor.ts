@@ -51,7 +51,7 @@ export class AuditInterceptor implements NestInterceptor {
 
     private targetType(path: string): string | null {
         const match = path.match(
-            /super-admin\/(users|tenants|subscriptions|subscription-plans|entitlement-policies|billing-settings|payment-orders)/,
+            /super-admin\/(users|tenants|subscriptions|subscription-plans|entitlement-policies|billing-settings|payment-orders|sms-assistance)/,
         );
         return match?.[1] || null;
     }

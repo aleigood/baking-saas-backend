@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
-import { CreateOnboardingTenantDto } from './dto/create-onboarding-tenant.dto';
+import { CreateMembershipApplicationDto } from './dto/create-membership-application.dto';
+import { CreateStoreApplicationDto } from './dto/create-store-application.dto';
 import { OnboardingService } from './onboarding.service';
 
 @UseGuards(AuthGuard('jwt'))
@@ -10,18 +11,33 @@ import { OnboardingService } from './onboarding.service';
 export class OnboardingController {
     constructor(private readonly onboardingService: OnboardingService) {}
 
-    @Get('invitations')
-    listInvitations(@GetUser() user: UserPayload) {
-        return this.onboardingService.listInvitations(user.sub);
+    @Get('store-application')
+    getStoreApplication(@GetUser() user: UserPayload) {
+        return this.onboardingService.getStoreApplication(user.sub);
     }
 
-    @Post('tenant')
-    createTenant(@GetUser() user: UserPayload, @Body() dto: CreateOnboardingTenantDto) {
-        return this.onboardingService.createTenant(user.sub, dto.name);
+    @Post('store-applications')
+    createStoreApplication(@GetUser() user: UserPayload, @Body() dto: CreateStoreApplicationDto) {
+        return this.onboardingService.createStoreApplication(user.sub, dto);
     }
 
-    @Post('invitations/:id/accept')
-    acceptInvitation(@GetUser() user: UserPayload, @Param('id', ParseUUIDPipe) id: string) {
-        return this.onboardingService.acceptInvitation(user.sub, id);
+    @Post('store-applications/:id/cancel')
+    cancelStoreApplication(@GetUser() user: UserPayload, @Param('id', ParseUUIDPipe) id: string) {
+        return this.onboardingService.cancelStoreApplication(user.sub, id);
+    }
+
+    @Get('join-link')
+    getJoinLink(@GetUser() user: UserPayload, @Query('token') token: string) {
+        return this.onboardingService.getJoinLink(user.sub, token);
+    }
+
+    @Post('membership-applications')
+    createMembershipApplication(@GetUser() user: UserPayload, @Body() dto: CreateMembershipApplicationDto) {
+        return this.onboardingService.createMembershipApplication(user.sub, dto);
+    }
+
+    @Get('membership-applications/mine')
+    listMembershipApplications(@GetUser() user: UserPayload) {
+        return this.onboardingService.listMembershipApplications(user.sub);
     }
 }

@@ -4,4 +4,8 @@ export class UpdateTenantDto {
     @IsString()
     @IsOptional()
     name?: string;
+
+    @IsString()
+    @IsOptional()
+    address?: string;
 }

@@ -1,4 +1,17 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query, ParseUUIDPipe } from '@nestjs/common';
+import {
+    Controller,
+    Get,
+    Post,
+    Body,
+    Patch,
+    Param,
+    Delete,
+    UseGuards,
+    Query,
+    ParseUUIDPipe,
+    Req,
+} from '@nestjs/common';
+import { Request } from 'express';
 import { SuperAdminService } from './super-admin.service';
 import { AuthGuard } from '@nestjs/passport';
 import { SuperAdminGuard } from './guards/super-admin.guard';
@@ -22,6 +35,10 @@ import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { UpdateBillingSettingsDto, UpsertEntitlementPolicyDto } from './dto/entitlement-policy.dto';
 import { EntitlementsService } from '../billing/entitlements.service';
 import { UpsertIngredientPresetDto } from './dto/upsert-ingredient-preset.dto';
+import { ReviewStoreApplicationDto } from './dto/review-store-application.dto';
+import { ApplicationStatus } from '@prisma/client';
+import { SmsService } from '../sms/sms.service';
+import { SendRegistrationCodeDto } from '../auth/dto/auth.dto';
 
 @UseGuards(AuthGuard('jwt'), SuperAdminGuard)
 @Controller('super-admin')
@@ -30,11 +47,40 @@ export class SuperAdminController {
         private readonly superAdminService: SuperAdminService,
         private readonly billingService: BillingService,
         private readonly entitlementsService: EntitlementsService,
+        private readonly smsService: SmsService,
     ) {}
+
+    @Post('sms-assistance/code')
+    issueAssistedSmsCode(@Body() dto: SendRegistrationCodeDto, @Req() request: Request) {
+        return this.smsService.issueAssistedCode(dto.phone, request.ip);
+    }
 
     @Get('dashboard-stats')
     getDashboardStats() {
         return this.superAdminService.getDashboardStats();
+    }
+
+    @Get('store-applications')
+    findStoreApplications(@Query() query: QueryDto & { status?: ApplicationStatus }) {
+        return this.superAdminService.findStoreApplications(query);
+    }
+
+    @Post('store-applications/:id/approve')
+    approveStoreApplication(
+        @GetUser() user: UserPayload,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: ReviewStoreApplicationDto,
+    ) {
+        return this.superAdminService.approveStoreApplication(id, user.sub, dto);
+    }
+
+    @Post('store-applications/:id/reject')
+    rejectStoreApplication(
+        @GetUser() user: UserPayload,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: ReviewStoreApplicationDto,
+    ) {
+        return this.superAdminService.rejectStoreApplication(id, user.sub, dto);
     }
 
     // --- Subscription plan endpoints ---

@@ -20,6 +20,12 @@ CREATE TYPE "TenantStatus" AS ENUM ('ACTIVE', 'INACTIVE');
 CREATE TYPE "InvitationStatus" AS ENUM ('PENDING', 'ACCEPTED', 'DECLINED', 'EXPIRED');
 
 -- CreateEnum
+CREATE TYPE "ApplicationStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'CANCELED');
+
+-- CreateEnum
+CREATE TYPE "JoinLinkStatus" AS ENUM ('ACTIVE', 'REVOKED');
+
+-- CreateEnum
 CREATE TYPE "ProductionTaskStatus" AS ENUM ('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED');
 
 -- CreateEnum
@@ -61,9 +67,11 @@ CREATE TYPE "RecipeDraftStatus" AS ENUM ('DRAFT', 'SYNCED', 'ARCHIVED');
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
-    "phone" TEXT NOT NULL,
+    "phone" TEXT,
     "phoneVerifiedAt" TIMESTAMP(3),
     "name" TEXT,
+    "wechatNickname" TEXT,
+    "profileCompletedAt" TIMESTAMP(3),
     "avatarUrl" TEXT,
     "password" TEXT,
     "wechatOpenId" TEXT,
@@ -96,6 +104,7 @@ CREATE TABLE "SmsVerificationCode" (
 CREATE TABLE "Tenant" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "address" TEXT NOT NULL,
     "status" "TenantStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -105,6 +114,61 @@ CREATE TABLE "Tenant" (
     "trialEntitlementPolicyId" TEXT,
 
     CONSTRAINT "Tenant_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "StoreApplication" (
+    "id" TEXT NOT NULL,
+    "applicantId" TEXT NOT NULL,
+    "storeName" TEXT NOT NULL,
+    "address" TEXT NOT NULL,
+    "description" TEXT,
+    "contactName" TEXT NOT NULL,
+    "contactPhone" TEXT NOT NULL,
+    "wechatNickname" TEXT,
+    "status" "ApplicationStatus" NOT NULL DEFAULT 'PENDING',
+    "reviewedById" TEXT,
+    "reviewNote" TEXT,
+    "reviewedAt" TIMESTAMP(3),
+    "createdTenantId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "StoreApplication_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "TenantJoinLink" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "createdById" TEXT NOT NULL,
+    "tokenHash" TEXT NOT NULL,
+    "role" "TenantRole" NOT NULL DEFAULT 'MEMBER',
+    "status" "JoinLinkStatus" NOT NULL DEFAULT 'ACTIVE',
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "TenantJoinLink_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "MembershipApplication" (
+    "id" TEXT NOT NULL,
+    "joinLinkId" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "applicantId" TEXT NOT NULL,
+    "displayName" TEXT NOT NULL,
+    "wechatNickname" TEXT,
+    "message" TEXT,
+    "status" "ApplicationStatus" NOT NULL DEFAULT 'PENDING',
+    "reviewedById" TEXT,
+    "reviewNote" TEXT,
+    "reviewedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "MembershipApplication_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -533,6 +597,9 @@ CREATE UNIQUE INDEX "User_wechatOpenId_key" ON "User"("wechatOpenId");
 CREATE UNIQUE INDEX "User_wechatUnionId_key" ON "User"("wechatUnionId");
 
 -- CreateIndex
+CREATE INDEX "User_profileCompletedAt_createdAt_idx" ON "User"("profileCompletedAt", "createdAt");
+
+-- CreateIndex
 CREATE INDEX "SmsVerificationCode_phone_purpose_createdAt_idx" ON "SmsVerificationCode"("phone", "purpose", "createdAt" DESC);
 
 -- CreateIndex
@@ -540,6 +607,30 @@ CREATE INDEX "SmsVerificationCode_requestIp_createdAt_idx" ON "SmsVerificationCo
 
 -- CreateIndex
 CREATE INDEX "SmsVerificationCode_expiresAt_idx" ON "SmsVerificationCode"("expiresAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "StoreApplication_createdTenantId_key" ON "StoreApplication"("createdTenantId");
+
+-- CreateIndex
+CREATE INDEX "StoreApplication_status_createdAt_idx" ON "StoreApplication"("status", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "StoreApplication_applicantId_status_idx" ON "StoreApplication"("applicantId", "status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "TenantJoinLink_tokenHash_key" ON "TenantJoinLink"("tokenHash");
+
+-- CreateIndex
+CREATE INDEX "TenantJoinLink_tenantId_status_expiresAt_idx" ON "TenantJoinLink"("tenantId", "status", "expiresAt");
+
+-- CreateIndex
+CREATE INDEX "MembershipApplication_tenantId_status_createdAt_idx" ON "MembershipApplication"("tenantId", "status", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "MembershipApplication_applicantId_status_idx" ON "MembershipApplication"("applicantId", "status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MembershipApplication_joinLinkId_applicantId_key" ON "MembershipApplication"("joinLinkId", "applicantId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "RecipeEditorSession_token_key" ON "RecipeEditorSession"("token");
@@ -732,6 +823,33 @@ CREATE INDEX "IngredientConsumptionLog_skuId_idx" ON "IngredientConsumptionLog"(
 
 -- AddForeignKey
 ALTER TABLE "Tenant" ADD CONSTRAINT "Tenant_trialEntitlementPolicyId_fkey" FOREIGN KEY ("trialEntitlementPolicyId") REFERENCES "EntitlementPolicy"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StoreApplication" ADD CONSTRAINT "StoreApplication_applicantId_fkey" FOREIGN KEY ("applicantId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StoreApplication" ADD CONSTRAINT "StoreApplication_reviewedById_fkey" FOREIGN KEY ("reviewedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StoreApplication" ADD CONSTRAINT "StoreApplication_createdTenantId_fkey" FOREIGN KEY ("createdTenantId") REFERENCES "Tenant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TenantJoinLink" ADD CONSTRAINT "TenantJoinLink_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TenantJoinLink" ADD CONSTRAINT "TenantJoinLink_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MembershipApplication" ADD CONSTRAINT "MembershipApplication_joinLinkId_fkey" FOREIGN KEY ("joinLinkId") REFERENCES "TenantJoinLink"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MembershipApplication" ADD CONSTRAINT "MembershipApplication_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MembershipApplication" ADD CONSTRAINT "MembershipApplication_applicantId_fkey" FOREIGN KEY ("applicantId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MembershipApplication" ADD CONSTRAINT "MembershipApplication_reviewedById_fkey" FOREIGN KEY ("reviewedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RecipeEditorSession" ADD CONSTRAINT "RecipeEditorSession_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;

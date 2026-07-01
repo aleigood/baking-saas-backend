@@ -36,6 +36,7 @@ export class TenantsService {
         return this.prisma.tenant.create({
             data: {
                 name: tenantData.name,
+                address: tenantData.address,
                 members: {
                     create: {
                         userId: userId,

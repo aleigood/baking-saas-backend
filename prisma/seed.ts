@@ -26,12 +26,16 @@ async function main() {
         where: { phone: adminPhone },
         update: {
             name: '超级管理员',
+            phoneVerifiedAt: new Date(),
+            profileCompletedAt: new Date(),
             globalRole: GlobalRole.SUPER_ADMIN,
             status: 'ACTIVE',
         },
         create: {
             name: '超级管理员',
             phone: adminPhone,
+            phoneVerifiedAt: new Date(),
+            profileCompletedAt: new Date(),
             password: hashedAdminPassword,
             globalRole: GlobalRole.SUPER_ADMIN,
             status: 'ACTIVE',
@@ -55,10 +59,13 @@ async function main() {
 
     const leo = await prisma.user.upsert({
         where: { phone: leoPhone },
-        update: {},
+        update: { phoneVerifiedAt: new Date(), profileCompletedAt: new Date(), wechatNickname: 'Leo' },
         create: {
             name: 'Leo',
+            wechatNickname: 'Leo',
             phone: leoPhone,
+            phoneVerifiedAt: new Date(),
+            profileCompletedAt: new Date(),
             password: hashedLeoPassword,
             globalRole: GlobalRole.USER,
             status: 'ACTIVE',
@@ -82,6 +89,7 @@ async function main() {
         await prisma.tenant.create({
             data: {
                 name: '小时光',
+                address: '测试地址',
                 members: {
                     create: {
                         userId: leo.id,

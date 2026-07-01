@@ -1,5 +1,5 @@
 // 文件路径: src/auth/dto/auth.dto.ts
-import { IsString, IsNotEmpty, IsOptional, Matches, MinLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, Matches, MaxLength, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 /**
@@ -52,6 +52,8 @@ export class AuthDto {
 export class WechatLoginDto {
     @IsString()
     @IsNotEmpty()
+    @MaxLength(512)
+    @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
     code!: string;
 
     @IsString()
@@ -62,6 +64,8 @@ export class WechatLoginDto {
 export class BindWechatDto {
     @IsString()
     @IsNotEmpty()
+    @MaxLength(512)
+    @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
     code!: string;
 }
 

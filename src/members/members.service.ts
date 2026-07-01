@@ -1,255 +1,210 @@
-// ========================================================
-
-// 文件路径: src/members/members.service.ts
-import {
-    Injectable as InjectableMembers,
-    NotFoundException as NotFoundExceptionMembers,
-    ForbiddenException as ForbiddenExceptionMembers,
-    ConflictException,
-} from '@nestjs/common';
-import { PrismaService as PrismaServiceMembers } from '../prisma/prisma.service';
-import { InvitationStatus, TenantRole } from '@prisma/client';
-import { UpdateMemberDto as UpdateMemberDtoMembers } from './dto/update-member.dto';
-import { UserPayload as UserPayloadMembers } from 'src/auth/interfaces/user-payload.interface';
-import { CreateMemberDto } from './dto/create-member.dto'; // [核心新增] 导入CreateMemberDto
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ApplicationStatus, JoinLinkStatus, TenantRole, UserStatus } from '@prisma/client';
+import { createHash, randomBytes } from 'crypto';
+import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { EntitlementsService } from '../billing/entitlements.service';
 import { getUserDisplayName } from '../common/utils/user-display.util';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateJoinLinkDto } from './dto/create-join-link.dto';
+import { ReviewMembershipApplicationDto } from './dto/review-membership-application.dto';
+import { UpdateMemberDto } from './dto/update-member.dto';
 
-@InjectableMembers()
+@Injectable()
 export class MembersService {
     constructor(
-        private prisma: PrismaServiceMembers,
+        private readonly prisma: PrismaService,
         private readonly entitlements: EntitlementsService,
     ) {}
 
-    /**
-     * [核心新增] 在指定店铺中创建一个新成员
-     * @param tenantId 店铺ID
-     * @param dto 成员数据
-     * @param currentUser 当前操作用户
-     */
-    async create(tenantId: string, dto: CreateMemberDto, currentUser: UserPayloadMembers) {
-        if (currentUser.tenantRole === TenantRole.MEMBER) {
-            throw new ForbiddenExceptionMembers('您没有权限创建新成员。');
-        }
+    async createJoinLink(user: UserPayload, dto: CreateJoinLinkDto) {
+        this.assertOwner(user);
+        if (dto.role === TenantRole.OWNER) throw new ForbiddenException('不能邀请店铺所有者');
+        const token = randomBytes(32).toString('base64url');
+        const link = await this.prisma.tenantJoinLink.create({
+            data: {
+                tenantId: user.tenantId,
+                createdById: user.sub,
+                tokenHash: createHash('sha256').update(token).digest('hex'),
+                role: dto.role,
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            },
+        });
+        return { id: link.id, token, role: link.role, expiresAt: link.expiresAt };
+    }
 
-        // [核心新增] 权限校验：管理员不能创建管理员或所有者
-        if (
-            currentUser.tenantRole === TenantRole.ADMIN &&
-            (dto.role === TenantRole.ADMIN || dto.role === TenantRole.OWNER)
-        ) {
-            throw new ForbiddenExceptionMembers('管理员只能创建普通员工。');
-        }
-
-        // [核心新增] 权限校验：所有者不能直接创建另一个所有者
-        if (dto.role === TenantRole.OWNER) {
-            throw new ForbiddenExceptionMembers('不能直接创建所有者角色。');
-        }
-
-        await this.entitlements.assertCanInviteMember(tenantId);
-
-        const existingUser = await this.prisma.user.findUnique({ where: { phone: dto.phone }, select: { id: true } });
-        if (existingUser) {
-            const membership = await this.prisma.tenantUser.findUnique({
-                where: { userId_tenantId: { userId: existingUser.id, tenantId } },
-            });
-            if (membership) throw new ConflictException('该用户已经属于当前店铺。');
-        }
-
-        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-        return this.prisma.invitation.upsert({
-            where: { tenantId_phone: { tenantId, phone: dto.phone } },
-            update: { role: dto.role, status: InvitationStatus.PENDING, expiresAt },
-            create: { tenantId, phone: dto.phone, role: dto.role, status: InvitationStatus.PENDING, expiresAt },
-            include: { tenant: { select: { id: true, name: true } } },
+    listJoinLinks(user: UserPayload) {
+        this.assertOwner(user);
+        return this.prisma.tenantJoinLink.findMany({
+            where: { tenantId: user.tenantId, status: JoinLinkStatus.ACTIVE, expiresAt: { gt: new Date() } },
+            select: { id: true, role: true, expiresAt: true, createdAt: true },
+            orderBy: { createdAt: 'desc' },
         });
     }
 
-    /**
-     * [核心新增] 获取所有者名下所有店铺的全部成员列表
-     * @param ownerId 所有者的用户ID
-     */
-    async findAllInAllTenantsByOwner(ownerId: string) {
-        // 1. 验证用户是否为所有者，并获取其拥有的所有店铺ID
-        const ownerTenants = await this.prisma.tenantUser.findMany({
-            where: {
-                userId: ownerId,
-                role: TenantRole.OWNER,
-            },
-            select: {
-                tenantId: true,
-            },
+    async revokeJoinLink(user: UserPayload, id: string) {
+        this.assertOwner(user);
+        const result = await this.prisma.tenantJoinLink.updateMany({
+            where: { id, tenantId: user.tenantId },
+            data: { status: JoinLinkStatus.REVOKED },
         });
+        if (!result.count) throw new NotFoundException('邀请不存在');
+        return { revoked: true };
+    }
 
-        if (ownerTenants.length === 0) {
-            // 如果该用户不是任何店铺的所有者，返回空数组
-            return [];
-        }
-
-        const tenantIds = ownerTenants.map((t) => t.tenantId);
-
-        // 2. 查询这些店铺中的所有成员
-        const tenantsWithMembers = await this.prisma.tenant.findMany({
-            where: {
-                id: { in: tenantIds },
-            },
+    listApplications(user: UserPayload) {
+        this.assertOwner(user);
+        return this.prisma.membershipApplication.findMany({
+            where: { tenantId: user.tenantId },
             include: {
-                members: {
-                    include: {
-                        user: {
-                            select: {
-                                id: true,
-                                name: true,
-                                phone: true,
-                                avatarUrl: true,
-                                createdAt: true,
-                            },
-                        },
-                    },
-                    orderBy: { user: { createdAt: 'asc' } },
+                applicant: { select: { id: true, name: true, wechatNickname: true, avatarUrl: true } },
+                joinLink: { select: { role: true } },
+            },
+            orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+        });
+    }
+
+    async approveApplication(user: UserPayload, id: string, dto: ReviewMembershipApplicationDto) {
+        this.assertOwner(user);
+        const application = await this.prisma.membershipApplication.findFirst({
+            where: { id, tenantId: user.tenantId, status: ApplicationStatus.PENDING },
+            include: { joinLink: true },
+        });
+        if (!application) throw new NotFoundException('申请不存在或已处理');
+        await this.entitlements.assertCanInviteMember(user.tenantId);
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.membershipApplication.updateMany({
+                where: { id, status: ApplicationStatus.PENDING },
+                data: {
+                    status: ApplicationStatus.APPROVED,
+                    reviewedById: user.sub,
+                    reviewedAt: new Date(),
+                    reviewNote: dto.reviewNote?.trim() || null,
                 },
+            });
+            if (!updated.count) throw new ConflictException('该申请已经被处理');
+            await tx.tenantUser.upsert({
+                where: { userId_tenantId: { userId: application.applicantId, tenantId: user.tenantId } },
+                update: { role: application.joinLink.role, status: UserStatus.ACTIVE },
+                create: {
+                    userId: application.applicantId,
+                    tenantId: user.tenantId,
+                    role: application.joinLink.role,
+                    status: UserStatus.ACTIVE,
+                },
+            });
+            return { approved: true };
+        });
+    }
+
+    async rejectApplication(user: UserPayload, id: string, dto: ReviewMembershipApplicationDto) {
+        this.assertOwner(user);
+        const result = await this.prisma.membershipApplication.updateMany({
+            where: { id, tenantId: user.tenantId, status: ApplicationStatus.PENDING },
+            data: {
+                status: ApplicationStatus.REJECTED,
+                reviewedById: user.sub,
+                reviewedAt: new Date(),
+                reviewNote: dto.reviewNote?.trim() || null,
             },
         });
+        if (!result.count) throw new NotFoundException('申请不存在或已处理');
+        return { rejected: true };
+    }
 
-        // 3. 格式化数据以便前端展示
-        const allMembersByTenant = tenantsWithMembers.map((tenant) => ({
+    async findAllInAllTenantsByOwner(ownerId: string) {
+        const tenants = await this.prisma.tenant.findMany({
+            where: { members: { some: { userId: ownerId, role: TenantRole.OWNER } } },
+            include: { members: { include: { user: true }, orderBy: { user: { createdAt: 'asc' } } } },
+        });
+        return tenants.map((tenant) => ({
             tenantId: tenant.id,
             tenantName: tenant.name,
-            members: tenant.members.map((tu) => ({
-                id: tu.user.id,
-                name: tu.user.name,
-                displayName: getUserDisplayName(tu.user),
-                phone: tu.user.phone,
-                avatarUrl: tu.user.avatarUrl,
-                role: tu.role,
-                status: tu.status,
-                joinDate: tu.user.createdAt.toISOString().split('T')[0],
-            })),
+            members: tenant.members.map((tu) => this.formatMember(tu)),
         }));
-
-        return allMembersByTenant;
     }
 
-    /**
-     * [核心新增] 检查并返回所有者有权访问的目标租户ID
-     * @param currentUser 当前用户
-     * @param requestedTenantId 请求的租户ID
-     * @returns 最终用于查询的租户ID
-     */
-    getTargetTenantIdForOwner(currentUser: UserPayloadMembers, requestedTenantId?: string): string {
-        // 如果用户是所有者并且提供了一个租户ID，则使用该ID
-        if (currentUser.tenantRole === TenantRole.OWNER && requestedTenantId) {
-            // 在生产环境中，这里应该增加一步校验：
-            // 确认 requestedTenantId 确实是该 currentUser 拥有的店铺之一
-            return requestedTenantId;
-        }
-        // 对于任何其他情况（非所有者，或所有者未提供特定店铺ID），
-        // 都默认使用他们当前登录的店铺ID
-        return currentUser.tenantId;
+    async resolveTenantId(user: UserPayload, requestedTenantId?: string) {
+        if (!requestedTenantId || requestedTenantId === user.tenantId) return user.tenantId;
+        if (user.tenantRole !== TenantRole.OWNER) throw new ForbiddenException('无权访问该店铺');
+        const ownership = await this.prisma.tenantUser.findUnique({
+            where: { userId_tenantId: { userId: user.sub, tenantId: requestedTenantId } },
+        });
+        if (ownership?.role !== TenantRole.OWNER) throw new ForbiddenException('无权访问该店铺');
+        return requestedTenantId;
     }
 
     async findAll(tenantId: string) {
-        const tenantUsers = await this.prisma.tenantUser.findMany({
+        const rows = await this.prisma.tenantUser.findMany({
             where: { tenantId },
-            include: {
-                user: true,
-            },
+            include: { user: true },
             orderBy: { user: { createdAt: 'asc' } },
         });
-
-        return tenantUsers.map((tu) => ({
-            id: tu.user.id,
-            name: tu.user.name,
-            displayName: getUserDisplayName(tu.user),
-            phone: tu.user.phone,
-            avatarUrl: tu.user.avatarUrl,
-            role: tu.role,
-            status: tu.status,
-            joinDate: tu.user.createdAt.toISOString().split('T')[0],
-        }));
+        return rows.map((row) => this.formatMember(row));
     }
 
     async findOne(tenantId: string, memberId: string) {
-        const tenantUser = await this.prisma.tenantUser.findUnique({
-            where: {
-                userId_tenantId: { tenantId, userId: memberId },
-            },
+        const row = await this.prisma.tenantUser.findUnique({
+            where: { userId_tenantId: { tenantId, userId: memberId } },
             include: { user: true },
         });
-
-        if (!tenantUser) {
-            throw new NotFoundExceptionMembers('该成员不存在');
-        }
-
-        // [核心修正] 格式化返回数据，确保包含 joinDate 字段
-        const { user } = tenantUser;
-        return {
-            id: user.id,
-            name: user.name,
-            displayName: getUserDisplayName(user),
-            phone: user.phone,
-            avatarUrl: user.avatarUrl,
-            role: tenantUser.role,
-            status: tenantUser.status,
-            joinDate: user.createdAt.toISOString().split('T')[0],
-        };
+        if (!row) throw new NotFoundException('该成员不存在');
+        return this.formatMember(row);
     }
 
-    async update(tenantId: string, memberId: string, dto: UpdateMemberDtoMembers, currentUser: UserPayloadMembers) {
-        // [核心修正] findOne 现在返回的是格式化后的数据，需要调整这里的逻辑
-        const memberToUpdate = await this.prisma.tenantUser.findUnique({
+    async update(tenantId: string, memberId: string, dto: UpdateMemberDto, user: UserPayload) {
+        const target = await this.prisma.tenantUser.findUnique({
             where: { userId_tenantId: { tenantId, userId: memberId } },
         });
-
-        if (!memberToUpdate) {
-            throw new NotFoundExceptionMembers('该成员不存在');
-        }
-
-        if (currentUser.tenantRole === TenantRole.MEMBER) {
-            throw new ForbiddenExceptionMembers('您没有权限修改成员信息。');
-        }
-        if (currentUser.tenantRole === TenantRole.ADMIN) {
-            if (memberToUpdate.role === TenantRole.ADMIN || memberToUpdate.role === TenantRole.OWNER) {
-                throw new ForbiddenExceptionMembers('管理员不能修改其他管理员或所有者。');
-            }
-        }
-
-        return this.prisma.tenantUser.update({
-            where: {
-                userId_tenantId: { tenantId, userId: memberId },
-            },
-            data: {
-                role: dto.role,
-                status: dto.status,
-            },
-        });
-    }
-
-    async remove(tenantId: string, memberId: string, currentUser: UserPayloadMembers) {
-        // [核心修正] findOne 现在返回的是格式化后的数据，需要调整这里的逻辑
-        const memberToRemove = await this.prisma.tenantUser.findUnique({
-            where: { userId_tenantId: { tenantId, userId: memberId } },
-        });
-
-        if (!memberToRemove) {
-            throw new NotFoundExceptionMembers('该成员不存在');
-        }
-
-        if (memberToRemove.role === TenantRole.OWNER) {
-            throw new ForbiddenExceptionMembers('不能移除店铺所有者。');
-        }
-
+        if (!target) throw new NotFoundException('该成员不存在');
         if (
-            currentUser.tenantRole === TenantRole.MEMBER ||
-            (currentUser.tenantRole === TenantRole.ADMIN && memberToRemove.role === TenantRole.ADMIN)
-        ) {
-            throw new ForbiddenExceptionMembers('您没有权限移除该成员。');
-        }
-
-        return this.prisma.tenantUser.delete({
-            where: {
-                userId_tenantId: { tenantId, userId: memberId },
-            },
+            user.tenantRole === TenantRole.MEMBER ||
+            dto.role === TenantRole.OWNER ||
+            (user.tenantRole === TenantRole.ADMIN && target.role !== TenantRole.MEMBER)
+        )
+            throw new ForbiddenException('无权修改该成员');
+        return this.prisma.tenantUser.update({
+            where: { userId_tenantId: { tenantId, userId: memberId } },
+            data: { role: dto.role, status: dto.status },
         });
+    }
+
+    async remove(tenantId: string, memberId: string, user: UserPayload) {
+        const target = await this.prisma.tenantUser.findUnique({
+            where: { userId_tenantId: { tenantId, userId: memberId } },
+        });
+        if (!target) throw new NotFoundException('该成员不存在');
+        if (
+            target.role === TenantRole.OWNER ||
+            user.tenantRole === TenantRole.MEMBER ||
+            (user.tenantRole === TenantRole.ADMIN && target.role !== TenantRole.MEMBER)
+        )
+            throw new ForbiddenException('无权移除该成员');
+        return this.prisma.tenantUser.delete({ where: { userId_tenantId: { tenantId, userId: memberId } } });
+    }
+
+    private assertOwner(user: UserPayload) {
+        if (user.tenantRole !== TenantRole.OWNER) throw new ForbiddenException('仅店铺所有者可执行此操作');
+    }
+    private formatMember(row: {
+        role: TenantRole;
+        status: UserStatus;
+        user: {
+            id: string;
+            name: string | null;
+            wechatNickname: string | null;
+            avatarUrl: string | null;
+            createdAt: Date;
+        };
+    }) {
+        return {
+            id: row.user.id,
+            name: row.user.name,
+            wechatNickname: row.user.wechatNickname,
+            displayName: getUserDisplayName(row.user),
+            avatarUrl: row.user.avatarUrl,
+            role: row.role,
+            status: row.status,
+            joinDate: row.user.createdAt.toISOString().split('T')[0],
+        };
     }
 }

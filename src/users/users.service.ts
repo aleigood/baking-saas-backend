@@ -23,7 +23,10 @@ export class UsersService {
         const updatedUser = await this.prisma.user.update({
             where: { id: userId },
             data: {
-                name: updateProfileDto.name === undefined ? undefined : updateProfileDto.name.trim() || null,
+                wechatNickname:
+                    updateProfileDto.wechatNickname === undefined
+                        ? undefined
+                        : updateProfileDto.wechatNickname.trim() || null,
                 avatarUrl: updateProfileDto.avatarId ? getAvatarPath(updateProfileDto.avatarId) : undefined,
             },
             select: {
@@ -31,6 +34,7 @@ export class UsersService {
                 phone: true,
                 phoneVerifiedAt: true,
                 name: true,
+                wechatNickname: true,
                 avatarUrl: true,
                 globalRole: true,
                 status: true,

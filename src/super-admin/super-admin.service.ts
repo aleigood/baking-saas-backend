@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import {
     EntitlementTier,
+    ApplicationStatus,
     GlobalRole,
     PaymentOrderStatus,
     Prisma,
@@ -25,6 +26,8 @@ import { CreateTenantSubscriptionDto } from './dto/create-tenant-subscription.dt
 import { UpdateTenantSubscriptionDto } from './dto/update-tenant-subscription.dto';
 import { EntitlementsService } from '../billing/entitlements.service';
 import { UpsertIngredientPresetDto } from './dto/upsert-ingredient-preset.dto';
+import { ReviewStoreApplicationDto } from './dto/review-store-application.dto';
+import { getUserDisplayName } from '../common/utils/user-display.util';
 
 @Injectable()
 export class SuperAdminService {
@@ -40,7 +43,7 @@ export class SuperAdminService {
             await Promise.all([
                 this.prisma.tenant.count(),
                 this.prisma.user.count({
-                    where: { globalRole: { not: GlobalRole.SUPER_ADMIN } },
+                    where: { globalRole: { not: GlobalRole.SUPER_ADMIN }, profileCompletedAt: { not: null } },
                 }),
                 this.prisma.recipeFamily.count({
                     where: { deletedAt: null },
@@ -68,6 +71,80 @@ export class SuperAdminService {
             activeSubscriptions,
             paidAmountInCents: paidOrdersAggregate._sum.amountInCents ?? 0,
         };
+    }
+
+    async findStoreApplications(query: QueryDto & { status?: ApplicationStatus }) {
+        const page = Number(query.page || 1);
+        const limit = Number(query.limit || 10);
+        const where: Prisma.StoreApplicationWhereInput = {
+            ...(query.status ? { status: query.status } : {}),
+            ...(query.search
+                ? {
+                      OR: [
+                          { storeName: { contains: query.search, mode: 'insensitive' } },
+                          { address: { contains: query.search, mode: 'insensitive' } },
+                          { contactName: { contains: query.search, mode: 'insensitive' } },
+                          { contactPhone: { contains: query.search } },
+                      ],
+                  }
+                : {}),
+        };
+        const [data, total] = await Promise.all([
+            this.prisma.storeApplication.findMany({
+                where,
+                include: {
+                    applicant: { select: { id: true, name: true, avatarUrl: true } },
+                    reviewer: { select: { id: true, name: true } },
+                    createdTenant: { select: { id: true, name: true } },
+                },
+                orderBy: { createdAt: 'desc' },
+                skip: (page - 1) * limit,
+                take: limit,
+            }),
+            this.prisma.storeApplication.count({ where }),
+        ]);
+        return { data, meta: { total, page, limit, lastPage: Math.ceil(total / limit) } };
+    }
+
+    async approveStoreApplication(id: string, reviewerId: string, dto: ReviewStoreApplicationDto) {
+        const application = await this.prisma.storeApplication.findUnique({ where: { id } });
+        if (!application || application.status !== ApplicationStatus.PENDING)
+            throw new NotFoundException('申请不存在或已处理');
+        return this.prisma.$transaction(async (tx) => {
+            const claimed = await tx.storeApplication.updateMany({
+                where: { id, status: ApplicationStatus.PENDING },
+                data: {
+                    status: ApplicationStatus.APPROVED,
+                    reviewedById: reviewerId,
+                    reviewedAt: new Date(),
+                    reviewNote: dto.reviewNote?.trim() || null,
+                },
+            });
+            if (!claimed.count) throw new ConflictException('该申请已经被处理');
+            const tenant = await tx.tenant.create({
+                data: {
+                    name: application.storeName,
+                    address: application.address,
+                    members: { create: { userId: application.applicantId, role: TenantRole.OWNER, status: 'ACTIVE' } },
+                },
+            });
+            await tx.storeApplication.update({ where: { id }, data: { createdTenantId: tenant.id } });
+            return { approved: true, tenant };
+        });
+    }
+
+    async rejectStoreApplication(id: string, reviewerId: string, dto: ReviewStoreApplicationDto) {
+        const result = await this.prisma.storeApplication.updateMany({
+            where: { id, status: ApplicationStatus.PENDING },
+            data: {
+                status: ApplicationStatus.REJECTED,
+                reviewedById: reviewerId,
+                reviewedAt: new Date(),
+                reviewNote: dto.reviewNote?.trim() || null,
+            },
+        });
+        if (!result.count) throw new NotFoundException('申请不存在或已处理');
+        return { rejected: true };
     }
 
     // --- Subscription Plan Management ---
@@ -383,11 +460,12 @@ export class SuperAdminService {
                 return {
                     id: tenant.id,
                     name: tenant.name,
+                    address: tenant.address,
                     status: tenant.status,
                     recipeCount: tenant._count.recipeFamilies,
                     createdAt: tenant.createdAt,
                     updatedAt: tenant.updatedAt,
-                    ownerName: ownerInfo?.phone || 'N/A',
+                    ownerName: ownerInfo?.name?.trim() || ownerInfo?.phone || '微信用户',
                     ownerId: ownerInfo?.id,
                     subscriptionState: entitlement.state,
                     entitledUntil: entitlement.entitledUntil,
@@ -407,7 +485,7 @@ export class SuperAdminService {
     }
 
     async createTenant(dto: CreateTenantDto) {
-        const { name, ownerId } = dto;
+        const { name, address, ownerId } = dto;
         const ownerExists = await this.prisma.user.findUnique({
             where: { id: ownerId },
         });
@@ -417,6 +495,7 @@ export class SuperAdminService {
         return this.prisma.tenant.create({
             data: {
                 name,
+                address,
                 members: {
                     create: {
                         userId: ownerId,
@@ -451,7 +530,19 @@ export class SuperAdminService {
         const { search, page = '1', limit = '10', sortBy = 'createdAt', order = 'desc' } = queryDto;
         const pageNum = parseInt(page, 10);
         const limitNum = parseInt(limit, 10);
-        const where: Prisma.UserWhereInput = search ? { phone: { contains: search, mode: 'insensitive' } } : {};
+        const where: Prisma.UserWhereInput = {
+            profileCompletedAt: { not: null },
+            ...(search
+                ? {
+                      OR: [
+                          { phone: { contains: search, mode: 'insensitive' } },
+                          { name: { contains: search, mode: 'insensitive' } },
+                          { wechatNickname: { contains: search, mode: 'insensitive' } },
+                          { tenants: { some: { tenant: { name: { contains: search, mode: 'insensitive' } } } } },
+                      ],
+                  }
+                : {}),
+        };
 
         const orderBy = { [sortBy]: order };
 
@@ -473,6 +564,8 @@ export class SuperAdminService {
         const data = users.map((user) => ({
             id: user.id,
             name: user.name, // [新增] 返回用户姓名
+            wechatNickname: user.wechatNickname,
+            displayName: getUserDisplayName(user),
             phone: user.phone,
             globalRole: user.globalRole,
             status: user.status,
@@ -505,6 +598,8 @@ export class SuperAdminService {
             data: {
                 name,
                 phone,
+                phoneVerifiedAt: new Date(),
+                profileCompletedAt: new Date(),
                 password: hashedPassword,
             },
         });

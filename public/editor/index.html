@@ -4,7 +4,7 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>在线配方编辑器</title>
-        <script src="/vendor/vue.global.prod.js"></script>
+        <script src="./vendor/vue.global.prod.js"></script>
         <style>
             :root {
                 /* 保持原始文件的颜色变量 */
@@ -2401,6 +2401,7 @@
                             return [];
                         }
                     };
+                    const editorApiPrefix = window.location.pathname.startsWith('/api/') ? '/api' : '';
                     const editorApi = async (path, options = {}) => {
                         const { skipEditorAuth = false, headers = {}, ...fetchOptions } = options;
                         const authHeaders =
@@ -2410,7 +2411,10 @@
                                       'X-Editor-Token': editorToken.value,
                                   }
                                 : {};
-                        const res = await fetch(path, {
+                        const requestPath = editorApiPrefix && path.startsWith('/') && !path.startsWith(`${editorApiPrefix}/`)
+                            ? `${editorApiPrefix}${path}`
+                            : path;
+                        const res = await fetch(requestPath, {
                             ...fetchOptions,
                             headers: { 'Content-Type': 'application/json', ...authHeaders, ...headers },
                         });

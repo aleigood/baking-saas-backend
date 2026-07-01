@@ -5,6 +5,10 @@ export class CreateTenantDto {
     @IsNotEmpty()
     name!: string;
 
+    @IsString()
+    @IsNotEmpty()
+    address!: string;
+
     // --- 新增字段 ---
     @IsUUID()
     @IsNotEmpty()

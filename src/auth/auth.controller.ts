@@ -20,6 +20,12 @@ export class AuthController {
         return this.authService.register(registerDto);
     }
 
+    @UseGuards(AuthGuard('jwt'))
+    @Post('profile-sms-codes')
+    sendProfileCode(@Body() dto: SendRegistrationCodeDto, @Req() request: Request) {
+        return this.authService.sendProfileCode(dto.phone, request.ip);
+    }
+
     @Post('login')
     login(@Body() loginDto: AuthDto): Promise<{ accessToken: string }> {
         return this.authService.login(loginDto);

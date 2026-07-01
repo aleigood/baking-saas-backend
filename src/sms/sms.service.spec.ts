@@ -58,4 +58,9 @@ describe('SmsService', () => {
         const { service } = createService({ NODE_ENV: 'production' });
         expect(() => service.onModuleInit()).toThrow('Production must use a real SMS provider');
     });
+
+    it('allows SMS to be disabled in production', () => {
+        const { service } = createService({ NODE_ENV: 'production', SMS_PROVIDER: 'disabled', SMS_TEST_CODE: '' });
+        expect(() => service.onModuleInit()).not.toThrow();
+    });
 });

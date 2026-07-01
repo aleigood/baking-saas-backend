@@ -1,9 +1,10 @@
-import { IsString, IsOptional, Matches } from 'class-validator';
+import { IsString, IsOptional, Matches, Length } from 'class-validator';
 
 export class UpdateProfileDto {
     @IsString()
     @IsOptional()
-    name?: string;
+    @Length(1, 30)
+    wechatNickname?: string;
 
     @IsString()
     @IsOptional()

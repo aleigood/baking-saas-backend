@@ -1,4 +1,5 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { ApplicationStatus } from '@prisma/client';
 
 // 修复：创建并导出 QueryDto
 export class QueryDto {
@@ -21,4 +22,8 @@ export class QueryDto {
     @IsOptional()
     @IsString()
     order?: 'asc' | 'desc';
+
+    @IsOptional()
+    @IsEnum(ApplicationStatus)
+    status?: ApplicationStatus;
 }
