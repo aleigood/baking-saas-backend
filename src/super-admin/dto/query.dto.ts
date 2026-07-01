@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
 import { ApplicationStatus } from '@prisma/client';
 
 // 修复：创建并导出 QueryDto
@@ -26,4 +26,12 @@ export class QueryDto {
     @IsOptional()
     @IsEnum(ApplicationStatus)
     status?: ApplicationStatus;
+
+    @IsOptional()
+    @IsIn(['ACCOUNT', 'STORE', 'BILLING', 'RECIPE', 'SECURITY', 'OTHER'])
+    category?: string;
+
+    @IsOptional()
+    @IsIn(['SUCCESS', 'FAILED'])
+    result?: string;
 }

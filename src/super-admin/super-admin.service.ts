@@ -662,15 +662,35 @@ export class SuperAdminService {
     async findAuditLogs(query: QueryDto) {
         const page = Number(query.page || 1);
         const limit = Number(query.limit || 20);
-        const where: Prisma.AuditLogWhereInput = query.search
-            ? {
-                  OR: [
-                      { action: { contains: query.search, mode: 'insensitive' } },
-                      { path: { contains: query.search, mode: 'insensitive' } },
-                      { actorUserId: { contains: query.search, mode: 'insensitive' } },
-                  ],
-              }
-            : {};
+        const search = query.search?.trim();
+        const matchingActors = search
+            ? await this.prisma.user.findMany({
+                  where: {
+                      OR: [
+                          { name: { contains: search, mode: 'insensitive' } },
+                          { phone: { contains: search, mode: 'insensitive' } },
+                          { wechatNickname: { contains: search, mode: 'insensitive' } },
+                      ],
+                  },
+                  select: { id: true },
+                  take: 50,
+              })
+            : [];
+        const conditions: Prisma.AuditLogWhereInput[] = [];
+        if (search) {
+            conditions.push({
+                OR: [
+                    { action: { contains: search, mode: 'insensitive' } },
+                    { path: { contains: search, mode: 'insensitive' } },
+                    { actorUserId: { contains: search, mode: 'insensitive' } },
+                    { actorUserId: { in: matchingActors.map((actor) => actor.id) } },
+                ],
+            });
+        }
+        if (query.category) conditions.push({ metadata: { path: ['category'], equals: query.category } });
+        if (query.result === 'SUCCESS') conditions.push({ statusCode: { lt: 400 } });
+        if (query.result === 'FAILED') conditions.push({ statusCode: { gte: 400 } });
+        const where: Prisma.AuditLogWhereInput = conditions.length ? { AND: conditions } : {};
         const [data, total] = await Promise.all([
             this.prisma.auditLog.findMany({
                 where,
@@ -680,7 +700,59 @@ export class SuperAdminService {
             }),
             this.prisma.auditLog.count({ where }),
         ]);
-        return { data, meta: { total, page, limit, lastPage: Math.ceil(total / limit) } };
+        const actorIds = [...new Set(data.flatMap((record) => (record.actorUserId ? [record.actorUserId] : [])))];
+        const tenantIds = [
+            ...new Set(
+                data.flatMap((record) => (record.targetType === 'tenant' && record.targetId ? [record.targetId] : [])),
+            ),
+        ];
+        const applicationIds = [
+            ...new Set(
+                data.flatMap((record) =>
+                    record.targetType === 'store-application' && record.targetId ? [record.targetId] : [],
+                ),
+            ),
+        ];
+        const [actors, tenants, applications] = await Promise.all([
+            this.prisma.user.findMany({
+                where: { id: { in: actorIds } },
+                select: { id: true, name: true, phone: true, wechatNickname: true },
+            }),
+            this.prisma.tenant.findMany({ where: { id: { in: tenantIds } }, select: { id: true, name: true } }),
+            this.prisma.storeApplication.findMany({
+                where: { id: { in: applicationIds } },
+                select: { id: true, storeName: true, contactName: true },
+            }),
+        ]);
+        const actorMap = new Map(actors.map((actor) => [actor.id, actor]));
+        const tenantMap = new Map(tenants.map((tenant) => [tenant.id, tenant.name]));
+        const applicationMap = new Map(
+            applications.map((application) => [
+                application.id,
+                `${application.storeName} · ${application.contactName}`,
+            ]),
+        );
+        const enrichedData = data.map((record) => {
+            const actor = record.actorUserId ? actorMap.get(record.actorUserId) : undefined;
+            const targetName =
+                record.targetType === 'tenant' && record.targetId
+                    ? tenantMap.get(record.targetId)
+                    : record.targetType === 'store-application' && record.targetId
+                      ? applicationMap.get(record.targetId)
+                      : undefined;
+            return {
+                ...record,
+                actor: actor
+                    ? {
+                          id: actor.id,
+                          displayName: getUserDisplayName(actor),
+                          phone: actor.phone,
+                      }
+                    : null,
+                targetName: targetName || null,
+            };
+        });
+        return { data: enrichedData, meta: { total, page, limit, lastPage: Math.ceil(total / limit) } };
     }
 
     private addDays(date: Date, days: number) {

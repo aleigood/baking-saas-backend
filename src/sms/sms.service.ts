@@ -50,6 +50,20 @@ export class SmsService implements OnModuleInit {
         if (this.testCode && !/^\d{6}$/.test(this.testCode)) {
             throw new Error('SMS_TEST_CODE must contain exactly 6 digits');
         }
+        if (this.providerName === 'tencent') {
+            const requiredNames = [
+                'TENCENT_CLOUD_SECRET_ID',
+                'TENCENT_CLOUD_SECRET_KEY',
+                'TENCENT_SMS_REGION',
+                'TENCENT_SMS_SDK_APP_ID',
+                'TENCENT_SMS_SIGN_NAME',
+                'TENCENT_SMS_TEMPLATE_ID',
+            ];
+            const missingNames = requiredNames.filter((name) => !this.config.get<string>(name)?.trim());
+            if (missingNames.length > 0) {
+                throw new Error(`Tencent SMS configuration is incomplete: ${missingNames.join(', ')}`);
+            }
+        }
     }
 
     async sendRegistrationCode(phone: string, requestIp?: string): Promise<SmsCodeResponse> {
