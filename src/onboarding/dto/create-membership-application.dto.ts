@@ -5,20 +5,20 @@ import { Transform } from 'class-transformer';
 export class CreateMembershipApplicationDto {
     @IsString()
     @MinLength(20)
-    token: string;
+    token!: string;
 
     @IsString()
     @Length(1, 30)
     @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
-    name: string;
+    name!: string;
 
     @IsString()
     @Length(1, 30)
     @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() || undefined : value))
-    wechatNickname: string;
+    wechatNickname!: string;
 
     @Matches(/^1\d{10}$/, { message: '请输入正确的手机号' })
-    phone: string;
+    phone!: string;
 
     @IsOptional()
     @Matches(/^\d{6}$/, { message: '请输入6位短信验证码' })

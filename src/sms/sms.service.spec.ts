@@ -39,19 +39,22 @@ describe('SmsService', () => {
             SMS_TEST_CODE: '123456',
             ...overrides,
         };
-        const config = { get: jest.fn((key: string, fallback?: string) => values[key] ?? fallback) } as unknown as ConfigService;
-        const provider = { sendRegistrationCode: jest.fn().mockResolvedValue(undefined) } as SmsProvider;
-        return { service: new SmsService(prisma, config, provider), prisma, provider, tx };
+        const config = {
+            get: jest.fn((key: string, fallback?: string) => values[key] ?? fallback),
+        } as unknown as ConfigService;
+        const sendRegistrationCode = jest.fn().mockResolvedValue(undefined);
+        const provider = { sendRegistrationCode } as SmsProvider;
+        return { service: new SmsService(prisma, config, provider), prisma, sendRegistrationCode, tx };
     }
 
     it('returns the configured code only in development mock mode', async () => {
-        const { service, provider } = createService();
+        const { service, sendRegistrationCode } = createService();
         service.onModuleInit();
 
         const result = await service.sendRegistrationCode('13800138000', '127.0.0.1');
 
         expect(result.debugCode).toBe('123456');
-        expect(provider.sendRegistrationCode).toHaveBeenCalledWith('13800138000', '123456');
+        expect(sendRegistrationCode).toHaveBeenCalledWith('13800138000', '123456');
     });
 
     it('rejects mock mode in production', () => {

@@ -1,6 +1,4 @@
 # docker-compose.yml
-version: '3.8'
-
 services:
   app:
     build:
@@ -14,8 +12,6 @@ services:
       PAYMENT_PROVIDER: wechat
     ports:
       - '9527:9527'
-      # [核心修改] 新增这一行来暴露 Prisma Studio 的端口
-      - '5555:5555'
     depends_on:
       - db
 

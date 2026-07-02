@@ -1,6 +1,4 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { SuperAdminModule } from './super-admin/super-admin.module';
@@ -44,7 +42,6 @@ import { RecipeEditorModule } from './recipe-editor/recipe-editor.module';
         OnboardingModule,
         RecipeEditorModule,
     ],
-    controllers: [AppController],
-    providers: [AppService, { provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
+    providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
 })
 export class AppModule {}
