@@ -582,6 +582,9 @@ export class RecipesService {
         const overallResult: BatchImportResultDto = {
             totalCount: orderedRecipesDto.length * targetTenants.length,
             importedCount: 0,
+            enabledMainRecipeCount: 0,
+            restrictedMainRecipeCount: 0,
+            componentRecipeCount: 0,
             skippedCount: 0,
             skippedRecipes: [],
         };
@@ -589,6 +592,19 @@ export class RecipesService {
         for (const tenant of targetTenants) {
             const tenantId = tenant.id;
             const tenantName = tenant.name;
+            const entitlement = await this.entitlements.getSummary(tenantId);
+            const restrictImportedMainRecipes = !entitlement.fullAccess;
+
+            const recordImportedFamily = (type: RecipeType, freeTierUnlocked: boolean) => {
+                overallResult.importedCount++;
+                if (type !== RecipeType.MAIN) {
+                    overallResult.componentRecipeCount++;
+                } else if (freeTierUnlocked) {
+                    overallResult.enabledMainRecipeCount++;
+                } else {
+                    overallResult.restrictedMainRecipeCount++;
+                }
+            };
 
             for (const recipeDto of orderedRecipesDto) {
                 try {
@@ -662,7 +678,11 @@ export class RecipesService {
                             const createDto = convertVersionToCreateDto(versionDto);
 
                             if (familyId === null) {
-                                const createdFamily = await this.create(tenantId, actorUserId, createDto);
+                                const createdFamily = await this.create(tenantId, actorUserId, createDto, {
+                                    bypassEntitlements: true,
+                                    newFamilyFreeTierUnlocked:
+                                        recipeDto.type !== RecipeType.MAIN || !restrictImportedMainRecipes,
+                                });
 
                                 if (!createdFamily) {
                                     throw new Error(`创建配方族 "${recipeDto.name}" 失败，_sanitizeFamily 返回 null`);
@@ -676,6 +696,7 @@ export class RecipesService {
                                     familyId,
                                     actorUserId,
                                     createDto,
+                                    { bypassEntitlements: true },
                                 );
                                 latestCreatedVersionId = createdFamily?.versions[0]?.id ?? latestCreatedVersionId;
                                 versionsCreatedCount++;
@@ -683,9 +704,18 @@ export class RecipesService {
                         }
                         if (versionsCreatedCount > 0) {
                             if (familyId && latestCreatedVersionId) {
-                                await this.activateVersion(tenantId, familyId, latestCreatedVersionId, actorUserId);
+                                await this.activateVersion(
+                                    tenantId,
+                                    familyId,
+                                    latestCreatedVersionId,
+                                    actorUserId,
+                                    true,
+                                );
                             }
-                            overallResult.importedCount++;
+                            recordImportedFamily(
+                                recipeDto.type,
+                                recipeDto.type !== RecipeType.MAIN || !restrictImportedMainRecipes,
+                            );
                         } else {
                             overallResult.skippedCount++;
                             overallResult.skippedRecipes.push(
@@ -708,6 +738,7 @@ export class RecipesService {
                                 existingFamily.id,
                                 actorUserId,
                                 createDto,
+                                { bypassEntitlements: true },
                             );
                             latestCreatedVersionId = createdFamily?.versions[0]?.id ?? latestCreatedVersionId;
                             newVersionsAdded++;
@@ -720,9 +751,10 @@ export class RecipesService {
                                     existingFamily.id,
                                     latestCreatedVersionId,
                                     actorUserId,
+                                    true,
                                 );
                             }
-                            overallResult.importedCount++;
+                            recordImportedFamily(existingFamily.type, existingFamily.freeTierUnlocked);
                         } else {
                             overallResult.skippedCount++;
                             overallResult.skippedRecipes.push(
@@ -1047,10 +1079,17 @@ export class RecipesService {
         }
     }
 
-    async create(tenantId: string, actorUserId: string, createRecipeDto: CreateRecipeDto) {
+    async create(
+        tenantId: string,
+        actorUserId: string,
+        createRecipeDto: CreateRecipeDto,
+        options: { bypassEntitlements?: boolean; newFamilyFreeTierUnlocked?: boolean } = {},
+    ) {
         const { name } = createRecipeDto;
 
-        await this.entitlements.assertCanCreateRecipe(tenantId, createRecipeDto.type ?? RecipeType.MAIN);
+        if (!options.bypassEntitlements) {
+            await this.entitlements.assertCanCreateRecipe(tenantId, createRecipeDto.type ?? RecipeType.MAIN);
+        }
 
         const existingFamily = await this.prisma.recipeFamily.findFirst({
             where: {
@@ -1074,11 +1113,18 @@ export class RecipesService {
             false,
             undefined,
             'RECIPE_CREATED',
+            options.newFamilyFreeTierUnlocked,
         );
     }
 
-    async createVersion(tenantId: string, familyId: string, actorUserId: string, createRecipeDto: CreateRecipeDto) {
-        await this.entitlements.assertRecipeWritable(tenantId, familyId);
+    async createVersion(
+        tenantId: string,
+        familyId: string,
+        actorUserId: string,
+        createRecipeDto: CreateRecipeDto,
+        options: { bypassEntitlements?: boolean } = {},
+    ) {
+        if (!options.bypassEntitlements) await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const recipeFamily = await this.prisma.recipeFamily.findFirst({
             where: { id: familyId, tenantId, deletedAt: null },
             include: {
@@ -1761,6 +1807,7 @@ export class RecipesService {
             items: [{ kind: 'INITIAL_VERSION' }],
         },
         operationAction: RecipeOperationAction = 'VERSION_CREATED',
+        newFamilyFreeTierUnlocked = true,
     ) {
         const { name, type = 'MAIN', category } = createRecipeDto;
 
@@ -1791,7 +1838,13 @@ export class RecipesService {
                     });
 
                     recipeFamily = await tx.recipeFamily.create({
-                        data: { name, tenantId, type, category: finalCategory },
+                        data: {
+                            name,
+                            tenantId,
+                            type,
+                            category: finalCategory,
+                            freeTierUnlocked: newFamilyFreeTierUnlocked,
+                        },
                         include: { versions: true },
                     });
 
@@ -2340,8 +2393,8 @@ export class RecipesService {
                 referencedByNames: family.referencedByNames,
                 versionCount: family.versionCount,
                 activeVersion: family.activeVersion,
-                freeTierEnabled: family.freeTierEnabled,
-                readOnly: !entitlement.fullAccess && family.type === RecipeType.MAIN && !family.freeTierEnabled,
+                freeTierUnlocked: family.freeTierUnlocked,
+                readOnly: !entitlement.fullAccess && family.type === RecipeType.MAIN && !family.freeTierUnlocked,
             };
         });
 
@@ -2366,7 +2419,7 @@ export class RecipesService {
                 deletedAt: null,
                 ...(entitlement.fullAccess
                     ? {}
-                    : { OR: [{ type: { not: RecipeType.MAIN } }, { freeTierEnabled: true }] }),
+                    : { OR: [{ type: { not: RecipeType.MAIN } }, { freeTierUnlocked: true }] }),
                 versions: {
                     some: {
                         isActive: true,
@@ -2561,7 +2614,7 @@ export class RecipesService {
         return sanitizedFamily
             ? {
                   ...sanitizedFamily,
-                  readOnly: !entitlement.fullAccess && family.type === RecipeType.MAIN && !family.freeTierEnabled,
+                  readOnly: !entitlement.fullAccess && family.type === RecipeType.MAIN && !family.freeTierUnlocked,
               }
             : null;
     }
@@ -3464,8 +3517,14 @@ export class RecipesService {
         );
     }
 
-    async activateVersion(tenantId: string, familyId: string, versionId: string, actorUserId: string) {
-        await this.entitlements.assertRecipeWritable(tenantId, familyId);
+    async activateVersion(
+        tenantId: string,
+        familyId: string,
+        versionId: string,
+        actorUserId: string,
+        bypassEntitlements = false,
+    ) {
+        if (!bypassEntitlements) await this.entitlements.assertRecipeWritable(tenantId, familyId);
         const versionToActivate = await this.prisma.recipeVersion.findFirst({
             where: {
                 id: versionId,

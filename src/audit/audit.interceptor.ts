@@ -16,7 +16,7 @@ export class AuditInterceptor implements NestInterceptor {
         const user = request.user;
         if (!user || user.globalRole !== GlobalRole.SUPER_ADMIN || request.method === 'GET') return next.handle();
 
-        const record = (statusCode: number) => {
+        const record = (statusCode: number, responseBody?: unknown) => {
             const targetId = request.params?.id || request.params?.tenantId || request.params?.orderId || null;
             const event = this.describe(request.method, request.path);
             void this.prisma.auditLog
@@ -35,6 +35,7 @@ export class AuditInterceptor implements NestInterceptor {
                         metadata: {
                             eventType: event.eventType,
                             category: event.category,
+                            ...this.responseMetadata(event.eventType, responseBody),
                         },
                     },
                 })
@@ -42,7 +43,7 @@ export class AuditInterceptor implements NestInterceptor {
         };
 
         return next.handle().pipe(
-            tap(() => record(context.switchToHttp().getResponse<Response>().statusCode)),
+            tap((responseBody) => record(context.switchToHttp().getResponse<Response>().statusCode, responseBody)),
             catchError((error: unknown) => {
                 const statusCode =
                     typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
@@ -52,6 +53,21 @@ export class AuditInterceptor implements NestInterceptor {
                 return throwError(() => error);
             }),
         );
+    }
+
+    private responseMetadata(eventType: string, responseBody: unknown): Record<string, number> {
+        if (eventType !== 'RECIPES_BATCH_IMPORTED' || typeof responseBody !== 'object' || responseBody === null)
+            return {};
+        const body = responseBody as Record<string, unknown>;
+        const keys = [
+            'totalCount',
+            'importedCount',
+            'enabledMainRecipeCount',
+            'restrictedMainRecipeCount',
+            'componentRecipeCount',
+            'skippedCount',
+        ];
+        return Object.fromEntries(keys.flatMap((key) => (typeof body[key] === 'number' ? [[key, body[key]]] : [])));
     }
 
     private describe(method: string, path: string) {

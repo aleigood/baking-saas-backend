@@ -222,7 +222,7 @@ export class EntitlementsService {
             await this.prisma.$transaction([
                 this.prisma.recipeFamily.updateMany({
                     where: { tenantId, type: RecipeType.MAIN },
-                    data: { freeTierEnabled: false },
+                    data: { freeTierUnlocked: false },
                 }),
                 this.prisma.tenant.update({
                     where: { id: tenantId },
@@ -247,8 +247,8 @@ export class EntitlementsService {
             }),
             this.prisma.recipeFamily.findMany({
                 where: { tenantId, type: RecipeType.MAIN, deletedAt: null },
-                select: { id: true, name: true, freeTierEnabled: true, updatedAt: true },
-                orderBy: [{ freeTierEnabled: 'desc' }, { updatedAt: 'desc' }],
+                select: { id: true, name: true, freeTierUnlocked: true, updatedAt: true },
+                orderBy: [{ freeTierUnlocked: 'desc' }, { updatedAt: 'desc' }],
             }),
         ]);
 
@@ -314,19 +314,19 @@ export class EntitlementsService {
             async (tx) => {
                 const recipe = await tx.recipeFamily.findFirst({
                     where: { id: recipeId, tenantId, type: RecipeType.MAIN, deletedAt: null },
-                    select: { id: true, freeTierEnabled: true },
+                    select: { id: true, freeTierUnlocked: true },
                 });
                 if (!recipe) throw new BadRequestException('配方不存在或无法解除受限');
 
                 const enabledCount = await tx.recipeFamily.count({
-                    where: { tenantId, type: RecipeType.MAIN, freeTierEnabled: true },
+                    where: { tenantId, type: RecipeType.MAIN, freeTierUnlocked: true },
                 });
-                if (recipe.freeTierEnabled) return limit === null ? null : Math.max(limit - enabledCount, 0);
+                if (recipe.freeTierUnlocked) return limit === null ? null : Math.max(limit - enabledCount, 0);
                 if (limit !== null && enabledCount >= limit) {
                     throw new BadRequestException(`免费版最多只能启用 ${limit} 个配方`);
                 }
 
-                await tx.recipeFamily.update({ where: { id: recipeId }, data: { freeTierEnabled: true } });
+                await tx.recipeFamily.update({ where: { id: recipeId }, data: { freeTierUnlocked: true } });
                 return limit === null ? null : Math.max(limit - enabledCount - 1, 0);
             },
             { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -341,7 +341,7 @@ export class EntitlementsService {
         const limit = summary.limits.mainRecipes;
         if (summary.fullAccess || limit === null) return;
         const enabledCount = await this.prisma.recipeFamily.count({
-            where: { tenantId, type: RecipeType.MAIN, freeTierEnabled: true },
+            where: { tenantId, type: RecipeType.MAIN, freeTierUnlocked: true },
         });
         if (enabledCount < limit) return;
         this.limitExceeded('RECIPE_LIMIT', `当前权益最多创建 ${limit} 个主配方`);
@@ -352,10 +352,10 @@ export class EntitlementsService {
         if (summary.fullAccess) return;
         const family = await this.prisma.recipeFamily.findFirst({
             where: { id: familyId, tenantId, deletedAt: null },
-            select: { type: true, freeTierEnabled: true },
+            select: { type: true, freeTierUnlocked: true },
         });
         if (!family) throw new BadRequestException('配方不存在');
-        if (family.type !== RecipeType.MAIN || family.freeTierEnabled) return;
+        if (family.type !== RecipeType.MAIN || family.freeTierUnlocked) return;
         this.limitExceeded('RECIPE_READ_ONLY', '该配方当前使用受限');
     }
 
@@ -365,10 +365,11 @@ export class EntitlementsService {
         if (limit !== null && summary.usage.productionTasksThisMonth >= limit) {
             this.limitExceeded('TASK_LIMIT', `当前权益每月最多创建 ${limit} 个生产任务`);
         }
+        if (summary.fullAccess) return;
         const disabledRecipes = await this.prisma.product.count({
             where: {
                 id: { in: productIds },
-                recipeVersion: { family: { tenantId, type: RecipeType.MAIN, freeTierEnabled: false } },
+                recipeVersion: { family: { tenantId, type: RecipeType.MAIN, freeTierUnlocked: false } },
             },
         });
         if (disabledRecipes > 0) this.limitExceeded('RECIPE_READ_ONLY', '生产任务包含使用受限的配方');

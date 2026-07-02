@@ -287,23 +287,23 @@ model TenantJoinLink {
 }
 
 model MembershipApplication {
-  id           String            @id @default(uuid())
-  joinLinkId   String
-  tenantId     String
-  applicantId  String
-  displayName  String
+  id             String            @id @default(uuid())
+  joinLinkId     String
+  tenantId       String
+  applicantId    String
+  displayName    String
   wechatNickname String?
-  message      String?
-  status       ApplicationStatus @default(PENDING)
-  reviewedById String?
-  reviewNote   String?
-  reviewedAt   DateTime?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  joinLink     TenantJoinLink    @relation(fields: [joinLinkId], references: [id], onDelete: Cascade)
-  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  applicant    User              @relation("MembershipApplicant", fields: [applicantId], references: [id], onDelete: Cascade)
-  reviewer     User?             @relation("MembershipReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  message        String?
+  status         ApplicationStatus @default(PENDING)
+  reviewedById   String?
+  reviewNote     String?
+  reviewedAt     DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  joinLink       TenantJoinLink    @relation(fields: [joinLinkId], references: [id], onDelete: Cascade)
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  applicant      User              @relation("MembershipApplicant", fields: [applicantId], references: [id], onDelete: Cascade)
+  reviewer       User?             @relation("MembershipReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@unique([joinLinkId, applicantId])
   @@index([tenantId, status, createdAt])
@@ -528,7 +528,7 @@ model RecipeFamily {
   createdAt                  DateTime              @default(now())
   updatedAt                  DateTime              @updatedAt
   deletedAt                  DateTime?
-  freeTierEnabled            Boolean               @default(true)
+  freeTierUnlocked           Boolean               @default(true)
   tenant                     Tenant                @relation(fields: [tenantId], references: [id])
   versions                   RecipeVersion[] // 一个配方族包含多个版本
   operationLogs              RecipeOperationLog[]
@@ -545,7 +545,7 @@ model RecipeFamily {
 
   @@unique([tenantId, name, deletedAt])
   @@index([tenantId])
-  @@index([tenantId, type, freeTierEnabled])
+  @@index([tenantId, type, freeTierUnlocked])
 }
 
 // 配方版本：记录配方的具体版本信息

@@ -161,6 +161,9 @@ export class BatchImportRecipeDto {
 export class BatchImportResultDto {
     totalCount!: number;
     importedCount!: number;
+    enabledMainRecipeCount!: number;
+    restrictedMainRecipeCount!: number;
+    componentRecipeCount!: number;
     skippedCount!: number;
     skippedRecipes!: string[];
 }

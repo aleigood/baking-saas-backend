@@ -360,7 +360,7 @@ CREATE TABLE "RecipeFamily" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
-    "freeTierEnabled" BOOLEAN NOT NULL DEFAULT true,
+    "freeTierUnlocked" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "RecipeFamily_pkey" PRIMARY KEY ("id")
 );
@@ -699,7 +699,7 @@ CREATE INDEX "AuditLog_action_createdAt_idx" ON "AuditLog"("action", "createdAt"
 CREATE INDEX "RecipeFamily_tenantId_idx" ON "RecipeFamily"("tenantId");
 
 -- CreateIndex
-CREATE INDEX "RecipeFamily_tenantId_type_freeTierEnabled_idx" ON "RecipeFamily"("tenantId", "type", "freeTierEnabled");
+CREATE INDEX "RecipeFamily_tenantId_type_freeTierUnlocked_idx" ON "RecipeFamily"("tenantId", "type", "freeTierUnlocked");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "RecipeFamily_tenantId_name_deletedAt_key" ON "RecipeFamily"("tenantId", "name", "deletedAt");
