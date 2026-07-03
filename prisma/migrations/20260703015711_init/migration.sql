@@ -633,6 +633,9 @@ CREATE INDEX "MembershipApplication_applicantId_status_idx" ON "MembershipApplic
 CREATE UNIQUE INDEX "MembershipApplication_joinLinkId_applicantId_key" ON "MembershipApplication"("joinLinkId", "applicantId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "MembershipApplication_tenantId_applicantId_key" ON "MembershipApplication"("tenantId", "applicantId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "RecipeEditorSession_token_key" ON "RecipeEditorSession"("token");
 
 -- CreateIndex

@@ -66,7 +66,7 @@ export class OnboardingService {
                 select: { role: true },
             }),
             this.prisma.membershipApplication.findUnique({
-                where: { joinLinkId_applicantId: { joinLinkId: link.id, applicantId: userId } },
+                where: { tenantId_applicantId: { tenantId: link.tenantId, applicantId: userId } },
                 select: { status: true },
             }),
         ]);
@@ -90,23 +90,31 @@ export class OnboardingService {
 
     async createMembershipApplication(userId: string, dto: CreateMembershipApplicationDto) {
         const link = await this.findActiveLink(dto.token);
-        const pendingApplication = await this.prisma.membershipApplication.findUnique({
-            where: { joinLinkId_applicantId: { joinLinkId: link.id, applicantId: userId } },
-            select: { status: true },
-        });
+        const [membership, pendingApplication] = await Promise.all([
+            this.prisma.tenantUser.findUnique({
+                where: { userId_tenantId: { userId, tenantId: link.tenantId } },
+                select: { userId: true },
+            }),
+            this.prisma.membershipApplication.findUnique({
+                where: { tenantId_applicantId: { tenantId: link.tenantId, applicantId: userId } },
+                select: { status: true },
+            }),
+        ]);
+        if (membership) throw new ConflictException('您已经是该店铺成员');
         if (pendingApplication?.status === ApplicationStatus.PENDING) {
             throw new ConflictException('您的申请正在等待店主确认');
         }
         const profile = await this.prepareProfile(userId, dto);
         const result = await this.prisma.$transaction(async (tx) => {
             const applicantId = await this.saveProfile(tx, profile);
-            const membership = await tx.tenantUser.findUnique({
+            const currentMembership = await tx.tenantUser.findUnique({
                 where: { userId_tenantId: { userId: applicantId, tenantId: link.tenantId } },
             });
-            if (membership) throw new ConflictException('您已经是该店铺成员');
+            if (currentMembership) throw new ConflictException('您已经是该店铺成员');
             const application = await tx.membershipApplication.upsert({
-                where: { joinLinkId_applicantId: { joinLinkId: link.id, applicantId } },
+                where: { tenantId_applicantId: { tenantId: link.tenantId, applicantId } },
                 update: {
+                    joinLinkId: link.id,
                     displayName: dto.name,
                     wechatNickname: dto.wechatNickname,
                     message: dto.message?.trim() || null,

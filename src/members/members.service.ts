@@ -70,6 +70,23 @@ export class MembersService {
             include: { joinLink: true },
         });
         if (!application) throw new NotFoundException('申请不存在或已处理');
+        const existingMembership = await this.prisma.tenantUser.findUnique({
+            where: { userId_tenantId: { userId: application.applicantId, tenantId: user.tenantId } },
+            select: { userId: true },
+        });
+        if (existingMembership) {
+            const closed = await this.prisma.membershipApplication.updateMany({
+                where: { id: application.id, status: ApplicationStatus.PENDING },
+                data: {
+                    status: ApplicationStatus.CANCELED,
+                    reviewedById: user.sub,
+                    reviewedAt: new Date(),
+                    reviewNote: '申请人已是店铺成员，申请已自动关闭',
+                },
+            });
+            if (!closed.count) throw new ConflictException('该申请已经被处理');
+            return { approved: false, alreadyMember: true };
+        }
         await this.entitlements.assertCanInviteMember(user.tenantId);
         return this.prisma.$transaction(async (tx) => {
             const updated = await tx.membershipApplication.updateMany({
@@ -82,10 +99,8 @@ export class MembersService {
                 },
             });
             if (!updated.count) throw new ConflictException('该申请已经被处理');
-            await tx.tenantUser.upsert({
-                where: { userId_tenantId: { userId: application.applicantId, tenantId: user.tenantId } },
-                update: { role: application.joinLink.role, status: UserStatus.ACTIVE },
-                create: {
+            await tx.tenantUser.create({
+                data: {
                     userId: application.applicantId,
                     tenantId: user.tenantId,
                     role: application.joinLink.role,

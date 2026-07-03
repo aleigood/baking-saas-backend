@@ -306,6 +306,7 @@ model MembershipApplication {
   reviewer       User?             @relation("MembershipReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@unique([joinLinkId, applicantId])
+  @@unique([tenantId, applicantId])
   @@index([tenantId, status, createdAt])
   @@index([applicantId, status])
 }
