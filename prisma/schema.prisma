@@ -159,6 +159,13 @@ enum RecipeDraftStatus {
   ARCHIVED
 }
 
+enum RecipeImportJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 // ================================================================= //
 //                         CORE AUTH & TENANCY                       //
 // ================================================================= //
@@ -239,6 +246,7 @@ model Tenant {
   paymentOrders            PaymentOrder[]
   recipeEditorSessions     RecipeEditorSession[]
   recipeDrafts             RecipeDraft[]
+  recipeImportJobs         RecipeImportJob[]
   storeApplication         StoreApplication?
   joinLinks                TenantJoinLink[]
   membershipApplications   MembershipApplication[]
@@ -346,6 +354,30 @@ model RecipeDraft {
 
   @@index([tenantId, status, updatedAt])
   @@index([createdById, createdAt])
+}
+
+model RecipeImportJob {
+  id                  String                @id @default(uuid())
+  tenantId            String
+  status              RecipeImportJobStatus @default(PENDING)
+  fileName            String?
+  mimeType            String?
+  sourceData          Bytes?
+  sourceText          String?
+  catalogContext      String
+  result              Json?
+  diagnosticData      Json?
+  diagnosticExpiresAt DateTime?
+  errorMessage        String?
+  startedAt           DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  tenant              Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@index([diagnosticExpiresAt])
 }
 
 // 用户与租户的多对多关系表

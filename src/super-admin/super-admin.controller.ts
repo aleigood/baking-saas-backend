@@ -10,8 +10,9 @@ import {
     Query,
     ParseUUIDPipe,
     Req,
+    Res,
 } from '@nestjs/common';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { SuperAdminService } from './super-admin.service';
 import { AuthGuard } from '@nestjs/passport';
 import { SuperAdminGuard } from './guards/super-admin.guard';
@@ -58,6 +59,22 @@ export class SuperAdminController {
     @Get('dashboard-stats')
     getDashboardStats() {
         return this.superAdminService.getDashboardStats();
+    }
+
+    @Get('recipe-import-jobs')
+    findRecipeImportJobs(@Query('page') page?: string, @Query('limit') limit?: string, @Query('tenantId') tenantId?: string) {
+        return this.superAdminService.findRecipeImportJobs(Number(page) || 1, Number(limit) || 20, tenantId);
+    }
+
+    @Get('recipe-import-jobs/:id/diagnostic')
+    async downloadRecipeImportDiagnostic(
+        @Param('id', ParseUUIDPipe) id: string,
+        @Res({ passthrough: true }) response: Response,
+    ) {
+        const diagnostic = await this.superAdminService.getRecipeImportDiagnostic(id);
+        response.setHeader('Content-Type', 'application/json; charset=utf-8');
+        response.setHeader('Content-Disposition', `attachment; filename="recipe-import-${id}.json"`);
+        return diagnostic;
     }
 
     @Get('store-applications')

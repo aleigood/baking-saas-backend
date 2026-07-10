@@ -1,3 +1,39 @@
+# Baking SaaS Backend
+
+## 智能配方导入
+
+电脑端配方编辑器支持 Excel、CSV、图片、PDF、文本文件和粘贴内容的智能导入。识别结果会先进入现有配方编辑器，并仅标记需要确认、必须修正或由系统推导的字段；用户确认或修改后仍通过原有云端草稿流程发布。
+
+生产环境至少需要配置：
+
+```env
+RECIPE_IMPORT_PROVIDER=openai-compatible
+RECIPE_IMPORT_BASE_URL=https://api.openai.com/v1
+RECIPE_IMPORT_MODEL=gpt-5.4-mini
+RECIPE_IMPORT_API_KEY=your-api-key
+```
+
+`RECIPE_IMPORT_BASE_URL` 可指向兼容 Responses API、结构化输出及文件输入的服务。未配置 API Key 时，非生产环境只接受标准 JSON 粘贴，用于本地校对流程测试；生产环境会明确提示管理员配置，绝不会伪造识别结果。
+
+使用 DeepSeek V4 Flash 时：
+
+```env
+RECIPE_IMPORT_PROVIDER=deepseek
+RECIPE_IMPORT_BASE_URL=https://api.deepseek.com
+RECIPE_IMPORT_MODEL=deepseek-v4-flash
+RECIPE_IMPORT_API_KEY=your-deepseek-api-key
+```
+
+DeepSeek 使用 Chat Completions 接口。服务端会先提取 TXT、CSV 和 XLSX 内容再交给模型；DeepSeek 官方 API 不支持图片和 PDF 视觉输入，这两类文件需要改用支持视觉的模型。
+
+模型输出无法解析时，后端默认记录最多 1500 字符的原始返回预览。临时排查可设置 `RECIPE_IMPORT_LOG_MODEL_OUTPUT=true`，完整输出最多记录 20000 字符；排查结束后建议恢复为 `false`，避免配方内容长期留在容器日志中。
+
+DeepSeek 输出上限默认使用 `RECIPE_IMPORT_MAX_TOKENS=65536`。模型返回空内容或非法 JSON 时会自动重试一次；如果日志显示 `finish_reason=length`，说明当前文件输出仍然过大，需要拆分源文件或进一步收窄识别范围。
+
+模型请求默认超时为 `RECIPE_IMPORT_TIMEOUT_MS=240000`（4 分钟）。反向代理的读取超时应大于这个值，例如 Nginx 配置为 300 秒，否则代理会先返回 HTML 格式的 504 页面，而 Nest 仍在等待模型结果。
+
+配方识别现已使用数据库持久化异步任务：上传接口立即返回任务 ID，编辑器通过短请求轮询状态，因此反向代理不再需要等待完整的大模型响应。容器重启时，未完成任务会自动恢复执行。
+
 <p align="center">
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
 </p>

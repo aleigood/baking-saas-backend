@@ -5,49 +5,84 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>在线配方编辑器</title>
         <script src="./vendor/vue.global.prod.js"></script>
+        <link rel="stylesheet" href="./recipe-import-review.css" />
+        <script src="./recipe-import-review.js"></script>
         <style>
-            :root {
-                /* 保持原始文件的颜色变量 */
-                --primary-color: #8c5a3b;
-                --accent-color: #d4a373;
-                --bg-color: #fdf8f2;
-                --card-bg: #ffffff;
-                --text-primary: #4a3f35;
-                --text-secondary: #a98467;
-                --danger-color: #e74c3c;
-                --border-color: #f3e9e3;
-                --sidebar-bg: #f7f4ef;
+            @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
-                /* 标签颜色 */
-                --tag-flour-bg: #f0e6de;
+            :root {
+                /* Core baking palette */
+                --primary-color: #8c5a3b;        /* Deep Cocoa */
+                --primary-hover: #734529;
+                --primary-light: rgba(140, 90, 59, 0.06);
+                --primary-light-hover: rgba(140, 90, 59, 0.12);
+                
+                --accent-color: #d4a373;         /* Warm Honey Caramel */
+                --accent-hover: #c4915f;
+                --accent-light: rgba(212, 163, 115, 0.1);
+                
+                --bg-color: #faf6f0;             /* Milk Foam Cream */
+                --card-bg: #ffffff;
+                --text-primary: #3d332d;         /* Deep Roast Coffee */
+                --text-secondary: #8e7a6e;       /* Milky Tea Brown */
+                --text-muted: #bdaea4;           /* Soft Oat Powder */
+                --danger-color: #e05e5e;         /* Sweet Cranberry Red */
+                --danger-hover: #c94f4f;
+                --danger-light: rgba(224, 94, 94, 0.08);
+                
+                --border-color: #ece2d7;         /* Soft Wheat Straw */
+                --border-hover: #d2c1b0;
+                --sidebar-bg: #f4ece2;           /* Whole wheat flour */
+                
+                /* AI Indigo Gradient */
+                --ai-primary: #7c3aed;
+                --ai-primary-hover: #6d28d9;
+                --ai-light: rgba(124, 58, 237, 0.08);
+                --ai-border: rgba(124, 58, 237, 0.15);
+
+                /* Ingredient Tag Colors (matching our aesthetic) */
+                --tag-flour-bg: #f5eae1;
                 --tag-flour-text: #8c5a3b;
-                --tag-self-bg: #faedcd;
-                --tag-self-text: #8c5a3b;
-                --tag-water-bg: #ecf5ff;
-                --tag-water-text: #409eff;
+                --tag-self-bg: #f9edd4;
+                --tag-self-text: #a1784c;
+                --tag-water-bg: #e6f3ff;
+                --tag-water-text: #3182ce;
+
+                --radius-sm: 8px;
+                --radius-md: 12px;
+                --radius-lg: 18px;
+                --radius-xl: 24px;
+                
+                --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+                --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+                
+                --shadow-subtle: 0 4px 20px rgba(140, 90, 59, 0.03);
+                --shadow-normal: 0 8px 30px rgba(140, 90, 59, 0.06);
+                --shadow-focus: 0 0 0 4px rgba(140, 90, 59, 0.15);
             }
 
             body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
                 background-color: var(--bg-color);
                 color: var(--text-primary);
                 margin: 0;
-                font-size: 16px;
+                font-size: 15px;
+                line-height: 1.5;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
             }
 
-            /* 滚动条样式 */
+            /* Custom minimalist scrollbar */
             ::-webkit-scrollbar {
-                width: 8px;
-                height: 8px;
+                width: 6px;
+                height: 6px;
             }
             ::-webkit-scrollbar-track {
                 background: transparent;
             }
             ::-webkit-scrollbar-thumb {
-                background-color: #e0d3c9;
-                border-radius: 4px;
-                border: 2px solid transparent;
-                background-clip: content-box;
+                background-color: var(--border-hover);
+                border-radius: 99px;
             }
             ::-webkit-scrollbar-thumb:hover {
                 background-color: var(--accent-color);
@@ -57,198 +92,280 @@
                 display: flex;
                 height: 100vh;
                 overflow: hidden;
-                max-width: 1024px;
+                width: 100vw;
+                max-width: 1600px;
                 margin: 0 auto;
-                box-shadow: 0 0 30px rgba(0, 0, 0, 0.1);
+                background-color: var(--bg-color);
+                box-shadow: 0 10px 50px rgba(140, 90, 59, 0.08);
+                border-left: 1px solid var(--border-color);
+                border-right: 1px solid var(--border-color);
+                position: relative;
+            }
+            @media (max-width: 1366px) {
+                #app {
+                    border: none;
+                    box-shadow: none;
+                    max-width: 100%;
+                }
             }
 
-            /* Modal */
+            /* Modal overlay with backdrop blur */
             .modal-overlay {
                 position: fixed;
                 top: 0;
                 left: 0;
                 right: 0;
                 bottom: 0;
-                background-color: rgba(0, 0, 0, 0.5);
+                background-color: rgba(61, 51, 45, 0.4);
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
                 display: flex;
                 justify-content: center;
                 align-items: center;
                 z-index: 1000;
+                animation: fadeIn 0.25s ease-out;
+            }
+            @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
             }
             .modal-content {
-                background-color: white;
-                border-radius: 20px;
-                padding: 25px;
-                box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+                background-color: var(--card-bg);
+                border-radius: var(--radius-lg);
+                padding: 28px;
+                box-shadow: 0 20px 50px rgba(61, 51, 45, 0.15);
                 width: 90%;
-                max-width: 400px;
+                max-width: 420px;
                 max-height: 80vh;
                 display: flex;
                 flex-direction: column;
+                border: 1px solid var(--border-color);
+                transform: scale(1);
+                animation: scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            }
+            @keyframes scaleIn {
+                from { transform: scale(0.92); opacity: 0; }
+                to { transform: scale(1); opacity: 1; }
             }
             .modal-header {
                 font-size: 18px;
-                font-weight: 600;
+                font-weight: 700;
                 color: var(--text-primary);
                 margin-bottom: 20px;
                 text-align: center;
+                letter-spacing: 0.02em;
             }
             .modal-body {
                 overflow-y: auto;
                 flex-grow: 1;
+                padding-right: 4px;
             }
             .modal-body .selection-item {
-                padding: 12px;
-                border-radius: 10px;
-                margin-bottom: 8px;
+                padding: 14px;
+                border-radius: var(--radius-md);
+                margin-bottom: 10px;
                 cursor: pointer;
-                transition: background-color 0.2s;
+                transition: var(--transition-fast);
                 text-align: center;
-                font-weight: 500;
+                font-weight: 600;
                 border: 1px solid var(--border-color);
+                background-color: var(--bg-color);
+                color: var(--text-primary);
+            }
+            .modal-body .selection-item:hover {
+                background-color: var(--primary-light);
+                border-color: var(--accent-color);
+                color: var(--primary-color);
+                transform: translateY(-1px);
             }
             .modal-footer {
-                margin-top: 20px;
+                margin-top: 24px;
                 display: flex;
                 justify-content: flex-end;
-                gap: 10px;
+                gap: 12px;
             }
 
+            /* Login view */
             .cloud-login {
-                width: min(520px, calc(100vw - 40px));
-                margin: 10vh auto 0;
+                width: min(480px, calc(100vw - 40px));
+                margin: auto; /* centered vertically & horizontally */
                 background: var(--card-bg);
-                border-radius: 24px;
-                padding: 34px;
-                box-shadow: 0 18px 48px rgba(140, 90, 59, 0.12);
+                border-radius: var(--radius-xl);
+                padding: 40px;
+                box-shadow: 0 20px 60px rgba(140, 90, 59, 0.1);
+                border: 1px solid var(--border-color);
                 text-align: center;
+                animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            @keyframes slideUp {
+                from { transform: translateY(30px); opacity: 0; }
+                to { transform: translateY(0); opacity: 1; }
             }
             .cloud-login h1 {
-                margin: 0 0 8px;
+                margin: 0 0 12px;
                 color: var(--primary-color);
-                font-size: 28px;
+                font-size: 26px;
+                font-weight: 800;
+                letter-spacing: -0.02em;
             }
             .cloud-login p {
                 margin: 0;
                 color: var(--text-secondary);
-                line-height: 1.8;
-            }
-            .login-code {
-                margin: 24px auto 18px;
-                width: 220px;
-                border-radius: 22px;
-                padding: 26px 16px;
-                color: var(--primary-color);
-                background: linear-gradient(145deg, #fffaf4, #ffffff);
-                border: 1px solid var(--border-color);
-                font-size: 36px;
-                font-weight: 800;
-                letter-spacing: 0.18em;
-            }
-            .login-status {
-                margin-top: 14px;
-                color: var(--text-secondary);
+                line-height: 1.6;
                 font-size: 14px;
             }
+            .login-code {
+                margin: 28px auto 20px;
+                width: 220px;
+                border-radius: var(--radius-md);
+                padding: 20px 10px;
+                color: var(--primary-color);
+                background: linear-gradient(145deg, var(--bg-color), #ffffff);
+                border: 1.5px solid var(--border-color);
+                font-size: 38px;
+                font-weight: 800;
+                letter-spacing: 0.18em;
+                font-family: 'Plus Jakarta Sans', monospace;
+                box-shadow: inset 0 2px 8px rgba(140, 90, 59, 0.04);
+            }
+            .login-status {
+                margin-top: 16px;
+                color: var(--accent-color);
+                font-size: 14px;
+                font-weight: 600;
+            }
             .cloud-status {
-                margin-top: 10px;
+                margin-top: 12px;
                 color: var(--text-secondary);
                 font-size: 12px;
                 line-height: 1.6;
             }
 
-            /* Sidebar */
+            /* Sidebar layout */
             .sidebar {
-                width: 300px;
+                width: 310px;
                 flex-shrink: 0;
                 background-color: var(--sidebar-bg);
                 display: flex;
                 flex-direction: column;
                 border-right: 1px solid var(--border-color);
+                position: relative;
             }
             .sidebar-header {
-                padding: 20px;
+                padding: 24px 20px;
                 text-align: center;
-                border-bottom: 1px solid var(--border-color);
+                border-bottom: 1.5px solid var(--border-color);
             }
             .sidebar-header h1 {
-                font-size: 24px;
+                font-size: 22px;
+                font-weight: 800;
                 color: var(--primary-color);
                 margin: 0;
+                letter-spacing: -0.01em;
             }
             .sidebar-header p {
-                font-size: 13px;
+                font-size: 12px;
                 color: var(--text-secondary);
-                margin-top: 5px;
+                margin-top: 6px;
+                line-height: 1.4;
             }
             .sidebar-tabs {
                 display: flex;
-                padding: 10px;
-                gap: 5px;
+                padding: 12px;
+                gap: 8px;
                 border-bottom: 1px solid var(--border-color);
             }
             .sidebar-tab {
                 flex: 1;
-                padding: 8px 5px;
-                text-align: center;
-                font-size: 14px;
+                padding: 8px 2px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 5px;
+                font-size: 13px;
+                font-weight: 600;
                 color: var(--text-secondary);
-                border-radius: 10px;
+                border-radius: var(--radius-sm);
                 cursor: pointer;
-                transition:
-                    background-color 0.2s,
-                    color 0.2s;
-                position: relative;
+                transition: var(--transition-fast);
+                border: 1px solid transparent;
+            }
+            .sidebar-tab:hover {
+                color: var(--primary-color);
+                background-color: rgba(140, 90, 59, 0.04);
             }
             .sidebar-tab.active {
                 background-color: var(--primary-color);
-                color: white;
-                font-weight: 600;
+                color: #ffffff;
+                font-weight: 700;
+                box-shadow: 0 4px 12px rgba(140, 90, 59, 0.15);
             }
             .sidebar-tab .count-badge {
-                position: absolute;
-                top: -5px;
-                right: -5px;
-                background-color: var(--accent-color);
-                color: white;
                 font-size: 10px;
-                border-radius: 50%;
-                width: 18px;
-                height: 18px;
-                line-height: 18px;
-                text-align: center;
+                font-weight: 800;
+                background-color: rgba(212, 163, 115, 0.15);
+                color: var(--accent-hover);
+                border-radius: 99px;
+                padding: 1px 6px;
+                line-height: 1.3;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .sidebar-tab.active .count-badge {
+                background-color: rgba(255, 255, 255, 0.22);
+                color: #ffffff;
             }
             .recipe-list-container {
                 flex-grow: 1;
                 overflow-y: auto;
-                padding: 10px;
+                padding: 14px;
             }
             .recipe-list-item {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                padding: 12px;
-                border-radius: 10px;
-                margin-bottom: 8px;
+                padding: 14px 44px 14px 16px;
+                border-radius: var(--radius-md);
+                margin-bottom: 10px;
                 cursor: pointer;
-                transition:
-                    background-color 0.2s,
-                    box-shadow 0.2s;
+                transition: var(--transition-normal);
+                background-color: rgba(255, 255, 255, 0.4);
+                border: 1px solid rgba(236, 226, 215, 0.5);
+                position: relative;
+                overflow: hidden;
             }
             .recipe-list-item:hover {
-                background-color: var(--border-color);
+                background-color: var(--card-bg);
+                border-color: var(--border-hover);
+                box-shadow: 0 4px 12px rgba(140, 90, 59, 0.04);
+                transform: translateY(-1px);
+            }
+            .recipe-list-item::before {
+                content: '';
+                position: absolute;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                width: 4px;
+                background-color: var(--accent-color);
+                transform: scaleY(0);
+                transition: var(--transition-fast);
             }
             .recipe-list-item.active {
-                background-color: var(--primary-color);
-                color: white;
-                box-shadow: 0 4px 12px rgba(140, 90, 59, 0.2);
+                background-color: var(--card-bg);
+                border-color: var(--accent-color);
+                box-shadow: 0 6px 16px rgba(140, 90, 59, 0.07);
             }
-            .recipe-list-item.active .recipe-info span {
-                color: white !important;
+            .recipe-list-item.active::before {
+                transform: scaleY(1);
+            }
+            .recipe-list-item.active .recipe-info strong {
+                color: var(--primary-color);
             }
             .recipe-list-item.active .recipe-info .recipe-category-tag {
-                background-color: white;
-                color: var(--text-secondary) !important;
+                background-color: var(--primary-light);
+                color: var(--primary-color);
             }
             .recipe-info {
                 display: flex;
@@ -256,62 +373,82 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+                flex-grow: 1;
+                padding-right: 8px;
             }
             .recipe-item-controls {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                flex-shrink: 0;
-            }
-            .recipe-info strong {
-                font-size: 15px;
-                font-weight: 600;
-            }
-            .recipe-status {
-                margin-top: 5px;
-                font-size: 11px;
-                line-height: 1.2;
-                color: var(--text-secondary);
-            }
-            .recipe-status.pending {
-                color: var(--accent-color);
-                font-weight: 600;
-            }
-            .recipe-category-tag {
-                font-size: 10px;
-                font-weight: 500;
-                background-color: var(--border-color);
-                color: var(--text-secondary);
-                padding: 2px 6px;
-                border-radius: 5px;
-                margin-left: 6px;
-                vertical-align: middle;
-            }
-            .btn-delete-recipe {
-                background: none;
-                color: var(--text-secondary);
-                border-radius: 50%;
-                width: 24px;
-                height: 24px;
-                border: none;
-                cursor: pointer;
-                flex-shrink: 0;
-                transition: all 0.2s;
+                position: absolute;
+                right: 12px;
+                top: 50%;
+                transform: translateY(-50%) scale(0.9);
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                padding: 5px;
-                visibility: hidden;
+                flex-shrink: 0;
+                transition: var(--transition-fast);
+            }
+            .recipe-list-item:hover .recipe-item-controls {
+                transform: translateY(-50%) scale(1);
+            }
+            .recipe-info strong {
+                font-size: 14px;
+                font-weight: 700;
+                color: var(--text-primary);
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                min-width: 0;
+                width: 100%;
+            }
+            .recipe-item-name {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                flex-grow: 1;
+                min-width: 0;
+            }
+            .recipe-status {
+                margin-top: 6px;
+                font-size: 11px;
+                line-height: 1.2;
+                color: var(--text-secondary);
+                font-weight: 500;
+            }
+            .recipe-status.pending {
+                color: var(--accent-color);
+                font-weight: 700;
+            }
+            .recipe-category-tag {
+                font-size: 10px;
+                font-weight: 700;
+                background-color: var(--border-color);
+                color: var(--text-secondary);
+                padding: 2px 6px;
+                border-radius: 4px;
+                flex-shrink: 0;
+            }
+            .btn-delete-recipe {
+                background: none;
+                color: var(--text-muted);
+                border-radius: 50%;
+                width: 26px;
+                height: 26px;
+                border: none;
+                cursor: pointer;
+                flex-shrink: 0;
+                transition: var(--transition-fast);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 6px;
                 opacity: 0;
             }
-            .recipe-list-item:hover .btn-delete-recipe,
-            .recipe-list-item.active .btn-delete-recipe {
-                visibility: visible;
+            .recipe-list-item:hover .btn-delete-recipe {
                 opacity: 1;
             }
             .btn-delete-recipe:hover {
-                background: var(--danger-color);
-                color: white;
+                background: var(--danger-light);
+                color: var(--danger-color);
             }
             .btn-delete-recipe svg,
             .btn-delete-dough svg,
@@ -319,40 +456,558 @@
                 width: 100%;
                 height: 100%;
             }
-            .sidebar-footer {
-                padding: 15px;
-                border-top: 1px solid var(--border-color);
+            .sidebar-actions {
+                padding: 10px 14px 6px;
                 display: grid;
                 grid-template-columns: 1fr 1fr;
+                gap: 8px;
+                background-color: var(--sidebar-bg);
+                border-bottom: 1.5px solid var(--border-color);
+            }
+            .sidebar-actions .btn {
+                min-height: 36px;
+                height: 36px;
+                font-size: 13px;
+                padding: 4px 10px;
+            }
+            .sidebar-footer {
+                padding: 16px;
+                border-top: 1.5px solid var(--border-color);
+                display: flex;
+                flex-direction: column;
                 gap: 10px;
+                background-color: var(--sidebar-bg);
             }
 
-            /* Content & Card */
+            /* Main Content Panel */
             .main-content {
                 flex-grow: 1;
+                min-width: 0;
                 overflow-y: auto;
-                padding: 30px 20px;
+                padding: 24px;
                 position: relative;
+                background-color: var(--bg-color);
+            }
+            .editor-content {
+                max-width: 780px;
+                margin: 0 auto;
+            }
+            .inspector-panel {
+                width: 370px;
+                flex-shrink: 0;
+                display: flex;
+                flex-direction: column;
+                border-left: 1px solid var(--border-color);
+                background: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(250, 246, 240, 0.92));
+                overflow: hidden;
+            }
+            .inspector-header {
+                padding: 18px 16px 14px;
+                border-bottom: 1px solid var(--border-color);
+                background: rgba(255, 255, 255, 0.82);
+            }
+            .inspector-header h2 {
+                margin: 0;
+                color: var(--text-primary);
+                font-size: 17px;
+                font-weight: 800;
+                letter-spacing: -0.01em;
+            }
+            .inspector-header p {
+                margin: 4px 0 0;
+                color: var(--text-secondary);
+                font-size: 12px;
+                line-height: 1.5;
+            }
+            .inspector-tabs {
+                display: flex;
+                padding: 6px 12px;
+                background: #f4ece2;
+                border-bottom: 1.5px solid var(--border-color);
+                gap: 8px;
+            }
+            .inspector-tab {
+                flex: 1;
+                height: 34px;
+                line-height: 34px;
+                padding: 0;
+                border: 1px solid transparent;
+                border-radius: var(--radius-sm);
+                background: transparent;
+                color: var(--text-secondary);
+                font-size: 12.5px;
+                font-weight: 700;
+                cursor: pointer;
+                transition: var(--transition-fast);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+            }
+            .inspector-tab:hover {
+                color: var(--primary-color);
+                background: rgba(255, 255, 255, 0.5);
+            }
+            .inspector-tab.active {
+                background: #ffffff;
+                color: var(--primary-color);
+                border-color: var(--border-color);
+                box-shadow: 0 2px 6px rgba(140, 90, 59, 0.05);
+            }
+            .inspector-tab .tab-badge {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background: var(--danger-color);
+                color: #fff;
+                border-radius: 99px;
+                padding: 1px 6px;
+                font-size: 10px;
+                font-weight: 800;
+                line-height: 1;
+            }
+            .inspector-body {
+                flex: 1;
+                min-height: 0;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                padding: 0;
+            }
+            .inspector-body > section {
+                display: flex;
+                flex-direction: column;
+                height: 100%;
+                overflow: hidden;
+            }
+            .inspector-toolbar {
+                flex-shrink: 0;
+                display: grid;
+                gap: 10px;
+                padding: 12px 14px 10px;
+                background: #faf6f0;
+                border-bottom: 1px solid var(--border-color);
+                z-index: 10;
+            }
+            .inspector-toolbar .input-field {
+                height: 36px;
+                line-height: 36px;
+                font-size: 12px;
+            }
+            .inspector-summary {
+                display: flex;
+                gap: 6px;
+                flex-wrap: wrap;
+            }
+            .review-scope-switch-container {
+                display: flex;
+                justify-content: center;
+                width: 100%;
+            }
+            .review-scope-switch {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 2px;
+                padding: 2px;
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                background: rgba(255, 255, 255, 0.6);
+                width: 180px;
+            }
+            .review-scope-switch button {
+                min-height: 24px;
+                height: 24px;
+                border: 0;
+                border-radius: 6px;
+                background: transparent;
+                color: var(--text-secondary);
+                font-size: 11px;
+                font-weight: 800;
+                cursor: pointer;
+                transition: var(--transition-fast);
+            }
+            .review-scope-switch button {
+                min-height: 28px;
+                border: 0;
+                border-radius: 7px;
+                background: transparent;
+                color: var(--text-secondary);
+                font-size: 11px;
+                font-weight: 800;
+                cursor: pointer;
+            }
+            .review-scope-switch button.active {
+                color: var(--primary-color);
+                background: #fff;
+                box-shadow: 0 2px 8px rgba(74, 52, 38, 0.08);
+            }
+            .review-modified-state {
+                color: #a16207;
+                font-size: 10px;
+                font-weight: 800;
+            }
+            .review-view-state {
+                color: var(--text-secondary);
+                font-size: 10px;
+                font-weight: 700;
+            }
+            .review-diagnostic-list {
+                display: grid;
+                gap: 2px;
+                margin: 3px 0;
+                padding-left: 16px;
+                color: var(--text-secondary);
+                font-size: 11px;
+                line-height: 1.35;
+            }
+            .confirmed-review-toggle {
+                border: 0;
+                background: transparent;
+                cursor: pointer;
+            }
+            .inspector-list {
+                display: grid;
+                gap: 8px;
+            }
+            .inspector-empty {
+                margin: 12px 14px;
+                padding: 24px 16px;
+                border: 1px dashed var(--border-hover);
+                border-radius: var(--radius-md);
+                color: var(--text-secondary);
+                background: rgba(255, 255, 255, 0.64);
+                text-align: center;
+                font-size: 13px;
+                line-height: 1.7;
+            }
+            .ingredient-item-card {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 12px 14px;
+                border: 1.5px solid var(--border-color);
+                border-radius: var(--radius-md);
+                background: rgba(255, 255, 255, 0.94);
+                box-shadow: 0 4px 14px rgba(140, 90, 59, 0.025);
+                cursor: pointer;
+                transition: all 0.2s ease;
+            }
+            .ingredient-item-card:hover {
+                border-color: var(--accent-color);
+                background-color: #fffdfb;
+                box-shadow: 0 6px 18px rgba(140, 90, 59, 0.06);
+            }
+            .ingredient-item-card.import {
+                border-color: rgba(196, 125, 87, 0.2);
+                background: linear-gradient(180deg, #ffffff, #fffdfa);
+            }
+            .ingredient-item-card.import:hover {
+                border-color: var(--primary-color);
+            }
+            .ingredient-card-head {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+            }
+            .ingredient-card-head strong {
+                color: var(--text-primary);
+                font-size: 13.5px;
+                font-weight: 700;
+                line-height: 1.3;
+            }
+            .ingredient-card-badges {
+                display: flex;
+                gap: 6px;
+            }
+            .ingredient-card-meta {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                font-size: 11px;
+                color: var(--text-muted);
+            }
+            .ingredient-card-meta .type-label {
+                color: var(--text-muted);
+                font-weight: 600;
+            }
+            .ingredient-card-meta .source-label {
+                font-style: italic;
+            }
+            .ingredient-card-meta .occurrence-label {
+                background: rgba(140, 90, 59, 0.05);
+                color: var(--text-secondary);
+                padding: 1px 6px;
+                border-radius: 4px;
+                font-weight: 700;
+            }
+            .ing-tag.tag-new {
+                background: rgba(196, 125, 87, 0.1);
+                color: var(--primary-color);
+                border: 1px solid rgba(196, 125, 87, 0.2);
+                font-size: 10px;
+                font-weight: 700;
+                padding: 2px 6px;
+                border-radius: 4px;
+            }
+            .inspector-section-heading {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+                margin: 14px 0 8px;
+                padding: 0 2px;
+                color: var(--text-secondary);
+                font-size: 11px;
+                font-weight: 800;
+                letter-spacing: 0.04em;
+            }
+            .inspector-section-heading:first-of-type {
+                margin-top: 2px;
+            }
+            .ingredient-import-tag {
+                display: inline-flex;
+                align-items: center;
+                min-height: 22px;
+                padding: 2px 8px;
+                border-radius: 999px;
+                color: var(--ai-primary);
+                background: rgba(124, 58, 237, 0.09);
+                font-size: 10px;
+                font-weight: 800;
+                white-space: nowrap;
+            }
+            .ai-review-list.compact,
+            .inspector-scroll-area {
+                flex: 1;
+                overflow-y: auto;
+                padding: 12px 14px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .inspector-list {
+                display: grid;
+                gap: 8px;
+            }
+            .ai-review-list.compact .ai-review-item {
+                padding: 9px 10px;
+                border: 1px solid rgba(140, 90, 59, 0.14);
+                border-radius: var(--radius-md);
+                background: #fdfcf9;
+                box-shadow: none;
+            }
+            .ai-review-list.compact .ai-review-item:hover {
+                transform: none;
+                background: #ffffff;
+                border-color: var(--accent-color);
+                box-shadow: 0 4px 10px rgba(140, 90, 59, 0.05);
+            }
+            .ai-review-list.compact .ai-review-item.active.blocking {
+                border-color: #d45d43;
+                box-shadow: 0 0 0 3px rgba(212, 93, 67, 0.12);
+            }
+            .ai-review-list.compact .ai-review-item.active.review {
+                border-color: #c2956c;
+                box-shadow: 0 0 0 3px rgba(194, 149, 108, 0.12);
+            }
+            .ai-review-list.compact .ai-review-item.active.info,
+            .ai-review-list.compact .ai-review-item.active.resolved {
+                border-color: #2f7a58;
+                box-shadow: 0 0 0 3px rgba(47, 122, 88, 0.12);
+            }
+            .ai-review-list.compact .ai-review-item-head {
+                margin-bottom: 4px;
+            }
+            .ai-review-list.compact .ai-review-item-head strong {
+                font-size: 12.5px;
+            }
+            .ai-review-list.compact .ai-review-item-head span {
+                font-size: 10.5px;
+                max-width: 120px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .ai-review-list.compact .ai-review-item p {
+                margin: 4px 0;
+                font-size: 12px;
+                line-height: 1.45;
+            }
+            .ai-review-item-footer {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 12px;
+                margin-top: 8px;
+                padding-top: 6px;
+                border-top: 1px dashed rgba(140, 90, 59, 0.08);
+            }
+            .evidence-wrapper {
+                flex: 1;
+                min-width: 0;
+            }
+            .evidence-tag {
+                display: inline-block;
+                width: 100%;
+                height: auto;
+                min-height: 24px;
+                padding: 4px 8px;
+                background: rgba(140, 90, 59, 0.05);
+                color: #7c5135;
+                border: 1px solid rgba(140, 90, 59, 0.12);
+                border-radius: 4px;
+                font-size: 10.5px;
+                font-weight: 700;
+                line-height: 1.35;
+                box-sizing: border-box;
+                word-break: break-all;
+                white-space: normal;
+            }
+            .ai-review-list.compact .ai-review-item-actions {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                flex-shrink: 0;
+            }
+            .review-status-badge {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                height: 24px;
+                padding: 0 8px;
+                border-radius: 99px;
+                font-size: 10.5px;
+                font-weight: 700;
+                box-sizing: border-box;
+                flex-shrink: 0;
+            }
+            .review-status-badge.unseen {
+                background: rgba(140, 130, 122, 0.08);
+                color: #73675f;
+                border: 1px solid rgba(140, 130, 122, 0.18);
+            }
+            .review-status-badge.seen {
+                background: rgba(140, 90, 59, 0.06);
+                color: var(--primary-color);
+                border: 1px solid rgba(140, 90, 59, 0.12);
+            }
+            .review-status-badge.modified {
+                background: rgba(245, 158, 11, 0.06);
+                color: #d97706;
+                border: 1px solid rgba(245, 158, 11, 0.12);
+            }
+            .btn-confirm-issue {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                height: 24px;
+                padding: 0 10px;
+                font-size: 10.5px;
+                font-weight: 700;
+                border-radius: var(--radius-sm);
+                background: var(--primary-color);
+                color: #fff;
+                border: none;
+                cursor: pointer;
+                transition: var(--transition-fast);
+                box-sizing: border-box;
+            }
+            .btn-confirm-issue:hover {
+                background: var(--primary-dark);
+            }
+            .ai-review-done {
+                color: #2f7a58;
+                font-size: 10.5px;
+                font-weight: 700;
+            }
+            .ai-review-list.compact .ai-review-item:hover {
+                transform: none;
+            }
+            .ai-review-list.compact .ai-review-item.active {
+                border-color: var(--ai-primary);
+                box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.08);
+            }
+            .ai-review-list.compact .ai-review-item-head {
+                margin-bottom: 4px;
+            }
+            .ai-review-list.compact .ai-review-item-head strong {
+                font-size: 12px;
+            }
+            .ai-review-list.compact .ai-review-item-head span {
+                font-size: 10px;
+                max-width: 120px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .ai-review-list.compact .ai-review-item p {
+                margin: 3px 0;
+                font-size: 12px;
+                line-height: 1.4;
+            }
+            .ai-review-list.compact .ai-review-item .evidence {
+                padding: 2px 6px;
+                font-size: 11px;
+            }
+            .ai-review-list.compact .ai-review-item-actions {
+                margin-top: 7px;
+            }
+            .ai-review-list.compact .ai-review-item-actions .btn {
+                min-height: 28px;
+                padding: 4px 10px;
+                font-size: 11px;
+            }
+            .ai-review-item.resolved {
+                opacity: 0.54;
+                background: rgba(255, 255, 255, 0.58);
+            }
+            .ai-review-item.resolved .ai-review-item-head strong,
+            .ai-review-item.resolved p {
+                text-decoration: line-through;
+            }
+            .ai-review-done {
+                display: inline-flex;
+                align-items: center;
+                min-height: 26px;
+                padding: 3px 9px;
+                border-radius: 999px;
+                background: rgba(47, 122, 88, 0.08);
+                color: #2f7a58;
+                font-size: 11px;
+                font-weight: 800;
+            }
+            .import-ingredient-card .input-field {
+                height: 36px;
+                line-height: 36px;
+                font-size: 12px;
             }
             .card {
                 background: var(--card-bg);
-                padding: 20px;
-                border-radius: 20px;
-                margin-bottom: 20px;
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+                padding: 24px;
+                border-radius: var(--radius-lg);
+                margin-bottom: 24px;
+                box-shadow: var(--shadow-subtle);
+                border: 1px solid var(--border-color);
                 position: relative;
+                transition: var(--transition-normal);
+            }
+            .card:hover {
+                box-shadow: var(--shadow-normal);
             }
             .card-title-wrapper {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                padding: 0 5px;
                 margin-bottom: 20px;
+                border-left: 4px solid var(--accent-color);
+                padding-left: 10px;
             }
             .card-title {
-                font-size: 18px;
-                font-weight: 600;
+                font-size: 16px;
+                font-weight: 800;
                 color: var(--text-primary);
+                letter-spacing: 0.02em;
             }
             .form-item {
                 margin-bottom: 20px;
@@ -360,115 +1015,159 @@
             .form-grid {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
-                gap: 15px;
+                gap: 20px;
+            }
+            @media (max-width: 768px) {
+                .form-grid {
+                    grid-template-columns: 1fr;
+                    gap: 15px;
+                }
             }
             .form-item-label {
                 display: block;
                 margin-bottom: 8px;
-                font-size: 14px;
-                color: #606266;
+                font-size: 13px;
+                font-weight: 700;
+                color: var(--text-secondary);
             }
+
             .input-field,
             .picker {
                 width: 100%;
-                height: 44px;
-                line-height: 44px;
-                padding: 0 12px;
-                border: 1px solid var(--border-color);
-                border-radius: 10px;
+                height: 42px;
+                line-height: 42px;
+                padding: 0 14px;
+                border: 1.5px solid var(--border-color);
+                border-radius: var(--radius-md);
                 font-size: 14px;
-                background-color: #f8f9fa;
+                background-color: var(--card-bg);
                 box-sizing: border-box;
                 color: var(--text-primary);
-                transition:
-                    border-color 0.2s,
-                    box-shadow 0.2s;
+                font-family: inherit;
+                transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            .input-field::placeholder {
+                color: var(--text-muted);
             }
             .input-field.ratio-input {
-                width: 100px;
+                width: 90px;
                 text-align: center;
                 flex-shrink: 0;
                 flex-grow: 0;
-                flex-basis: 100px;
+                flex-basis: 90px;
+                font-weight: 700;
+                color: var(--primary-color);
             }
             .input-field:focus,
             .picker:focus {
                 outline: none;
-                border-color: var(--primary-color);
-                box-shadow: 0 0 0 3px rgba(140, 90, 59, 0.15);
+                border-color: var(--accent-color);
+                box-shadow: var(--shadow-focus);
+                background-color: #ffffff;
             }
-            .input-field[readonly],
-            .picker:disabled {
-                color: #756a62;
-                background-color: #f1eee9;
+            .input-field[readonly] {
+                color: var(--text-secondary);
+                background-color: var(--bg-color);
+                border-color: var(--border-color);
                 cursor: default;
-                box-shadow: none;
             }
-            /* 错误状态样式 */
+            .picker:disabled {
+                color: var(--text-muted);
+                background-color: var(--bg-color);
+                border-color: var(--border-color);
+                cursor: not-allowed;
+            }
+            /* Error states */
             .input-field.error {
                 border-color: var(--danger-color);
+                background-color: rgba(224, 94, 94, 0.02);
+            }
+            .input-field.error:focus {
+                box-shadow: 0 0 0 4px rgba(224, 94, 94, 0.15);
             }
             .input-error-msg {
                 color: var(--danger-color);
                 font-size: 12px;
-                margin-top: 4px;
+                margin-top: 6px;
+                font-weight: 600;
                 padding-left: 2px;
             }
 
+            /* Modern buttons */
             .btn {
                 display: inline-flex;
                 justify-content: center;
                 align-items: center;
-                padding: 10px 15px;
-                min-height: 44px;
+                padding: 10px 16px;
+                min-height: 42px;
                 box-sizing: border-box;
-                border-radius: 15px;
-                font-size: 16px;
-                font-weight: 500;
+                border-radius: var(--radius-md);
+                font-size: 14px;
+                font-weight: 600;
                 cursor: pointer;
-                transition:
-                    transform 0.2s,
-                    box-shadow 0.28s;
-                border: none;
+                transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+                border: 0;
             }
             .btn:active {
-                transform: scale(0.97);
+                transform: scale(0.96);
             }
             .btn:disabled {
-                opacity: 0.6;
+                opacity: 0.45;
                 cursor: not-allowed;
+                transform: none !important;
+                box-shadow: none !important;
             }
             .btn-primary {
-                background-image: linear-gradient(135deg, var(--accent-color) 0%, var(--primary-color) 100%);
+                background: linear-gradient(135deg, var(--accent-color) 0%, var(--primary-color) 100%);
                 color: white;
-                box-shadow: 0 4px 15px rgba(140, 90, 59, 0.2);
+                box-shadow: 0 4px 14px rgba(140, 90, 59, 0.2);
+            }
+            .btn-primary:hover:not(:disabled) {
+                background: linear-gradient(135deg, var(--accent-hover) 0%, var(--primary-hover) 100%);
+                box-shadow: 0 6px 20px rgba(140, 90, 59, 0.3);
+                transform: translateY(-1px);
             }
             .btn-secondary {
-                background-color: #f3e9e3;
-                color: var(--text-secondary);
+                background-color: var(--border-color);
+                color: var(--text-primary);
+                border: 0;
+            }
+            .btn-secondary:hover:not(:disabled) {
+                background-color: var(--border-hover);
+                transform: translateY(-1px);
             }
             .btn-dashed {
-                border: 1px dashed var(--primary-color);
+                border: 1.5px dashed var(--primary-color);
                 color: var(--primary-color);
                 background: transparent;
-                min-height: 46px;
+                min-height: 42px;
+            }
+            .btn-dashed:hover:not(:disabled) {
+                background-color: var(--primary-light);
+                transform: translateY(-1px);
             }
             .btn-full-width {
                 width: 100%;
             }
             .btn-remove {
-                width: 40px;
-                height: 40px;
-                border: 1px dashed var(--border-color);
-                border-radius: 10px;
-                color: var(--danger-color);
-                background: transparent;
+                width: 38px;
+                height: 38px;
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-md);
+                color: var(--text-secondary);
+                background: var(--card-bg);
                 padding: 10px;
                 min-height: auto;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 flex-shrink: 0;
+                transition: var(--transition-fast);
+            }
+            .btn-remove:hover {
+                border-color: var(--danger-color);
+                color: var(--danger-color);
+                background-color: var(--danger-light);
             }
             .btn-delete-dough {
                 position: absolute;
@@ -476,48 +1175,55 @@
                 right: 20px;
                 background: none;
                 border: none;
-                color: var(--primary-color);
+                color: var(--text-muted);
                 cursor: pointer;
                 width: 24px;
                 height: 24px;
-                opacity: 0.8;
-                transition: opacity 0.2s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 50%;
+                transition: var(--transition-fast);
             }
             .btn-delete-dough:hover {
-                opacity: 1;
+                background-color: var(--danger-light);
+                color: var(--danger-color);
             }
 
-            /* Ingredients & Tags */
+            /* Ingredient lists */
             .ingredient-header {
                 display: flex;
                 align-items: center;
                 color: var(--text-secondary);
-                font-size: 13px;
-                margin-top: 15px;
-                margin-bottom: 8px;
-                gap: 10px;
+                font-size: 12px;
+                font-weight: 700;
+                margin-top: 20px;
+                margin-bottom: 10px;
+                gap: 12px;
+                padding: 0 4px;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
             }
             .col-name {
                 flex: 1;
             }
             .col-ratio {
-                width: 100px;
+                width: 90px;
                 text-align: center;
             }
             .col-action {
-                width: 40px;
+                width: 38px;
                 text-align: right;
             }
             .ingredient-row {
                 display: flex;
                 align-items: center;
-                gap: 10px;
-                margin-bottom: 10px;
+                gap: 12px;
+                margin-bottom: 12px;
             }
             .ingredient-row > .input-with-tag-wrapper {
                 flex: 1;
             }
-
             .input-with-tag-wrapper {
                 position: relative;
                 display: flex;
@@ -526,22 +1232,23 @@
             }
             .tags-container {
                 position: absolute;
-                right: 8px;
+                right: 10px;
                 top: 50%;
                 transform: translateY(-50%);
                 display: flex;
-                gap: 4px;
+                gap: 6px;
                 pointer-events: none;
                 z-index: 2;
                 height: auto;
             }
             .ing-tag {
-                font-size: 12px;
-                padding: 4px 8px;
+                font-size: 11px;
+                padding: 3px 8px;
                 border-radius: 6px;
-                font-weight: 600;
-                line-height: 1;
+                font-weight: 700;
+                line-height: 1.2;
                 white-space: nowrap;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
             }
             .tag-flour {
                 background-color: var(--tag-flour-bg);
@@ -555,40 +1262,52 @@
                 background-color: var(--tag-water-bg);
                 color: var(--tag-water-text);
             }
-
+            /* Precision indents for input text to avoid overlapping tags */
             .input-with-tag-wrapper.input-has-1-tag .input-field {
-                padding-right: 55px !important;
+                padding-right: 65px !important;
             }
             .input-with-tag-wrapper.input-has-2-tags .input-field {
-                padding-right: 110px !important;
-            } /* 加宽以容纳水标签 */
+                padding-right: 120px !important;
+            }
             .input-with-tag-wrapper.input-has-water-tag .input-field {
-                padding-right: 110px !important;
+                padding-right: 120px !important;
             }
 
-            /* Procedures & Subgroups */
+            /* Procedures */
             .procedure-item {
                 display: flex;
                 align-items: center;
-                gap: 10px;
-                margin-bottom: 10px;
+                gap: 12px;
+                margin-bottom: 12px;
             }
             .procedure-notes .notes-title {
                 display: block;
-                margin-bottom: 8px;
-                font-size: 14px;
-                color: #606266;
+                margin-bottom: 10px;
+                font-size: 13px;
+                font-weight: 700;
+                color: var(--text-secondary);
             }
             .sub-group {
-                margin-top: 20px;
-                border-top: 1px solid var(--border-color);
+                margin-top: 24px;
+                border-top: 1.5px solid var(--border-color);
                 padding-top: 20px;
             }
             .sub-group-title {
                 font-size: 14px;
-                font-weight: 500;
-                color: var(--text-primary);
-                margin-bottom: 15px;
+                font-weight: 800;
+                color: var(--primary-color);
+                margin-bottom: 16px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+            .sub-group-title::before {
+                content: '';
+                display: inline-block;
+                width: 6px;
+                height: 6px;
+                background-color: var(--accent-color);
+                border-radius: 50%;
             }
             .editor-placeholder {
                 display: flex;
@@ -597,147 +1316,836 @@
                 height: 100%;
                 text-align: center;
                 color: var(--text-secondary);
-                font-size: 18px;
+                font-size: 16px;
+                line-height: 1.8;
+                padding: 40px;
             }
 
-            /* Tabs */
+            /* Horizontal Tabs Wrapper */
             .tabs-wrapper {
                 position: relative;
                 display: flex;
                 align-items: center;
-                margin-bottom: 20px;
+                margin-bottom: 24px;
+                background-color: var(--bg-color);
+                padding: 6px;
+                border-radius: var(--radius-md);
+                border: 1px solid var(--border-color);
             }
             .tabs {
                 display: flex;
-                gap: 10px;
-                border-bottom: 1px solid var(--border-color);
+                gap: 8px;
                 flex-wrap: nowrap;
                 overflow-x: auto;
                 scrollbar-width: none;
+                width: 100%;
+                padding: 2px 24px;
             }
             .tabs::-webkit-scrollbar {
                 display: none;
             }
             .tab-item {
-                padding: 10px 15px;
+                padding: 8px 16px;
                 cursor: pointer;
                 color: var(--text-secondary);
-                border-bottom: 3px solid transparent;
-                transition:
-                    color 0.3s,
-                    border-color 0.3s;
+                border-radius: var(--radius-sm);
+                background-color: transparent;
+                border: 1px solid transparent;
+                transition: var(--transition-normal);
                 display: flex;
                 align-items: center;
                 gap: 8px;
                 white-space: nowrap;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            .tab-item:hover {
+                color: var(--primary-color);
+                background-color: rgba(255, 255, 255, 0.6);
             }
             .tab-item.active {
                 color: var(--primary-color);
-                border-bottom-color: var(--primary-color);
-                font-weight: 600;
+                background-color: var(--card-bg);
+                font-weight: 700;
+                box-shadow: 0 2px 8px rgba(140, 90, 59, 0.05);
+                border-color: rgba(236, 226, 215, 0.6);
             }
             .add-tab {
-                font-weight: bold;
+                font-weight: 800;
                 color: var(--primary-color);
+                font-size: 16px;
+                padding: 8px 14px;
+            }
+            .add-tab:hover {
+                background-color: var(--primary-light);
             }
             .tab-delete-btn {
-                background-color: var(--border-color);
+                background-color: rgba(61, 51, 45, 0.05);
                 border-radius: 50%;
                 border: none;
                 padding: 0;
                 margin: 0;
-                width: 18px;
-                height: 18px;
+                width: 16px;
+                height: 16px;
                 color: var(--text-secondary);
                 cursor: pointer;
-                transition: all 0.2s;
+                transition: var(--transition-fast);
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 flex-shrink: 0;
-                visibility: hidden;
-                opacity: 0;
+                opacity: 0.4;
             }
             .tab-item:hover .tab-delete-btn,
             .tab-item.active .tab-delete-btn {
-                visibility: visible;
-                opacity: 1;
+                opacity: 0.8;
             }
             .tab-delete-btn:hover {
                 background-color: var(--danger-color);
-                color: white;
+                color: white !important;
+                opacity: 1 !important;
             }
             .tab-scroll-btn {
                 position: absolute;
                 top: 50%;
                 transform: translateY(-50%);
-                background-color: rgba(255, 255, 255, 0.8);
-                border: 1px solid var(--border-color);
+                background-color: rgba(255, 255, 255, 0.98);
+                border: 1px solid rgba(140, 90, 59, 0.16);
                 border-radius: 50%;
                 width: 28px;
                 height: 28px;
                 z-index: 10;
                 cursor: pointer;
-                color: var(--text-secondary);
-                font-size: 16px;
+                color: var(--primary-color);
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
-            }
-            .tab-scroll-btn.left {
-                left: -14px;
-            }
-            .tab-scroll-btn.right {
-                right: -14px;
+                box-shadow: 0 4px 12px rgba(140, 90, 59, 0.15);
+                transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
             }
             .tab-scroll-btn:hover {
-                color: var(--primary-color);
+                color: #ffffff;
+                border-color: var(--primary-color);
+                background-color: var(--primary-color);
+                transform: translateY(-50%) scale(1.1);
+            }
+            .tab-scroll-btn.left {
+                left: 4px;
+            }
+            .tab-scroll-btn.right {
+                right: 4px;
             }
             .tab-delete-btn svg {
-                width: 10px;
-                height: 10px;
+                width: 8px;
+                height: 8px;
             }
 
-            /* Suggestion Box */
+            /* Input Auto-suggestions */
             .suggestion-box {
                 position: absolute;
                 background-color: var(--card-bg);
-                border: 1px solid var(--border-color);
-                border-radius: 10px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+                border: 1.5px solid var(--border-color);
+                border-radius: var(--radius-md);
+                box-shadow: 0 10px 30px rgba(140, 90, 59, 0.12);
                 z-index: 100;
                 max-height: 200px;
                 overflow-y: auto;
                 list-style: none;
-                margin: 0;
-                padding: 5px;
+                margin: 4px 0 0;
+                padding: 6px;
                 box-sizing: border-box;
             }
             .suggestion-item {
-                padding: 8px 12px;
-                font-size: 14px;
+                padding: 10px 14px;
+                font-size: 13px;
+                font-weight: 600;
                 cursor: pointer;
-                border-radius: 8px;
+                border-radius: var(--radius-sm);
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
+                color: var(--text-primary);
+                transition: var(--transition-fast);
             }
             .suggestion-item:hover {
-                background-color: var(--sidebar-bg);
+                background-color: var(--bg-color);
+                color: var(--primary-color);
             }
             .suggestion-tag {
                 font-size: 10px;
                 padding: 2px 6px;
                 border-radius: 4px;
-                font-weight: 500;
+                font-weight: 700;
                 margin-left: 8px;
             }
             .suggestion-action {
+                color: var(--accent-color);
+                font-weight: 700;
+            }
+
+            /* AI Features Styles */
+            .ai-import-trigger {
+                position: relative;
+                overflow: hidden;
+                border: 1px solid var(--ai-border);
+                background: linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(99, 102, 241, 0.05) 100%);
+                color: var(--ai-primary);
+                font-weight: 700;
+                box-shadow: 0 2px 8px rgba(124, 58, 237, 0.08);
+            }
+            .ai-import-trigger:hover {
+                background: linear-gradient(135deg, rgba(124, 58, 237, 0.15) 0%, rgba(99, 102, 241, 0.1) 100%);
+                border-color: var(--ai-primary);
+                transform: translateY(-1px);
+            }
+            .ai-import-badge {
+                display: inline-flex;
+                align-items: center;
+                margin-left: 7px;
+                padding: 2px 7px;
+                border: 1px solid rgba(196, 125, 87, 0.26);
+                border-radius: 999px;
+                background: rgba(196, 125, 87, 0.09);
+                color: #9a6041;
+                font-size: 10px;
+                font-weight: 700;
+                vertical-align: middle;
+            }
+            .ai-ingredient-summary {
+                margin-bottom: 22px;
+                padding: 18px;
+                border: 1px solid var(--border-color);
+                border-radius: 14px;
+                background: #fbfaf8;
+            }
+            .ai-ingredient-summary-head {
+                display: flex;
+                justify-content: space-between;
+                gap: 16px;
+                margin-bottom: 12px;
+            }
+            .ai-ingredient-summary-head p { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; }
+            .ai-ingredient-toolbar {
+                display: grid;
+                grid-template-columns: minmax(220px, 1fr) auto;
+                gap: 12px;
+                align-items: center;
+                margin-bottom: 14px;
+            }
+            .ai-ingredient-toolbar .input-field {
+                height: 38px;
+                line-height: 38px;
+            }
+            .ai-ingredient-list { display: grid; gap: 9px; }
+            .ai-ingredient-row {
+                display: grid;
+                grid-template-columns: minmax(120px, 0.8fr) minmax(220px, 1.2fr) minmax(160px, 1fr);
+                align-items: center;
+                gap: 12px;
+                padding: 11px 12px;
+                border: 1px solid #ece7e2;
+                border-radius: 10px;
+                background: #fff;
+            }
+            .ai-ingredient-row select { width: 100%; }
+            .ai-ingredient-row .input-field {
+                height: 38px;
+                line-height: 38px;
+            }
+            .ai-ingredient-source strong { display: block; font-size: 13px; }
+            .ai-ingredient-source span, .ai-ingredient-usage { color: var(--text-secondary); font-size: 11px; }
+            .ai-match-state { color: #2f7a58; font-size: 12px; font-weight: 700; }
+            .ai-match-state.new { color: #a86735; }
+            @media (max-width: 720px) {
+                .ai-ingredient-row { grid-template-columns: 1fr; }
+            }
+            .ai-review-bar {
+                position: sticky;
+                bottom: 20px;
+                top: auto;
+                z-index: 35;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+                gap: 16px;
+                margin: 20px auto 0;
+                padding: 16px 18px;
+                width: min(900px, 100%);
+                box-sizing: border-box;
+                border: 1px solid var(--ai-border);
+                border-radius: var(--radius-xl);
+                background: rgba(255, 255, 255, 0.92);
+                box-shadow: 0 12px 36px rgba(124, 58, 237, 0.16);
+                backdrop-filter: blur(20px);
+                -webkit-backdrop-filter: blur(20px);
+                animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            .ai-review-mini {
+                position: sticky;
+                bottom: 20px;
+                z-index: 35;
+                display: inline-flex;
+                align-items: center;
+                gap: 10px;
+                margin: 20px auto 0;
+                padding: 10px 16px;
+                border: 1px solid var(--ai-border);
+                border-radius: 999px;
+                background: rgba(255, 255, 255, 0.94);
                 color: var(--primary-color);
+                box-shadow: 0 10px 28px rgba(124, 58, 237, 0.14);
+                font-size: 13px;
+                font-weight: 800;
+                cursor: pointer;
+                backdrop-filter: blur(18px);
+                -webkit-backdrop-filter: blur(18px);
+            }
+            .ai-review-title {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                min-width: 0;
+            }
+            .ai-review-title strong {
+                color: var(--text-primary);
+                font-size: 15px;
+                font-weight: 800;
+            }
+            .ai-review-title span {
+                color: var(--text-secondary);
+                font-size: 13px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .ai-review-counts {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+            .ai-count-chip {
+                padding: 4px 10px;
+                border-radius: 99px;
+                background: var(--bg-color);
+                color: var(--text-secondary);
+                font-size: 11px;
+                font-weight: 700;
+            }
+            .ai-count-chip.blocking {
+                background: rgba(224, 94, 94, 0.08);
+                color: var(--danger-color);
+            }
+            .ai-count-chip.review {
+                background: rgba(212, 163, 115, 0.12);
+                color: #a16207;
+            }
+            .ai-review-actions {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                flex-shrink: 0;
+            }
+            .ai-current-review {
+                grid-column: 1 / -1;
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr);
+                gap: 12px;
+                align-items: start;
+                padding: 12px 14px;
+                border: 1px solid rgba(212, 163, 115, 0.24);
+                border-radius: var(--radius-lg);
+                background: linear-gradient(135deg, rgba(255, 250, 244, 0.96), rgba(255, 255, 255, 0.92));
+            }
+            .ai-current-review-marker {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 28px;
+                height: 28px;
+                border-radius: 50%;
+                background: rgba(212, 163, 115, 0.14);
+                color: #a16207;
+                font-weight: 900;
+            }
+            .ai-current-review-main {
+                min-width: 0;
+            }
+            .ai-current-review-main strong {
+                display: block;
+                color: var(--text-primary);
+                font-size: 14px;
+                font-weight: 800;
+                line-height: 1.35;
+            }
+            .ai-current-review-main p {
+                margin: 5px 0 0;
+                color: var(--text-secondary);
+                font-size: 12px;
+                line-height: 1.55;
+            }
+            .ai-current-review-evidence {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                margin-top: 9px;
+            }
+            .ai-current-review-evidence span {
+                max-width: 260px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                padding: 4px 8px;
+                border-radius: 999px;
+                background: rgba(61, 51, 45, 0.06);
+                color: var(--text-secondary);
+                font-size: 11px;
+                font-weight: 700;
+            }
+            .ai-current-review > .ai-review-actions {
+                grid-column: 2;
+                flex-wrap: wrap;
+                justify-content: flex-start;
+            }
+            .ai-review-popover {
+                grid-column: 1 / -1;
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-lg);
+                background: rgba(255, 255, 255, 0.96);
+                overflow: hidden;
+            }
+            .ai-review-popover-head {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 12px 14px;
+                border-bottom: 1px solid var(--border-color);
+                background: #fbfaf8;
+            }
+            .ai-review-popover-body {
+                max-height: min(52vh, 520px);
+                overflow-y: auto;
+                padding: 14px;
+            }
+            .ai-review-field {
+                position: relative;
+            }
+            .ai-review-field.review .input-field {
+                border-color: var(--accent-color) !important;
+                background: rgba(212, 163, 115, 0.03);
+                padding-right: 32px;
+            }
+            .ai-review-field.blocking .input-field {
+                border-color: var(--danger-color) !important;
+                background: rgba(224, 94, 94, 0.02);
+                padding-right: 32px;
+            }
+            .ai-review-field.info .input-field {
+                border-color: #3182ce !important;
+                background: rgba(49, 130, 206, 0.02);
+                padding-right: 32px;
+            }
+            .input-field.ai-review-field.review {
+                border-color: var(--accent-color) !important;
+                background: rgba(212, 163, 115, 0.05);
+                box-shadow: 0 0 0 3px rgba(212, 163, 115, 0.1);
+            }
+            .input-field.ai-review-field.blocking {
+                border-color: var(--danger-color) !important;
+                background: rgba(224, 94, 94, 0.04);
+                box-shadow: 0 0 0 3px rgba(224, 94, 94, 0.08);
+            }
+            .input-field.ai-review-field.info {
+                border-color: #3182ce !important;
+                background: rgba(49, 130, 206, 0.04);
+                box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.08);
+            }
+            .ai-review-field::after {
+                position: absolute;
+                right: 12px;
+                top: 50%;
+                transform: translateY(-50%);
+                font-size: 12px;
+                font-weight: 800;
+                pointer-events: none;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+            }
+            .ai-review-field.review::after {
+                content: '?';
+                color: var(--accent-color);
+                background-color: rgba(212, 163, 115, 0.1);
+            }
+            .ai-review-field.blocking::after {
+                content: '!';
+                color: var(--danger-color);
+                background-color: rgba(224, 94, 94, 0.1);
+            }
+            .ai-review-field.info::after {
+                content: 'i';
+                color: #3182ce;
+                background-color: rgba(49, 130, 206, 0.1);
+            }
+            
+            /* AI Drawers */
+            .ai-panel-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 120;
+                display: flex;
+                justify-content: flex-end;
+                background: rgba(61, 51, 45, 0.3);
+                backdrop-filter: blur(4px);
+                -webkit-backdrop-filter: blur(4px);
+                animation: fadeIn 0.2s ease-out;
+            }
+            .ai-panel {
+                width: min(480px, 100%);
+                height: 100%;
+                background: var(--card-bg);
+                box-shadow: -10px 0 40px rgba(61, 51, 45, 0.08);
+                border-left: 1.5px solid var(--border-color);
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                animation: slideLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            .ai-panel.ai-review-panel {
+                width: min(920px, 100%);
+            }
+            .ai-panel-body {
+                flex-grow: 1;
+                overflow-y: auto;
+                padding: 24px 32px;
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+            }
+            @keyframes slideLeft {
+                from { transform: translateX(100%); }
+                to { transform: translateX(0); }
+            }
+            .ai-panel-header {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 16px;
+                padding: 28px 32px 20px;
+                border-bottom: 1px solid var(--border-color);
+                flex-shrink: 0;
+            }
+            .ai-panel-header h2 {
+                margin: 0 0 6px;
+                color: var(--text-primary);
+                font-size: 20px;
+                font-weight: 800;
+            }
+            .ai-panel-header p {
+                margin: 0;
+                color: var(--text-secondary);
+                font-size: 13px;
+                line-height: 1.6;
+            }
+            .ai-review-tabs {
+                display: inline-flex;
+                gap: 6px;
+                padding: 5px;
+                border: 1px solid var(--border-color);
+                border-radius: 999px;
+                background: #f7f3ef;
+                margin-bottom: 4px;
+            }
+            .ai-review-tab {
+                min-height: 32px;
+                padding: 6px 14px;
+                border: none;
+                border-radius: 999px;
+                background: transparent;
+                color: var(--text-secondary);
+                font-size: 12px;
+                font-weight: 800;
+                cursor: pointer;
+                transition: var(--transition-fast);
+            }
+            .ai-review-tab.active {
+                background: #fff;
+                color: var(--primary-color);
+                box-shadow: 0 4px 14px rgba(61, 51, 45, 0.08);
+            }
+            .ai-upload-zone {
+                padding: 28px;
+                border: 2px dashed var(--ai-border);
+                border-radius: var(--radius-lg);
+                background: var(--ai-light);
+                text-align: center;
+                transition: var(--transition-normal);
+            }
+            .ai-upload-zone:hover {
+                border-color: var(--ai-primary);
+                background: rgba(124, 58, 237, 0.12);
+            }
+            .ai-upload-zone strong {
+                display: block;
+                margin-bottom: 8px;
+                color: var(--text-primary);
+                font-size: 14px;
+                font-weight: 700;
+            }
+            .ai-upload-zone p {
+                margin: 0 0 16px;
+                color: var(--text-secondary);
+                font-size: 12px;
+                line-height: 1.6;
+            }
+            .ai-file-name {
+                margin-top: 12px;
+                color: var(--ai-primary);
+                font-size: 13px;
+                font-weight: 700;
+                word-break: break-all;
+            }
+            .ai-textarea {
+                width: 100%;
+                box-sizing: border-box;
+                flex-grow: 1;
+                min-height: 180px;
+                padding: 14px;
+                resize: none;
+                border: 1.5px solid var(--border-color);
+                border-radius: var(--radius-md);
+                background: var(--card-bg);
+                color: var(--text-primary);
+                font: inherit;
+                line-height: 1.6;
+                transition: var(--transition-fast);
+            }
+            .ai-textarea:focus {
+                outline: none;
+                border-color: var(--ai-primary);
+                box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15);
+            }
+            .ai-panel-footer {
+                display: flex;
+                justify-content: flex-end;
+                gap: 12px;
+                padding: 20px 32px 24px;
+                border-top: 1px solid var(--border-color);
+                background-color: var(--card-bg);
+                flex-shrink: 0;
+            }
+            .ai-review-list {
+                display: grid;
+                gap: 14px;
+            }
+            .ai-review-item {
+                padding: 16px;
+                border: 1px solid rgba(140, 90, 59, 0.14);
+                border-radius: var(--radius-md);
+                background: #fdfcf9;
+                cursor: pointer;
+                transition: var(--transition-normal);
+            }
+            .ai-review-item:hover {
+                transform: translateY(-2px);
+                box-shadow: var(--shadow-normal);
+                border-color: var(--accent-color);
+                background: #ffffff;
+            }
+            .ai-review-item.blocking {
+                border-left: 4px solid #d45d43;
+                border-color: rgba(212, 93, 67, 0.22);
+                background: linear-gradient(180deg, #fffdfd, #fff7f5);
+            }
+            .ai-review-item.review {
+                border-left: 4px solid #c2956c;
+                border-color: rgba(194, 149, 108, 0.22);
+                background: linear-gradient(180deg, #fffdfa, #fffbf5);
+            }
+            .ai-review-item.info {
+                border-left: 4px solid #8e9e95;
+                border-color: rgba(142, 158, 149, 0.22);
+                background: linear-gradient(180deg, #fdfdfd, #f6f8f7);
+            }
+            .ai-review-item.resolved {
+                border-left: 4px solid #2f7a58;
+                border-color: rgba(47, 122, 88, 0.18);
+                background: #f7faf8;
+            }
+            .ai-review-item-head {
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                margin-bottom: 8px;
+            }
+            .ai-review-item-head strong {
+                color: var(--text-primary);
+                font-size: 14px;
+                font-weight: 700;
+            }
+            .ai-review-item-head span {
+                color: var(--text-secondary);
+                font-size: 11px;
                 font-weight: 600;
             }
+            .ai-review-item p {
+                margin: 6px 0;
+                color: var(--text-primary);
+                font-size: 13px;
+                line-height: 1.6;
+            }
+            .ai-review-item .evidence {
+                color: var(--text-secondary);
+                font-size: 12px;
+                background-color: var(--bg-color);
+                padding: 4px 8px;
+                border-radius: 4px;
+                margin-top: 4px;
+                display: inline-block;
+            }
+            .ai-review-item-actions {
+                display: flex;
+                gap: 8px;
+                margin-top: 14px;
+            }
+            .ai-review-item-actions .btn {
+                min-height: 34px;
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+            .ai-empty-review {
+                padding: 36px 20px;
+                border-radius: var(--radius-md);
+                background: #ecfdf5;
+                color: #065f46;
+                text-align: center;
+                line-height: 1.7;
+                font-weight: 600;
+                border: 1px solid #a7f3d0;
+            }
+
+            @media (max-width: 900px) {
+                .ai-review-bar {
+                    align-items: flex-start;
+                    grid-template-columns: 1fr;
+                    gap: 12px;
+                    padding: 12px 16px;
+                }
+                .ai-current-review {
+                    grid-template-columns: 1fr;
+                }
+                .ai-current-review > .ai-review-actions {
+                    grid-column: 1;
+                }
+                .ai-ingredient-toolbar {
+                    grid-template-columns: 1fr;
+                }
+                .ai-review-actions {
+                    width: 100%;
+                }
+                .ai-review-actions .btn {
+                    flex: 1;
+                }
+            }
+            /* Toast Message System */
+            .toast-message {
+                position: fixed;
+                bottom: 24px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(61, 51, 45, 0.9);
+                color: #fff;
+                padding: 10px 20px;
+                border-radius: 99px;
+                font-size: 13.5px;
+                font-weight: 700;
+                z-index: 99999;
+                box-shadow: 0 8px 30px rgba(61, 51, 45, 0.22);
+                animation: toastIn 0.24s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                letter-spacing: 0.02em;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            @keyframes toastIn {
+                from {
+                    opacity: 0;
+                    transform: translate(-50%, 12px) scale(0.96);
+                }
+                to {
+                    opacity: 1;
+                    transform: translate(-50%, 0) scale(1);
+                }
+            }
+            .review-recipe-tag {
+                background: rgba(140, 90, 59, 0.06);
+                color: var(--primary-color);
+                border: 1px solid rgba(140, 90, 59, 0.14);
+                padding: 1px 6px;
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: 800;
+                margin-left: 6px;
+                display: inline-block;
+                white-space: nowrap;
+            }
+
+            /* Micro status dashboard widget */
+            .inspector-status-bar {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+                padding: 8px;
+                background: rgba(255, 255, 255, 0.65);
+                border-radius: var(--radius-md);
+                border: 1px solid var(--border-color);
+                margin-top: 4px;
+            }
+            .status-bar-item {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 6px 4px;
+                border-radius: var(--radius-sm);
+                transition: all 0.2s ease;
+            }
+            .status-bar-item.blocking {
+                background: rgba(224, 94, 94, 0.05);
+                color: var(--danger-color);
+            }
+            .status-bar-item.review {
+                background: rgba(212, 163, 115, 0.08);
+                color: #a16207;
+            }
+            .status-bar-item.confirmed {
+                background: rgba(47, 122, 88, 0.05);
+                color: #2f7a58;
+                cursor: pointer;
+                border: 1px solid transparent;
+            }
+            .status-bar-item.confirmed:hover {
+                background: rgba(47, 122, 88, 0.1);
+                border-color: rgba(47, 122, 88, 0.2);
+            }
+            .status-bar-item.confirmed.active {
+                background: rgba(47, 122, 88, 0.15);
+                border-color: rgba(47, 122, 88, 0.3);
+            }
+            .status-bar-item .status-count {
+                font-size: 15px;
+                font-weight: 800;
+                line-height: 1.2;
+                margin-bottom: 2px;
+            }
+            .status-bar-item .status-label {
+                font-size: 10px;
+                font-weight: 700;
+                color: var(--text-secondary);
+            }
         </style>
+
     </head>
 
     <body>
@@ -820,6 +2228,10 @@
                         >
                     </div>
                 </div>
+                <div class="sidebar-actions">
+                    <button class="btn btn-dashed btn-full-width" @click="addFamily()">新增配方</button>
+                    <button class="btn btn-secondary btn-full-width ai-import-trigger" @click="openImportPanel">智能导入</button>
+                </div>
                 <div class="recipe-list-container">
                     <div
                         v-for="family in filteredFamilies"
@@ -830,7 +2242,8 @@
                     >
                         <div class="recipe-info">
                             <strong>
-                                {{ family.name || `未命名配方` }}
+                                <span class="recipe-item-name">{{ family.name || `未命名配方` }}</span>
+                                <span v-if="aiImportedFamilyIds.has(family.id)" class="ai-import-badge">智能导入</span>
                                 <span v-if="family.type === 'MAIN'" class="recipe-category-tag"
                                     >{{ categoryDisplay(family.category) }}</span
                                 >
@@ -851,7 +2264,6 @@
                     </div>
                 </div>
                 <footer class="sidebar-footer">
-                    <button class="btn btn-dashed btn-full-width" @click="addFamily()">+ 新增配方</button>
                     <button
                         class="btn btn-secondary btn-full-width"
                         @click="saveCloudDraft"
@@ -863,16 +2275,22 @@
                         class="btn btn-primary btn-full-width"
                         @click="syncCloudDraft"
                         :disabled="unpublishedFamilies.length === 0"
-                        style="grid-column: 1 / -1"
+                        style="font-size: 15px; font-weight: 700; height: 46px;"
                     >
-                        创建新版本
+                        同步至门店 (发布新版本)
                     </button>
-                    <div class="cloud-status" style="grid-column: 1 / -1">{{ cloudStatusText }}</div>
+                    <div class="cloud-status" style="text-align: center;">{{ cloudStatusText }}</div>
                 </footer>
             </aside>
             <main class="main-content" ref="mainContentRef" v-if="editorAuthorized">
                 <div v-if="currentFamily && currentVersion" class="editor-content">
                     <div class="card">
+                        <div class="card-title-wrapper">
+                            <span class="card-title">基本信息</span>
+                            <span class="recipe-status" :class="{ pending: isFamilyUnpublished(currentFamily) }">
+                                {{ familyStatusText(currentFamily) }}
+                            </span>
+                        </div>
                         <div class="form-grid">
                             <div class="form-item" style="margin-bottom: 0">
                                 <label class="form-item-label">配方名称 (配方族)</label>
@@ -880,11 +2298,23 @@
                                     class="input-field"
                                     :class="{ error: nameValidationError }"
                                     v-model="currentFamily.name"
+                                    data-review-role="family-name"
+                                    @input="handleFamilyNameInput(currentFamily)"
                                     :readonly="isPublishedFamily(currentFamily)"
                                     :placeholder="recipeNamePlaceholder"
                                 />
                                 <div v-if="nameValidationError" class="input-error-msg">{{ nameValidationError }}</div>
                             </div>
+                            <div class="form-item" style="margin-bottom: 0">
+                                <label class="form-item-label">版本说明</label>
+                                <input
+                                    class="input-field"
+                                    v-model="currentVersion.notes"
+                                    placeholder="例如：调整夏季用水量"
+                                />
+                            </div>
+                        </div>
+                        <div class="form-grid" style="margin-top: 20px">
                             <div class="form-item" style="margin-bottom: 0">
                                 <label class="form-item-label">配方类型</label>
                                 <input
@@ -894,31 +2324,14 @@
                                     disabled
                                 />
                             </div>
-                        </div>
-                        <div v-if="currentFamily.type === 'MAIN'" class="form-item" style="margin-top: 20px">
-                            <label class="form-item-label">配方品类</label>
-                            <select class="picker" v-model="currentFamily.category" :disabled="isPublishedFamily(currentFamily)">
-                                <option v-for="cat in mainRecipeCategories" :key="cat.value" :value="cat.value">
-                                    {{ cat.text }}
-                                </option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="card">
-                        <div class="card-title-wrapper" style="margin-bottom: 10px">
-                            <span class="card-title">本次修改</span>
-                            <span class="recipe-status" :class="{ pending: isFamilyUnpublished(currentFamily) }">
-                                {{ familyStatusText(currentFamily) }}
-                            </span>
-                        </div>
-                        <div class="form-item" style="margin-bottom: 0">
-                            <label class="form-item-label">版本说明</label>
-                            <input
-                                class="input-field"
-                                v-model="currentVersion.notes"
-                                placeholder="例如：调整夏季用水量"
-                            />
+                            <div v-if="currentFamily.type === 'MAIN'" class="form-item" style="margin-bottom: 0">
+                                <label class="form-item-label">配方品类</label>
+                                <select class="picker" v-model="currentFamily.category" :disabled="isPublishedFamily(currentFamily)">
+                                    <option v-for="cat in mainRecipeCategories" :key="cat.value" :value="cat.value">
+                                        {{ cat.text }}
+                                    </option>
+                                </select>
+                            </div>
                         </div>
                     </div>
 
@@ -1026,6 +2439,8 @@
                                     <input
                                         class="input-field"
                                         v-model="ing.name"
+                                        :data-review-path="reviewPathForIngredient(ing, 'name')"
+                                        :data-review-field-id="reviewFieldIdForIngredient(ing, 'name')"
                                         placeholder="输入原料名称"
                                         @focus="handleIngredientInput(ing, $event)"
                                         @input="handleIngredientInput(ing, $event)"
@@ -1035,7 +2450,7 @@
                                         <span v-if="ing.isFlour" class="ing-tag tag-flour">面粉</span>
                                         <span v-if="isSelfMade(ing.name)" class="ing-tag tag-self">自制</span>
                                         <span v-if="shouldShowWaterTag(ing)" class="ing-tag tag-water"
-                                            >总量: {{ totalWaterRatio }}%</span
+                                            >总水量: {{ totalWaterRatio }}%</span
                                         >
                                     </div>
                                 </div>
@@ -1043,6 +2458,8 @@
                                     class="input-field ratio-input"
                                     type="number"
                                     v-model.lazy.number="ing.ratio"
+                                    :data-review-path="reviewPathForIngredient(ing, 'ratio')"
+                                    :data-review-field-id="reviewFieldIdForIngredient(ing, 'ratio')"
                                     placeholder="%"
                                 />
                                 <button class="btn btn-remove" @click="removeMainDoughIngredient(ing.id)">
@@ -1079,7 +2496,9 @@
                                     class="tab-scroll-btn left"
                                     @click="scrollProductTabs(-150)"
                                 >
-                                    &lt;
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="15 18 9 12 15 6"></polyline>
+                                    </svg>
                                 </button>
                                 <div class="tabs" ref="productTabsRef" @scroll="updateProductTabScrollButtons">
                                     <div
@@ -1101,7 +2520,9 @@
                                     class="tab-scroll-btn right"
                                     @click="scrollProductTabs(150)"
                                 >
-                                    &gt;
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                         <polyline points="9 18 15 12 9 6"></polyline>
+                                     </svg>
                                 </button>
                             </div>
                             <div v-if="currentVersion.products.length > 0">
@@ -1125,6 +2546,7 @@
                                                 class="input-field"
                                                 type="number"
                                                 v-model.number="currentVersion.products[prodIndex].baseDoughWeight"
+                                                data-review-role="product-weight"
                                                 placeholder="100"
                                             />
                                         </div>
@@ -1136,6 +2558,8 @@
                                                 <input
                                                     class="input-field"
                                                     v-model="ing.name"
+                                                    :data-review-path="reviewPathForIngredient(ing, 'name')"
+                                                    :data-review-field-id="reviewFieldIdForIngredient(ing, 'name')"
                                                     placeholder="输入辅料名称"
                                                     @focus="handleIngredientInput(ing, $event)"
                                                     @input="handleIngredientInput(ing, $event)"
@@ -1152,6 +2576,8 @@
                                                 class="input-field ratio-input"
                                                 type="number"
                                                 v-model.lazy.number="ing.ratio"
+                                                :data-review-path="reviewPathForIngredient(ing, 'ratio')"
+                                                :data-review-field-id="reviewFieldIdForIngredient(ing, 'ratio')"
                                                 placeholder="%"
                                             />
                                             <button
@@ -1175,6 +2601,8 @@
                                                 <input
                                                     class="input-field"
                                                     v-model="ing.name"
+                                                    :data-review-path="reviewPathForIngredient(ing, 'name')"
+                                                    :data-review-field-id="reviewFieldIdForIngredient(ing, 'name')"
                                                     placeholder="输入馅料名称"
                                                     @focus="handleIngredientInput(ing, $event)"
                                                     @input="handleIngredientInput(ing, $event)"
@@ -1191,6 +2619,8 @@
                                                 class="input-field ratio-input"
                                                 type="number"
                                                 v-model.lazy.number="ing.weightInGrams"
+                                                :data-review-path="reviewPathForIngredient(ing, 'weightInGrams')"
+                                                :data-review-field-id="reviewFieldIdForIngredient(ing, 'weightInGrams')"
                                                 placeholder="g"
                                             />
                                             <button
@@ -1214,6 +2644,8 @@
                                                 <input
                                                     class="input-field"
                                                     v-model="ing.name"
+                                                    :data-review-path="reviewPathForIngredient(ing, 'name')"
+                                                    :data-review-field-id="reviewFieldIdForIngredient(ing, 'name')"
                                                     placeholder="输入装饰名称"
                                                     @focus="handleIngredientInput(ing, $event)"
                                                     @input="handleIngredientInput(ing, $event)"
@@ -1230,6 +2662,8 @@
                                                 class="input-field ratio-input"
                                                 type="number"
                                                 v-model.lazy.number="ing.weightInGrams"
+                                                :data-review-path="reviewPathForIngredient(ing, 'weightInGrams')"
+                                                :data-review-field-id="reviewFieldIdForIngredient(ing, 'weightInGrams')"
                                                 placeholder="g"
                                             />
                                             <button
@@ -1314,6 +2748,8 @@
                                     <input
                                         class="input-field"
                                         v-model="ing.name"
+                                        :data-review-path="reviewPathForIngredient(ing, 'name')"
+                                        :data-review-field-id="reviewFieldIdForIngredient(ing, 'name')"
                                         placeholder="输入原料名称"
                                         @focus="handleIngredientInput(ing, $event)"
                                         @input="handleIngredientInput(ing, $event)"
@@ -1327,6 +2763,8 @@
                                     class="input-field ratio-input"
                                     type="number"
                                     v-model.lazy.number="ing.ratio"
+                                    :data-review-path="reviewPathForIngredient(ing, 'ratio')"
+                                    :data-review-field-id="reviewFieldIdForIngredient(ing, 'ratio')"
                                     placeholder="%"
                                 />
                                 <button class="btn btn-remove" @click="removeOtherIngredient(ing.id)">
@@ -1385,6 +2823,275 @@
                 </ul>
             </main>
 
+            <aside v-if="editorAuthorized" class="inspector-panel">
+                <header class="inspector-header">
+                    <h2>{{ isAiReviewMode ? '智能导入校对' : '基础原料' }}</h2>
+                    <p v-if="isAiReviewMode">{{ aiImportMeta.fileName || '粘贴内容' }} · 点击问题可定位到编辑器，高亮字段可直接修改。</p>
+                    <p v-else>当前店铺可用原料，编辑配方时可按名称搜索和选择。</p>
+                </header>
+                <div v-if="isAiReviewMode" class="inspector-tabs">
+                    <button class="inspector-tab" :class="{ active: reviewPanelTab === 'issues' }" @click="reviewPanelTab = 'issues'">
+                        问题 {{ pendingReviewItems.length }}
+                    </button>
+                    <button class="inspector-tab" :class="{ active: reviewPanelTab === 'ingredients' }" @click="reviewPanelTab = 'ingredients'">
+                        原料
+                    </button>
+                </div>
+                <div class="inspector-body">
+                    <section v-if="isAiReviewMode && reviewPanelTab === 'issues'">
+                        <div class="inspector-toolbar">
+                            <div class="review-scope-switch-container">
+                                <div class="review-scope-switch">
+                                    <button :class="{ active: reviewScope === 'current' }" @click="reviewScope = 'current'">当前配方</button>
+                                    <button :class="{ active: reviewScope === 'all' }" @click="reviewScope = 'all'">全部问题</button>
+                                </div>
+                            </div>
+                            <div class="inspector-status-bar">
+                                <div class="status-bar-item blocking">
+                                    <span class="status-count">{{ pendingBlockingCount }}</span>
+                                    <span class="status-label">必须处理</span>
+                                </div>
+                                <div class="status-bar-item review">
+                                    <span class="status-count">{{ pendingReviewCount }}</span>
+                                    <span class="status-label">待确认</span>
+                                </div>
+                                <div class="status-bar-item confirmed" @click="showConfirmedReviewItems = !showConfirmedReviewItems" :class="{ active: showConfirmedReviewItems }">
+                                    <span class="status-count">{{ confirmedReviewCount }}</span>
+                                    <span class="status-label">已确认 ({{ showConfirmedReviewItems ? '收起' : '展开' }})</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-if="visibleReviewItems.length" class="ai-review-list compact">
+                            <article
+                                v-for="item in visibleReviewItems"
+                                :key="item.id"
+                                class="ai-review-item"
+                                :data-review-item-id="item.id"
+                                :class="[item.severity.toLowerCase(), item.status !== 'PENDING' ? 'resolved' : '', activeReviewItem?.id === item.id ? 'active' : '']"
+                                @click="focusReviewItem(item)"
+                            >
+                                <div class="ai-review-item-head">
+                                    <strong>{{ item.label }}</strong>
+                                    <span class="review-recipe-tag" v-if="item.recipeName">{{ item.recipeName }}</span>
+                                </div>
+                                <ul v-if="item.diagnostics?.length > 1" class="review-diagnostic-list">
+                                    <li v-for="(diagnostic, diagnosticIndex) in item.diagnostics" :key="diagnosticIndex">{{ diagnostic.reason }}</li>
+                                </ul>
+                                <p v-else>{{ item.reason }}</p>
+                                <div class="ai-review-item-footer">
+                                    <div class="evidence-wrapper">
+                                        <span v-if="reviewEvidenceItems(item).length" class="evidence-tag">
+                                            {{ reviewEvidenceItems(item).join(' · ') }}
+                                        </span>
+                                    </div>
+                                    <div class="ai-review-item-actions">
+                                        <span
+                                            v-if="item.status === 'PENDING'"
+                                            class="review-status-badge"
+                                            :class="item.interactionState.toLowerCase()"
+                                        >{{ activeReviewItem?.id === item.id ? '正在编辑' : item.interactionState === 'UNSEEN' ? '未查看' : '已查看' }}</span>
+                                        <button v-if="item.status === 'PENDING'" class="btn btn-confirm-issue" @click.stop="confirmReviewItem(item)">确认</button>
+                                        <span v-else class="ai-review-done">✓ 已确认</span>
+                                    </div>
+                                </div>
+                            </article>
+                        </div>
+                        <div v-else class="inspector-empty">{{ reviewScope === 'current' ? '当前配方暂无待处理问题，可切换“全部问题”查看。' : '暂无识别问题。' }}</div>
+                    </section>
+
+                    <section v-else>
+                        <div class="inspector-toolbar">
+                            <input class="input-field" v-model="ingredientSearch" placeholder="搜索基础原料或本次新原料" />
+                            <div class="inspector-summary">
+                                <span class="ai-count-chip">{{ filteredLibraryIngredientItems.length }} 种基础原料</span>
+                                <span v-if="isAiReviewMode && importedIngredientItems.length" class="ingredient-import-tag">本次新增 {{ importedIngredientItems.length }}</span>
+                            </div>
+                        </div>
+                        <div class="inspector-scroll-area">
+                            <datalist id="ai-ingredient-name-options">
+                                <option v-for="name in availableIngredientNames" :key="name" :value="name"></option>
+                            </datalist>
+                        <div class="inspector-section-heading"><span>基础原料</span><span>{{ libraryIngredientItems.length }} 种</span></div>
+                        <div v-if="filteredLibraryIngredientItems.length" class="inspector-list">
+                            <article v-for="ingredient in filteredLibraryIngredientItems" :key="ingredient.name" class="ingredient-item-card" @click="copyIngredientName(ingredient.name)">
+                                <div class="ingredient-card-head">
+                                    <strong>{{ ingredient.name }}</strong>
+                                    <div class="ingredient-card-badges">
+                                        <span v-if="ingredient.isFlour" class="ing-tag tag-flour">面粉</span>
+                                        <span v-if="ingredient.waterContent" class="ing-tag tag-water">含水 {{ Math.round(ingredient.waterContent * 100) }}%</span>
+                                    </div>
+                                </div>
+                                <div class="ingredient-card-meta">
+                                    <span class="type-label">基础原料</span>
+                                </div>
+                            </article>
+                        </div>
+                        <div v-else class="inspector-empty">没有匹配的基础原料。</div>
+                        <template v-if="isAiReviewMode && importedIngredientItems.length">
+                            <div class="inspector-section-heading"><span>本次导入新原料</span><span class="ingredient-import-tag">本次新增</span></div>
+                            <div v-if="filteredImportedIngredientItems.length" class="inspector-list">
+                                <article v-for="ingredient in filteredImportedIngredientItems" :key="ingredient.sourceName" class="ingredient-item-card import" @click="copyIngredientName(ingredient.normalizedName || ingredient.sourceName)">
+                                    <div class="ingredient-card-head">
+                                        <strong>{{ ingredient.normalizedName || ingredient.sourceName }}</strong>
+                                        <span class="ing-tag tag-new">新增</span>
+                                    </div>
+                                    <div class="ingredient-card-meta">
+                                        <span class="source-label" v-if="ingredient.sourceName !== ingredient.normalizedName">识别自：{{ ingredient.sourceName }}</span>
+                                        <span class="source-label" v-else>本次导入</span>
+                                        <span class="occurrence-label">出现 {{ ingredient.occurrenceCount }} 次</span>
+                                    </div>
+                                </article>
+                            </div>
+                            <div v-else class="inspector-empty">没有匹配搜索条件的本次新原料。</div>
+                        </template>
+                        </div>
+                    </section>
+                </div>
+            </aside>
+
+            <div v-if="showImportPanel" class="ai-panel-overlay" @click="showImportPanel = false">
+                <section class="ai-panel" @click.stop>
+                    <header class="ai-panel-header">
+                        <div><h2>智能导入配方</h2><p>上传文件或粘贴内容，系统会生成可直接编辑的标准配方，只标记需要你判断的部分。</p></div>
+                        <button class="btn btn-remove" @click="showImportPanel = false"><svg><use href="#icon-close"></use></svg></button>
+                    </header>
+                    <div class="ai-panel-body">
+                        <div class="ai-upload-zone">
+                            <strong>Excel、图片、PDF 或文本文件</strong>
+                            <p>支持 xlsx、xls、csv、jpg、png、webp、pdf、txt，单个文件不超过 15MB。</p>
+                            <input ref="importFileInput" type="file" hidden accept=".xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp,.pdf,.txt" @change="handleImportFile" />
+                            <button class="btn btn-secondary" @click="importFileInput.click()">选择文件</button>
+                            <div v-if="selectedImportFile" class="ai-file-name">{{ selectedImportFile.name }}</div>
+                        </div>
+                        <textarea v-model="importText" class="ai-textarea" placeholder="也可以直接粘贴配方文字或用于测试的标准 JSON"></textarea>
+                    </div>
+                    <div class="ai-panel-footer">
+                        <button class="btn btn-secondary" @click="showImportPanel = false">取消</button>
+                        <button class="btn btn-primary" @click="analyzeImport" :disabled="importAnalyzing || (!selectedImportFile && !importText.trim())">{{ importAnalyzing ? importStatusText : '开始识别' }}</button>
+                    </div>
+                </section>
+            </div>
+
+            <div v-if="showIngredientReviewPanel" class="ai-panel-overlay ingredient-review-overlay">
+                <section class="ai-panel ingredient-review-panel" @click.stop>
+                    <header class="ingredient-review-header">
+                        <div>
+                            <h2>先确认原料</h2>
+                            <p>{{ pendingImportResult?.meta?.fileName || '智能识别结果' }}</p>
+                        </div>
+                        <div class="ingredient-review-progress">
+                            <span class="ai-count-chip blocking" v-if="pendingIngredientReviewCount">{{ pendingIngredientReviewCount }} 待确认</span>
+                            <span class="ai-count-chip confirmed">{{ confirmedIngredientReviewCount }} 已确认</span>
+                            <span class="ai-count-chip">{{ ingredientReviewItems.length }} 种原料</span>
+                        </div>
+                    </header>
+                    <div class="ingredient-review-body">
+                        <aside class="ingredient-review-sidebar">
+                            <nav class="ingredient-review-nav">
+                                <button :class="{ active: ingredientReviewFilter === 'pending' }" @click="ingredientReviewFilter = 'pending'">
+                                    待确认 <span>{{ pendingIngredientReviewCount }}</span>
+                                </button>
+                                <button :class="{ active: ingredientReviewFilter === 'confirmed' }" @click="ingredientReviewFilter = 'confirmed'">
+                                    已确认 <span>{{ confirmedIngredientReviewCount }}</span>
+                                </button>
+                                <button :class="{ active: ingredientReviewFilter === 'all' }" @click="ingredientReviewFilter = 'all'">
+                                    全部 <span>{{ ingredientReviewItems.length }}</span>
+                                </button>
+                            </nav>
+                            <div class="ingredient-review-tips">
+                                <div class="tip-title">💡 确认规则：</div>
+                                <ul class="tip-list">
+                                    <li><strong>自动匹配：</strong>若名称与已有原料一致，系统会自动关联。</li>
+                                    <li><strong>新建原料：</strong>未匹配的名称将作为新原料创建。</li>
+                                    <li><strong>自制原料：</strong>勾选“自制”的原料会生成独立配方。</li>
+                                </ul>
+                            </div>
+                        </aside>
+                        <section class="ingredient-review-workspace">
+                            <div class="ingredient-review-toolbar">
+                                <div class="search-input-wrapper">
+                                    <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <circle cx="11" cy="11" r="8"></circle>
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                    </svg>
+                                    <input class="input-field search-input" v-model="ingredientReviewSearch" placeholder="搜索识别名或最终原料名..." />
+                                </div>
+                                <button class="btn btn-batch-confirm" @click="confirmAllVisibleIngredients" :disabled="!filteredIngredientReviewItems.length">
+                                    ✓ 一键确认当前所有原料
+                                </button>
+                            </div>
+                            <datalist id="ingredient-review-name-options">
+                                <option v-for="name in availableIngredientNames" :key="name" :value="name"></option>
+                            </datalist>
+                            <div v-if="filteredIngredientReviewItems.length" class="ingredient-review-list">
+                                <article
+                                    v-for="item in filteredIngredientReviewItems"
+                                    :key="item.id"
+                                    class="ingredient-review-card"
+                                    :class="{ pending: item.status === 'PENDING', confirmed: item.status === 'CONFIRMED' }"
+                                >
+                                    <div class="ingredient-card-row-1">
+                                        <div class="ingredient-review-source">
+                                            <strong>{{ item.sourceName }}</strong>
+                                        </div>
+                                        <div class="mapping-arrow">➔</div>
+                                        <div class="target-input-group">
+                                            <input
+                                                class="input-field"
+                                                list="ingredient-review-name-options"
+                                                v-model="item.finalName"
+                                                placeholder="匹配/输入最终原料名称"
+                                                @input="markIngredientPending(item)"
+                                            />
+                                            <button :class="['btn', item.status === 'PENDING' ? 'btn-primary' : 'btn-secondary btn-confirmed']" @click="confirmIngredientItem(item)">
+                                                {{ item.status === 'PENDING' ? '确认' : '✓ 已确认' }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="ingredient-card-row-2">
+                                        <div class="meta-left">
+                                            <span class="occurrence-count">出现 {{ item.occurrenceCount }} 次</span>
+                                            <span class="recognized-from" v-if="item.sourceName !== item.normalizedName">识别自：{{ item.normalizedName }}</span>
+                                        </div>
+                                        <div class="meta-right">
+                                            <div class="property-checkboxes">
+                                                <label class="ingredient-review-check check-self" :class="{ checked: item.decision === 'SELF_MADE' }">
+                                                    <input
+                                                        type="checkbox"
+                                                        :checked="item.decision === 'SELF_MADE'"
+                                                        @change="setIngredientSelfMade(item, $event.target.checked)"
+                                                    />
+                                                     自制原料
+                                                </label>
+                                                <label class="ingredient-review-check check-flour" :class="{ checked: item.isFlour }">
+                                                    <input type="checkbox" v-model="item.isFlour" @change="markIngredientPending(item)" />
+                                                     面粉
+                                                </label>
+                                            </div>
+                                            <span class="ingredient-auto-match-note" :class="item.decision.toLowerCase()">
+                                                {{ ingredientReviewResolutionText(item) }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </article>
+                            </div>
+                            <div v-else class="inspector-empty">没有匹配的原料。</div>
+                        </section>
+                    </div>
+                    <footer class="ingredient-review-footer">
+                        <div class="ingredient-review-footer-note">
+                            ✨ 智能配方导入 · 请确认原料后进入编辑器
+                        </div>
+                        <div class="ingredient-review-footer-actions">
+                            <button class="btn btn-secondary" @click="cancelIngredientReview">返回</button>
+                            <button class="btn btn-primary" @click="applyIngredientReviewAndContinue" :disabled="!ingredientReviewItems.length || pendingIngredientReviewCount > 0">
+                                保存并进入编辑器
+                            </button>
+                        </div>
+                    </footer>
+                </section>
+            </div>
+
             <div v-if="isAddPreDoughModalVisible" class="modal-overlay" @click="isAddPreDoughModalVisible = false">
                 <div class="modal-content" @click.stop>
                     <div class="modal-header">选择要引用的面种</div>
@@ -1408,6 +3115,11 @@
                         <button class="btn btn-secondary" @click="isAddPreDoughModalVisible = false">关闭</button>
                     </div>
                 </div>
+            </div>
+            
+            <!-- Toast notification system -->
+            <div v-if="toast.visible" class="toast-message">
+                {{ toast.message }}
             </div>
         </div>
 
@@ -1435,6 +3147,7 @@
                     const activeReferenceByFamilyId = ref(new Map());
                     const activeReferenceByName = ref(new Map());
                     const globalIngredientLibrary = ref(new Map());
+                    const baseIngredientNames = ref(new Set());
                     const suggestionState = ref({ visible: false, suggestions: [], target: null, ingRef: null });
                     const suggestionBoxStyle = ref({});
                     const tabScrollState = ref({
@@ -1450,14 +3163,198 @@
                     const loginStatusText = ref('正在创建登录会话...');
                     const qrCanvas = ref(null);
                     const editorTenantName = ref('');
+                    const editorTenantId = ref('');
                     const cloudDrafts = ref([]);
                     const activeCloudDraftId = ref('');
                     const cloudStatusText = ref('草稿会保存到云端，不会下载 JSON 文件。');
-
-
+                    const showImportPanel = ref(false);
+                    const showReviewPanel = ref(false);
+                    const importFileInput = ref(null);
+                    const selectedImportFile = ref(null);
+                    const importText = ref('');
+                    const importAnalyzing = ref(false);
+                    const importStatusText = ref('正在创建任务…');
+                    const showIngredientReviewPanel = ref(false);
+                    const pendingImportResult = ref(null);
+                    const ingredientReviewItems = ref([]);
+                    const ingredientReviewFilter = ref('pending');
+                    const ingredientReviewSearch = ref('');
+                    const aiReviewItems = ref([]);
+                    const aiIngredientItems = ref([]);
+                    const aiImportedFamilyIds = ref(new Set());
+                    const aiImportMeta = ref({});
+                    const activeReviewItemId = ref('');
+                    const reviewPanelTab = ref('issues');
+                    const reviewBarCollapsed = ref(false);
+                    const reviewScope = ref('current');
+                    const showConfirmedReviewItems = ref(false);
+                    const ingredientSearch = ref('');
+                    const isAiReviewMode = computed(() => aiImportMeta.value?.source === 'ai-import');
+                    const normalizeReviewItems = (items) => {
+                        const severityRank = { INFO: 1, REVIEW: 2, BLOCKING: 3 };
+                        const byField = new Map();
+                        const usedIds = new Set();
+                        (Array.isArray(items) ? items : []).forEach((sourceItem, index) => {
+                            const item = {
+                                ...sourceItem,
+                                diagnostics: Array.isArray(sourceItem.diagnostics)
+                                    ? sourceItem.diagnostics
+                                    : [{
+                                          label: sourceItem.label,
+                                          reason: sourceItem.reason,
+                                          recognizedValue: sourceItem.recognizedValue,
+                                          normalizedValue: sourceItem.normalizedValue,
+                                      }],
+                                interactionState: sourceItem.status === 'PENDING' ? 'UNSEEN' : 'CONFIRMED',
+                            };
+                            const originalId = String(item.id || `review-${index}`);
+                            item.id = usedIds.has(originalId) ? `${originalId}-${index}` : originalId;
+                            usedIds.add(item.id);
+                            const amountLabel = String(item.label || '').trim();
+                            const canonicalPath = String(item.fieldPath || '').replace(
+                                /\.(amount|weight|weightInGrams)$/,
+                                '.ratio',
+                            );
+                            const fieldKey = item.fieldId || (/用量$/.test(amountLabel)
+                                ? `${item.familyId || item.recipeName || ''}::amount::${amountLabel}`
+                                : canonicalPath
+                                  ? `${item.familyId || item.recipeName || ''}::${canonicalPath}`
+                                  : `id::${item.id}`);
+                            item.fieldId = item.fieldId || `legacy-review-field:${fieldKey}`;
+                            const existing = byField.get(fieldKey);
+                            if (!existing) {
+                                byField.set(fieldKey, item);
+                                return;
+                            }
+                            if ((severityRank[item.severity] || 0) > (severityRank[existing.severity] || 0)) {
+                                existing.severity = item.severity;
+                            }
+                            if (item.status === 'PENDING') existing.status = 'PENDING';
+                            if (!existing.recognizedValue && item.recognizedValue != null) existing.recognizedValue = item.recognizedValue;
+                            if (!existing.normalizedValue && item.normalizedValue != null) existing.normalizedValue = item.normalizedValue;
+                            if (item.reason && !String(existing.reason || '').includes(item.reason)) {
+                                existing.reason = [existing.reason, item.reason].filter(Boolean).join('；');
+                            }
+                            item.diagnostics.forEach((diagnostic) => {
+                                if (!existing.diagnostics.some((entry) => entry.reason === diagnostic.reason)) {
+                                    existing.diagnostics.push(diagnostic);
+                                }
+                            });
+                        });
+                        return Array.from(byField.values());
+                    };
+                    const pendingReviewItems = computed(() => aiReviewItems.value.filter((item) => item.status === 'PENDING'));
+                    const activeReviewItem = computed(
+                        () => aiReviewItems.value.find((item) => item.id === activeReviewItemId.value) || null,
+                    );
+                    const pendingBlockingCount = computed(() => pendingReviewItems.value.filter((item) => item.severity === 'BLOCKING').length);
+                    const pendingReviewCount = computed(() => pendingReviewItems.value.filter((item) => item.severity === 'REVIEW').length);
+                    const confirmedReviewCount = computed(() => aiReviewItems.value.filter((item) => item.status !== 'PENDING').length);
+                    const sortedReviewItems = computed(() => {
+                        const familyOrder = new Map(recipes.value.map((family, index) => [family.id, index]));
+                        const nameOrder = new Map(recipes.value.map((family, index) => [family.name, index]));
+                        return [...aiReviewItems.value].sort((left, right) => {
+                            const leftFamily = left.familyId ? familyOrder.get(left.familyId) : nameOrder.get(left.recipeName);
+                            const rightFamily = right.familyId ? familyOrder.get(right.familyId) : nameOrder.get(right.recipeName);
+                            const familyCompare = (leftFamily ?? Number.MAX_SAFE_INTEGER) - (rightFamily ?? Number.MAX_SAFE_INTEGER);
+                            if (familyCompare) return familyCompare;
+                            return String(left.fieldPath || '').localeCompare(String(right.fieldPath || ''), 'zh-CN', { numeric: true });
+                        });
+                    });
+                    const visibleReviewItems = computed(() =>
+                        sortedReviewItems.value.filter((item) => {
+                            if (item.status !== 'PENDING' && !showConfirmedReviewItems.value) return false;
+                            if (reviewScope.value === 'all') return true;
+                            return item.familyId
+                                ? item.familyId === currentFamilyId.value
+                                : item.recipeName === currentFamily.value?.name;
+                        }),
+                    );
+                    const formatReviewValue = (value) => {
+                        if (value === undefined || value === null) return '';
+                        return String(value).trim();
+                    };
+                    const reviewEvidenceItems = (item) => {
+                        if (!item) return [];
+                        const evidence = [];
+                        const recognized = formatReviewValue(item.recognizedValue);
+                        const normalized = formatReviewValue(item.normalizedValue);
+                        if (recognized) evidence.push(`识别：${recognized}`);
+                        if (normalized) evidence.push(`当前：${normalized}`);
+                        else if (String(item.label || '').endsWith('用量')) evidence.push('需填写：比例/克重');
+                        if (item.derivation) evidence.push(`依据：${item.derivation}`);
+                        return evidence;
+                    };
                     const selfMadeRecipeNames = computed(
                         () => new Set(recipes.value.filter((r) => r.type !== 'MAIN').map((r) => r.name)),
                     );
+                    const libraryIngredientItems = computed(() =>
+                        Array.from(globalIngredientLibrary.value.entries())
+                            .filter(([name]) => baseIngredientNames.value.has(name) && !selfMadeRecipeNames.value.has(name))
+                            .map(([name, data]) => ({
+                                name,
+                                isFlour: !!data?.isFlour,
+                                waterContent: Number(data?.waterContent || 0),
+                            }))
+                            .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+                    );
+                    const availableIngredientNames = computed(() => libraryIngredientItems.value.map((ingredient) => ingredient.name));
+                    const filteredLibraryIngredientItems = computed(() => {
+                        const keyword = ingredientSearch.value.trim().toLocaleLowerCase('zh-CN');
+                        if (!keyword) return libraryIngredientItems.value;
+                        return libraryIngredientItems.value.filter((ingredient) =>
+                            [ingredient.name, ingredient.isFlour ? '面粉' : '']
+                                .filter(Boolean)
+                                .some((value) => String(value).toLocaleLowerCase('zh-CN').includes(keyword)),
+                        );
+                    });
+                    const importedIngredientItems = computed(() =>
+                        aiIngredientItems.value.filter((ingredient) => {
+                            const sourceName = String(ingredient.sourceName || '').trim();
+                            const normalizedName = String(ingredient.normalizedName || '').trim();
+                            if (!sourceName && !normalizedName) return false;
+                            if (baseIngredientNames.value.has(sourceName) || baseIngredientNames.value.has(normalizedName)) return false;
+                            return !selfMadeRecipeNames.value.has(sourceName) && !selfMadeRecipeNames.value.has(normalizedName);
+                        }),
+                    );
+                    const filteredImportedIngredientItems = computed(() => {
+                        const keyword = ingredientSearch.value.trim().toLocaleLowerCase('zh-CN');
+                        if (!keyword) return importedIngredientItems.value;
+                        return importedIngredientItems.value.filter((ingredient) =>
+                            [ingredient.sourceName, ingredient.normalizedName, ingredient.status]
+                                .filter(Boolean)
+                                .some((value) => String(value).toLocaleLowerCase('zh-CN').includes(keyword)),
+                        );
+                    });
+                    const pendingIngredientReviewCount = computed(
+                        () => ingredientReviewItems.value.filter((item) => item.status === 'PENDING').length,
+                    );
+                    const confirmedIngredientReviewCount = computed(
+                        () => ingredientReviewItems.value.filter((item) => item.status !== 'PENDING').length,
+                    );
+                    const filteredIngredientReviewItems = computed(() => {
+                        const keyword = ingredientReviewSearch.value.trim().toLocaleLowerCase('zh-CN');
+                        return ingredientReviewItems.value.filter((item) => {
+                            const byFilter =
+                                ingredientReviewFilter.value === 'all' ||
+                                (ingredientReviewFilter.value === 'pending' && item.status === 'PENDING') ||
+                                (ingredientReviewFilter.value === 'confirmed' && item.status !== 'PENDING');
+                            if (!byFilter) return false;
+                            if (!keyword) return true;
+                            return [item.sourceName, item.normalizedName, item.finalName, item.decision]
+                                .filter(Boolean)
+                                .some((value) => String(value).toLocaleLowerCase('zh-CN').includes(keyword));
+                        });
+                    });
+                    const ingredientReviewResolutionText = (item) => {
+                        if (!item) return '';
+                        if (item.decision === 'SELF_MADE') return '将作为自制原料';
+                        const finalName = String(item.finalName || '').trim();
+                        if (!finalName) return '待填写名称';
+                        return libraryIngredientItems.value.some((ingredient) => ingredient.name === finalName)
+                            ? '将使用已有原料'
+                            : '将作为新原料';
+                    };
                     const isSelfMade = (name) => selfMadeRecipeNames.value.has(name);
 
                     // ----------------------------
@@ -1823,8 +3720,10 @@
                         recipes.value.push(newFamily);
                         selectFamily(newFamily.id);
                     };
-                    const selectFamily = (id) => {
+                    const selectFamily = (id, options = {}) => {
                         suggestionState.value.visible = false;
+                        const family = recipes.value.find((entry) => entry.id === id);
+                        if (family && options.syncCategory !== false) activeCategory.value = family.type;
                         currentFamilyId.value = id;
                         currentVersionIndex.value = 0;
                     };
@@ -2146,6 +4045,7 @@
                                 isFlour: lib.isFlour,
                                 waterContent: lib.waterContent,
                                 recipeVersionId: ing.recipeVersionId,
+                                importMeta: ing.importMeta,
                                 recipeType: ing.flourRatio !== undefined ? 'PRE_DOUGH' : ing.recipeVersionId ? 'EXTRA' : null,
                             };
                         };
@@ -2218,7 +4118,7 @@
                                 id: nextRecipeId++,
                                 name: p.name,
                                 baseDoughWeight: p.weight,
-                                mixIns: (p.mixIn || []).map(processIng),
+                                mixIns: (p.mixIn || p.mixIns || []).map(processIng),
                                 fillings: (p.fillings || []).map((i) => ({
                                     ...processIng(i),
                                     weightInGrams: i.weightInGrams,
@@ -2228,6 +4128,7 @@
                                     weightInGrams: i.weightInGrams,
                                 })),
                                 procedure: p.procedure || [''],
+                                importMeta: p.importMeta,
                             }));
                             if (!base.products.length)
                                 base.products.push({
@@ -2414,19 +4315,515 @@
                         const requestPath = editorApiPrefix && path.startsWith('/') && !path.startsWith(`${editorApiPrefix}/`)
                             ? `${editorApiPrefix}${path}`
                             : path;
+                        const isFormData = fetchOptions.body instanceof FormData;
                         const res = await fetch(requestPath, {
                             ...fetchOptions,
-                            headers: { 'Content-Type': 'application/json', ...authHeaders, ...headers },
+                            headers: { ...(isFormData ? {} : { 'Content-Type': 'application/json' }), ...authHeaders, ...headers },
                         });
                         const text = await res.text();
-                        const data = text ? JSON.parse(text) : null;
+                        let data = null;
+                        if (text) {
+                            try {
+                                data = JSON.parse(text);
+                            } catch {
+                                data = null;
+                            }
+                        }
                         if (!res.ok) {
-                            const message = data?.message || '请求失败';
+                            const gatewayMessages = {
+                                502: '智能识别服务暂时不可用，请稍后重试。',
+                                503: '智能识别服务正在维护或过载，请稍后重试。',
+                                504: '智能识别请求已超过网关等待时间，请稍后重试或联系管理员调整代理超时时间。',
+                            };
+                            const message = data?.message || gatewayMessages[res.status] || `请求失败（${res.status}）`;
                             const error = new Error(Array.isArray(message) ? message.join('，') : message);
                             error.status = res.status;
                             throw error;
                         }
+                        if (text && data === null) throw new Error('服务器返回了无法识别的响应，请联系管理员检查网关日志。');
                         return data;
+                    };
+                    const openImportPanel = () => {
+                        selectedImportFile.value = null;
+                        importText.value = '';
+                        pendingImportResult.value = null;
+                        ingredientReviewItems.value = [];
+                        showIngredientReviewPanel.value = false;
+                        showImportPanel.value = true;
+                    };
+                    const handleImportFile = (event) => {
+                        selectedImportFile.value = event.target.files?.[0] || null;
+                    };
+                    const analyzeImport = async () => {
+                        if (!selectedImportFile.value && !importText.value.trim()) return;
+                        importAnalyzing.value = true;
+                        importStatusText.value = '正在创建任务…';
+                        try {
+                            const formData = new FormData();
+                            if (selectedImportFile.value) formData.append('file', selectedImportFile.value);
+                            if (importText.value.trim()) formData.append('text', importText.value.trim());
+                            const created = await editorApi('/recipe-editor/imports/analyze', { method: 'POST', body: formData });
+                            localStorage.setItem(activeImportStorageKey(), created.jobId);
+                            importStatusText.value = '后台识别中…';
+                            const result = await waitForImportJob(created.jobId);
+                            await openIngredientReview(result);
+                        } catch (error) {
+                            alert(error.message);
+                        } finally {
+                            importAnalyzing.value = false;
+                        }
+                    };
+                    const activeImportStorageKey = () => `recipe-import-active-job:${editorTenantId.value || 'unknown'}`;
+                    const waitForImportJob = async (jobId) => {
+                        const deadline = Date.now() + 10 * 60 * 1000;
+                        while (Date.now() < deadline) {
+                            const job = await editorApi(`/recipe-editor/imports/${encodeURIComponent(jobId)}`);
+                            if (job.status === 'COMPLETED') {
+                                if (!job.result) throw new Error('智能导入任务已完成，但没有返回配方结果。');
+                                localStorage.removeItem(activeImportStorageKey());
+                                return job.result;
+                            }
+                            if (job.status === 'FAILED') {
+                                localStorage.removeItem(activeImportStorageKey());
+                                throw new Error(job.errorMessage || '智能导入任务执行失败。');
+                            }
+                            importStatusText.value = job.status === 'PROCESSING' ? '正在解析配方…' : '等待处理…';
+                            await new Promise((resolve) => window.setTimeout(resolve, 1500));
+                        }
+                        throw new Error('智能导入任务处理时间过长，可稍后重新打开编辑器查看。');
+                    };
+                    const openIngredientReview = async (result) => {
+                        if (!window.RecipeImportReview?.createIngredientReviewItems) {
+                            alert('智能导入原料确认模块加载失败，请刷新页面后重试。');
+                            return;
+                        }
+                        pendingImportResult.value = result;
+                        ingredientReviewItems.value = window.RecipeImportReview.createIngredientReviewItems(
+                            result,
+                            libraryIngredientItems.value,
+                        );
+                        if (!ingredientReviewItems.value.length) {
+                            await applyImportResult(result);
+                            return;
+                        }
+                        ingredientReviewFilter.value = pendingIngredientReviewCount.value ? 'pending' : 'all';
+                        ingredientReviewSearch.value = '';
+                        showImportPanel.value = false;
+                        showIngredientReviewPanel.value = true;
+                    };
+                    const syncIngredientDecisionFromName = (item) => {
+                        if (!item) return;
+                        if (item.decision === 'SELF_MADE') return;
+                        const finalName = String(item.finalName || '').trim();
+                        const matched = libraryIngredientItems.value.find(
+                            (ingredient) => ingredient.name === finalName,
+                        );
+                        if (matched) {
+                            item.decision = 'MATCH_EXISTING';
+                            item.isFlour = !!item.isFlour || matched.isFlour;
+                            item.waterContentPercent = Math.round(Number(matched.waterContent || 0) * 10000) / 100;
+                        } else if (item.decision === 'MATCH_EXISTING') {
+                            item.decision = 'NEW_BASE';
+                        }
+                    };
+                    const applyIngredientReviewOverridesToLibrary = () => {
+                        ingredientReviewItems.value.forEach((item) => {
+                            const finalName = String(item.finalName || '').trim();
+                            if (!finalName) return;
+                            const existing = globalIngredientLibrary.value.get(finalName) || { name: finalName };
+                            globalIngredientLibrary.value.set(finalName, {
+                                ...existing,
+                                name: finalName,
+                                isFlour: !!existing.isFlour || !!item.isFlour,
+                                waterContent: Number(existing.waterContent || 0),
+                            });
+                        });
+                    };
+                    const markIngredientPending = (item) => {
+                        if (!item) return;
+                        syncIngredientDecisionFromName(item);
+                        item.status = 'PENDING';
+                    };
+                    const setIngredientSelfMade = (item, isSelfMadeIngredient) => {
+                        if (!item) return;
+                        item.decision = isSelfMadeIngredient ? 'SELF_MADE' : 'NEW_BASE';
+                        item.status = 'PENDING';
+                        syncIngredientDecisionFromName(item);
+                    };
+                    const confirmIngredientItem = (item) => {
+                        if (!item) return;
+                        const finalName = String(item.finalName || '').trim();
+                        if (!finalName) {
+                            alert('请先填写最终原料名称。');
+                            return;
+                        }
+                        item.finalName = finalName;
+                        syncIngredientDecisionFromName(item);
+                        item.status = 'CONFIRMED';
+                    };
+                    const confirmAllVisibleIngredients = () => {
+                        filteredIngredientReviewItems.value.forEach((item) => {
+                            if (String(item.finalName || '').trim()) {
+                                syncIngredientDecisionFromName(item);
+                                item.status = 'CONFIRMED';
+                            }
+                        });
+                    };
+                    const cancelIngredientReview = () => {
+                        showIngredientReviewPanel.value = false;
+                        if (!pendingImportResult.value) showImportPanel.value = false;
+                    };
+                    const applyIngredientReviewAndContinue = async () => {
+                        if (!pendingImportResult.value) return;
+                        const emptyItem = ingredientReviewItems.value.find((item) => !String(item.finalName || '').trim());
+                        if (emptyItem) {
+                            ingredientReviewFilter.value = 'all';
+                            alert(`请先填写“${emptyItem.sourceName}”的最终原料名称。`);
+                            return;
+                        }
+                        const pendingItem = ingredientReviewItems.value.find((item) => item.status === 'PENDING');
+                        if (pendingItem) {
+                            ingredientReviewFilter.value = 'pending';
+                            alert(`请先确认“${pendingItem.sourceName}”。`);
+                            return;
+                        }
+                        const reviewedResult = window.RecipeImportReview.applyIngredientReview(
+                            pendingImportResult.value,
+                            ingredientReviewItems.value,
+                        );
+                        applyIngredientReviewOverridesToLibrary();
+                        showIngredientReviewPanel.value = false;
+                        pendingImportResult.value = null;
+                        await applyImportResult(reviewedResult);
+                    };
+                    const applyImportResult = async (result) => {
+                        const existingFamilies = recipes.value.slice();
+                        const existingSavedSnapshots = new Map(savedRecipeSnapshots.value);
+                        const existingNames = new Set(existingFamilies.map((family) => family.name?.trim()).filter(Boolean));
+                        const importedFamilies = loadJson(JSON.stringify(result.recipes), {
+                            silent: true,
+                            referenceVersions: referenceVersionCatalog.value,
+                        });
+                        const importedNames = new Set();
+                        const nameConflicts = [];
+                        importedFamilies.forEach((family) => {
+                            const name = family.name?.trim();
+                            if (!name) return;
+                            if (existingNames.has(name) || importedNames.has(name)) {
+                                nameConflicts.push({
+                                    id: `name-conflict-${family.id}`,
+                                    recipeName: name,
+                                    fieldPath: 'name',
+                                    label: '配方名称冲突',
+                                    severity: 'BLOCKING',
+                                    status: 'PENDING',
+                                    recognizedValue: name,
+                                    familyId: family.id,
+                                    reason: existingNames.has(name)
+                                        ? '店铺中已存在同名配方。智能导入不会覆盖原配方，请修改导入配方名称。'
+                                        : '本次导入中存在重复配方名称，请修改后再发布。',
+                                });
+                            }
+                            importedNames.add(name);
+                        });
+                        recipes.value = [...existingFamilies, ...importedFamilies];
+                        savedRecipeSnapshots.value = existingSavedSnapshots;
+                        importedFamilies.forEach((family) => savedRecipeSnapshots.value.set(family.id, JSON.stringify(family)));
+                        aiImportedFamilyIds.value = new Set([
+                            ...aiImportedFamilyIds.value,
+                            ...importedFamilies.map((family) => family.id),
+                        ]);
+                        const importedFamilyByName = new Map(importedFamilies.map((family) => [family.name, family.id]));
+                        const importedReviewItems = (result.reviewItems || []).map((item) => ({
+                            ...item,
+                            familyId: item.familyId || importedFamilyByName.get(item.recipeName),
+                        }));
+                        aiReviewItems.value = normalizeReviewItems([...importedReviewItems, ...nameConflicts]);
+                        activeReviewItemId.value = aiReviewItems.value.find((item) => item.status === 'PENDING')?.id || '';
+                        aiIngredientItems.value = result.ingredients || [];
+                        aiImportMeta.value = result.meta || { source: 'ai-import' };
+                        activeCloudDraftId.value = '';
+                        showImportPanel.value = false;
+                        if (importedFamilies.length) selectFamily(importedFamilies[0].id);
+                        cloudStatusText.value = `已追加 ${importedFamilies.length} 个配方、识别 ${aiIngredientItems.value.length} 种原料，原有配方保持不变。`;
+                        await nextTick();
+                        applyReviewHighlights();
+                        if (pendingReviewItems.value.length || aiIngredientItems.value.length) openReviewPanel(pendingReviewItems.value.length ? 'issues' : 'ingredients');
+                    };
+                    const syncSingleProductName = (family) => {
+                        if (!family || family.type !== 'MAIN') return;
+                        family.versions.forEach((version) => {
+                            if (version.products?.length === 1) version.products[0].name = family.name;
+                        });
+                    };
+                    const validateFamilyName = (family) => {
+                        if (!family) return '';
+                        const name = String(family.name || '').trim();
+                        if (!name) return '配方名称不能为空';
+                        const duplicate = recipes.value.find(
+                            (candidate) => candidate.id !== family.id && String(candidate.name || '').trim() === name,
+                        );
+                        return duplicate ? '配方名称已存在，请使用其他名称' : '';
+                    };
+                    const isFamilyNameReviewItem = (item) =>
+                        item?.label === '配方名称' || item?.label === '配方名称冲突' || item?.fieldPath === 'name';
+                    const reconcileFamilyNameReviewItems = () => {
+                        let changed = false;
+                        aiReviewItems.value.forEach((item) => {
+                            if (!isFamilyNameReviewItem(item) || item.status !== 'PENDING') return;
+                            const family = item.familyId
+                                ? recipes.value.find((recipe) => recipe.id === item.familyId)
+                                : recipes.value.find(
+                                      (recipe) => aiImportedFamilyIds.value.has(recipe.id) && recipe.name === item.recipeName,
+                                  ) || recipes.value.find((recipe) => recipe.name === item.recipeName);
+                            if (!family) return;
+                            const error = validateFamilyName(family);
+                            if (error) {
+                                item.reason = error;
+                                return;
+                            }
+                            item.status = 'CONFIRMED';
+                            item.interactionState = 'CONFIRMED';
+                            item.normalizedValue = String(family.name || '').trim();
+                            changed = true;
+                        });
+                        if (changed && activeReviewItemId.value) {
+                            const activeStillPending = aiReviewItems.value.some(
+                                (item) => item.id === activeReviewItemId.value && item.status === 'PENDING',
+                            );
+                            if (!activeStillPending) activeReviewItemId.value = '';
+                        }
+                        if (changed) nextTick(() => applyReviewHighlights());
+                    };
+                    const handleFamilyNameInput = (family) => {
+                        syncSingleProductName(family);
+                        reconcileFamilyNameReviewItems();
+                    };
+                    const replaceImportedIngredientName = (sourceName, targetName) => {
+                        const visit = (items) => (items || []).forEach((ingredient) => {
+                            if (ingredient.name === sourceName) ingredient.name = targetName;
+                        });
+                        recipes.value
+                            .filter((family) => aiImportedFamilyIds.value.has(family.id))
+                            .forEach((family) => family.versions.forEach((version) => {
+                                visit(version.ingredients);
+                                (version.products || []).forEach((product) => {
+                                    visit(product.mixIns);
+                                    visit(product.fillings);
+                                    visit(product.toppings);
+                                });
+                            }));
+                    };
+                    const applyIngredientMapping = (ingredient, targetName) => {
+                        const normalizedTarget = String(targetName || '').trim();
+                        if (!normalizedTarget) return;
+                        const previousNames = new Set(
+                            [ingredient.normalizedName, ingredient.sourceName].filter((name) => String(name || '').trim()),
+                        );
+                        previousNames.forEach((name) => replaceImportedIngredientName(name, normalizedTarget));
+                        ingredient.normalizedName = normalizedTarget;
+                        ingredient.status = baseIngredientNames.value.has(normalizedTarget) ? 'MATCHED' : 'NEW';
+                    };
+                    const openReviewPanel = (tab = 'issues') => {
+                        reviewPanelTab.value = tab;
+                        showReviewPanel.value = true;
+                    };
+                    const toggleReviewPanel = (tab = 'issues') => {
+                        if (showReviewPanel.value && reviewPanelTab.value === tab) {
+                            showReviewPanel.value = false;
+                            return;
+                        }
+                        openReviewPanel(tab);
+                    };
+                    const resumeImportJob = async (jobId) => {
+                        importAnalyzing.value = true;
+                        importStatusText.value = '正在恢复识别任务…';
+                        showImportPanel.value = true;
+                        try {
+                            const result = await waitForImportJob(jobId);
+                            await openIngredientReview(result);
+                        } catch (error) {
+                            alert(error.message);
+                        } finally {
+                            importAnalyzing.value = false;
+                        }
+                    };
+                    const reviewPathForIngredient = (ingredient, field) =>
+                        ingredient?.importMeta?.fieldPath ? `${ingredient.importMeta.fieldPath}.${field}` : null;
+                    const reviewFieldIdForIngredient = (ingredient, field) => {
+                        const importedFieldId = ingredient?.importMeta?.fieldIds?.[field]
+                            || (['weight', 'weightInGrams'].includes(field) ? ingredient?.importMeta?.fieldIds?.ratio : null);
+                        if (importedFieldId) return importedFieldId;
+                        const recipeName = currentFamily.value?.name;
+                        const fieldPath = reviewPathForIngredient(ingredient, field);
+                        if (!recipeName || !fieldPath) return null;
+                        if (['ratio', 'weight', 'weightInGrams'].includes(field)) {
+                            return `recipe-import-field:${recipeName}::amount::${ingredient.name}用量`;
+                        }
+                        return `recipe-import-field:${recipeName}::${fieldPath}`;
+                    };
+                    const findVisibleElement = (selector) => {
+                        const elements = Array.from(document.querySelectorAll(selector));
+                        return elements.find((element) => element.offsetParent !== null) || elements[0] || null;
+                    };
+                    const findReviewInput = (item) => {
+                        if (item.label === '配方名称' || item.label === '配方名称冲突') {
+                            const familyNameInput = document.querySelector('.main-content .input-field[data-review-role="family-name"]');
+                            if (familyNameInput) return familyNameInput;
+                        }
+                        if (item.label === '出品规格' || /\.products\.\d+\.weight$/.test(String(item.fieldPath || ''))) {
+                            const productWeightInput = findVisibleElement('.main-content .input-field[data-review-role="product-weight"]');
+                            if (productWeightInput) return productWeightInput;
+                        }
+                        if (item.fieldId) {
+                            const escapedFieldId = window.CSS?.escape
+                                ? window.CSS.escape(item.fieldId)
+                                : String(item.fieldId).replace(/"/g, '\\"');
+                            const inputByFieldId = findVisibleElement(
+                                `.main-content .input-field[data-review-field-id="${escapedFieldId}"]`,
+                            );
+                            if (inputByFieldId) return inputByFieldId;
+                        }
+                        if (item.fieldPath) {
+                            const escapedPath = window.CSS?.escape ? window.CSS.escape(item.fieldPath) : String(item.fieldPath).replace(/"/g, '\\"');
+                            const inputByPath = findVisibleElement(`.main-content .input-field[data-review-path="${escapedPath}"]`);
+                            if (inputByPath) return inputByPath;
+                            const amountPath = String(item.fieldPath).replace(/\.(amount|weight)$/, '.ratio');
+                            if (amountPath !== item.fieldPath) {
+                                const escapedAmountPath = window.CSS?.escape ? window.CSS.escape(amountPath) : amountPath.replace(/"/g, '\\"');
+                                const amountInputByPath = findVisibleElement(
+                                    `.main-content .ratio-input[data-review-path="${escapedAmountPath}"]`,
+                                );
+                                if (amountInputByPath) return amountInputByPath;
+                            }
+                            const escapedPrefix = window.CSS?.escape
+                                ? window.CSS.escape(`${String(item.fieldPath).replace(/\.(name|ratio|amount|weight|weightInGrams)$/, '')}.`)
+                                : `${String(item.fieldPath).replace(/\.(name|ratio|amount|weight|weightInGrams)$/, '')}.`.replace(/"/g, '\\"');
+                            if (/用量|比例|克重/.test(`${item.label || ''}${item.reason || ''}`)) {
+                                const amountInputByPrefix = findVisibleElement(
+                                    `.main-content .ratio-input[data-review-path^="${escapedPrefix}"]`,
+                                );
+                                if (amountInputByPrefix) return amountInputByPrefix;
+                            }
+                        }
+                        const amountLabelMatch = String(item.label || '').match(/^(.+?)用量$/);
+                        if (amountLabelMatch) {
+                            const ingredientName = amountLabelMatch[1].trim();
+                            const row = Array.from(document.querySelectorAll('.main-content .ingredient-row')).find((candidateRow) => {
+                                const nameInput = candidateRow.querySelector('.input-with-tag-wrapper .input-field');
+                                return String(nameInput?.value || '').trim() === ingredientName;
+                            });
+                            const amountInput = row?.querySelector('.ratio-input');
+                            if (amountInput) return amountInput;
+                        }
+                        const candidates = Array.from(document.querySelectorAll('.main-content .input-field'));
+                        const values = [item.normalizedValue, item.recognizedValue].filter((value) => value !== undefined && value !== null && String(value).trim());
+                        return candidates.find((input) => values.some((value) => String(input.value).trim() === String(value).trim())) || null;
+                    };
+                    const applyReviewHighlights = () => {
+                        document.querySelectorAll('.ai-review-field').forEach((element) => {
+                            element.classList.remove('ai-review-field', 'blocking', 'review', 'info');
+                            delete element.dataset.reviewIds;
+                        });
+                        const fieldItems = new Map();
+                        pendingReviewItems.value.forEach((item) => {
+                            const input = findReviewInput(item);
+                            if (!input) return;
+                            if (!fieldItems.has(input)) fieldItems.set(input, []);
+                            fieldItems.get(input).push(item);
+                        });
+                        fieldItems.forEach((items, input) => {
+                            const severity = items.some((item) => item.severity === 'BLOCKING')
+                                ? 'blocking'
+                                : items.some((item) => item.severity === 'REVIEW')
+                                  ? 'review'
+                                  : 'info';
+                            input.classList.add('ai-review-field', severity);
+                            input.dataset.reviewIds = items.map((item) => item.id).join(',');
+                        });
+                    };
+                    watch([currentFamilyId, aiReviewItems], () => nextTick(() => applyReviewHighlights()), {
+                        deep: true,
+                    });
+                    const scrollActiveReviewItemIntoView = () => {
+                        if (!activeReviewItemId.value) return;
+                        const card = Array.from(document.querySelectorAll('.inspector-panel [data-review-item-id]')).find(
+                            (element) => element.dataset.reviewItemId === activeReviewItemId.value,
+                        );
+                        card?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    };
+                    let reviewFocusNavigationToken = 0;
+                    let isProgrammaticReviewFocus = false;
+                    const syncReviewTargetTabs = (item) => {
+                        const versionMatch = String(item?.fieldPath || '').match(/\.versions\.(\d+)\./);
+                        if (versionMatch) {
+                            const versionIndex = Number(versionMatch[1]);
+                            if (Number.isInteger(versionIndex) && currentFamily.value?.versions?.[versionIndex]) {
+                                currentVersionIndex.value = versionIndex;
+                            }
+                        }
+                        const productMatch = String(item?.fieldPath || '').match(/\.products\.(\d+)\./);
+                        if (productMatch) {
+                            const productIndex = Number(productMatch[1]);
+                            if (Number.isInteger(productIndex) && currentVersion.value?.products?.[productIndex]) {
+                                activeProductTab.value = productIndex;
+                            }
+                        }
+                    };
+                    const selectReviewItemForField = (ids) => {
+                        if (activeReviewItemId.value && ids.includes(activeReviewItemId.value)) {
+                            nextTick(() => scrollActiveReviewItemIntoView());
+                            return;
+                        }
+                        const item = pendingReviewItems.value.find((entry) => ids.includes(entry.id));
+                        if (!item) return;
+                        if (item.interactionState === 'UNSEEN') item.interactionState = 'VIEWED';
+                        activeReviewItemId.value = item.id;
+                        if (isAiReviewMode.value) reviewPanelTab.value = 'issues';
+                        nextTick(() => scrollActiveReviewItemIntoView());
+                    };
+                    const focusReviewItem = async (item) => {
+                        const navigationToken = ++reviewFocusNavigationToken;
+                        isProgrammaticReviewFocus = true;
+                        if (item.status === 'PENDING' && item.interactionState === 'UNSEEN') item.interactionState = 'VIEWED';
+                        activeReviewItemId.value = item.id;
+                        reviewPanelTab.value = 'issues';
+                        const family = item.familyId
+                            ? recipes.value.find((recipe) => recipe.id === item.familyId)
+                            : recipes.value.find(
+                                  (recipe) => aiImportedFamilyIds.value.has(recipe.id) && recipe.name === item.recipeName,
+                              ) || recipes.value.find((recipe) => recipe.name === item.recipeName);
+                        if (family) selectFamily(family.id);
+                        syncReviewTargetTabs(item);
+                        showReviewPanel.value = false;
+                        await nextTick();
+                        applyReviewHighlights();
+                        const input = findReviewInput(item);
+                        if (input) {
+                            input.focus({ preventScroll: true });
+                            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            window.requestAnimationFrame(() => {
+                                input.focus({ preventScroll: true });
+                                window.requestAnimationFrame(() => {
+                                    if (navigationToken === reviewFocusNavigationToken) isProgrammaticReviewFocus = false;
+                                });
+                            });
+                        } else if (navigationToken === reviewFocusNavigationToken) {
+                            isProgrammaticReviewFocus = false;
+                        }
+                    };
+                    const confirmReviewItem = async (item) => {
+                        const input = findReviewInput(item);
+                        const ids = input?.closest?.('[data-review-ids]')?.dataset.reviewIds?.split(',').filter(Boolean) || [item.id];
+                        aiReviewItems.value.forEach((entry) => {
+                            if (ids.includes(entry.id) && entry.status === 'PENDING') {
+                                entry.status = 'CONFIRMED';
+                                entry.interactionState = 'CONFIRMED';
+                            }
+                        });
+                        if (ids.includes(activeReviewItemId.value)) activeReviewItemId.value = '';
+                        await nextTick();
+                        applyReviewHighlights();
                     };
                     const drawLoginQr = (text) => {
                         if (!qrCanvas.value || !text) return;
@@ -2591,6 +4988,7 @@
                         (catalog.ingredients || []).forEach((ingredient) =>
                             globalIngredientLibrary.value.set(ingredient.name, ingredient),
                         );
+                        baseIngredientNames.value = new Set(globalIngredientLibrary.value.keys());
                     };
                     const startEditorHeartbeat = () => {
                         if (heartbeatTimer) window.clearInterval(heartbeatTimer);
@@ -2679,6 +5077,7 @@
                         await exchangeEditorCredential();
                         const me = await editorApi('/recipe-editor/me');
                         editorTenantName.value = me.tenant?.name || '';
+                        editorTenantId.value = me.tenant?.id || '';
                         editorAuthorized.value = true;
                         loginStatusText.value = '授权成功，正在进入编辑器...';
                         await Promise.all([refreshRecipeCatalog(), refreshCloudDrafts(), refreshIngredientCatalog()]);
@@ -2686,6 +5085,8 @@
                         const latestDraft = cloudDrafts.value.find((draft) => draft.status === 'DRAFT');
                         if (latestDraft) loadCloudDraft(latestDraft);
                         else cloudStatusText.value = '店铺配方已是最新状态，修改后可保存草稿或创建新版本。';
+                        const activeImportJobId = localStorage.getItem(activeImportStorageKey());
+                        if (activeImportJobId) void resumeImportJob(activeImportJobId);
                     };
                     const initEditorSession = async () => {
                         if (editorSessionId.value && editorToken.value) {
@@ -2742,7 +5143,15 @@
                                     baseVersionId: binding?.baseVersionId,
                                 };
                             }),
-                            meta: { editorVersion: 3, source: 'professional-editor' },
+                            meta: isAiReviewMode.value
+                                ? {
+                                      editorVersion: 3,
+                                      source: 'ai-import',
+                                      import: aiImportMeta.value,
+                                      reviewItems: aiReviewItems.value,
+                                      ingredients: aiIngredientItems.value,
+                                  }
+                                : { editorVersion: 3, source: 'professional-editor' },
                         };
                     };
                     const saveCloudDraft = async () => {
@@ -2809,10 +5218,26 @@
                             savedRecipeSnapshots.value.set(family.id, JSON.stringify(family)),
                         );
                         activeCloudDraftId.value = draft.id;
+                        const meta = draft.payload.meta || {};
+                        aiImportMeta.value = meta.source === 'ai-import' ? (meta.import || { source: 'ai-import' }) : {};
+                        const draftFamilyByName = new Map(draftFamilies.map((family) => [family.name, family.id]));
+                        aiReviewItems.value = normalizeReviewItems(
+                            (Array.isArray(meta.reviewItems) ? meta.reviewItems : []).map((item) => ({
+                                ...item,
+                                familyId: draftFamilyByName.get(item.recipeName) || item.familyId,
+                            })),
+                        );
+                        aiIngredientItems.value = Array.isArray(meta.ingredients) ? meta.ingredients : [];
+                        activeReviewItemId.value = aiReviewItems.value.find((item) => item.status === 'PENDING')?.id || '';
                         cloudStatusText.value = `已加载草稿：${draft.title}`;
+                        nextTick(() => applyReviewHighlights());
                     };
                     const syncCloudDraft = async () => {
                         try {
+                            if (pendingBlockingCount.value > 0) {
+                                openReviewPanel('issues');
+                                throw new Error(`还有 ${pendingBlockingCount.value} 项必须处理，暂不能创建配方版本。`);
+                            }
                             if (!activeCloudDraftId.value || isDirty.value) {
                                 const saved = await saveCloudDraft();
                                 if (!saved) return;
@@ -2858,16 +5283,80 @@
                             alert(error.message);
                         }
                     };
+                    const releaseEditorSession = () => {
+                        if (!editorAuthorized.value || !editorSessionId.value || !editorToken.value) return;
+                        const path = `${editorApiPrefix}/recipe-editor/sessions/${encodeURIComponent(editorSessionId.value)}/close`;
+                        void fetch(path, {
+                            method: 'POST',
+                            headers: {
+                                'X-Editor-Token': editorToken.value,
+                            },
+                            keepalive: true,
+                        }).catch(() => {});
+                    };
+                    const handleBeforeUnload = (event) => {
+                        if (isDirty.value) {
+                            event.preventDefault();
+                            event.returnValue = '';
+                        }
+                    };
+                    const handlePageHide = (event) => {
+                        if (!event.persisted) releaseEditorSession();
+                    };
+                    const reviewIdsFromEvent = (event) =>
+                        event.target?.closest?.('[data-review-ids]')?.dataset.reviewIds?.split(',').filter(Boolean) || [];
+                    const handleReviewPointerDown = (event) => {
+                        const ids = reviewIdsFromEvent(event);
+                        if (ids.length) selectReviewItemForField(ids);
+                    };
+                    const handleReviewFocusIn = (event) => {
+                        if (isProgrammaticReviewFocus) return;
+                        const ids = reviewIdsFromEvent(event);
+                        if (ids.length) selectReviewItemForField(ids);
+                    };
+                    const handleReviewInput = (event) => {
+                        const ids = reviewIdsFromEvent(event);
+                        if (!ids.length) return;
+                        aiReviewItems.value.forEach((item) => {
+                            if (ids.includes(item.id) && item.status === 'PENDING') item.interactionState = 'MODIFIED';
+                        });
+                    };
                     onMounted(() => {
                         void initEditorSession();
-                        window.addEventListener('beforeunload', (e) => {
-                            if (isDirty.value) {
-                                e.preventDefault();
-                                e.returnValue = '';
-                            }
-                        });
+                        document.addEventListener('pointerdown', handleReviewPointerDown);
+                        document.addEventListener('focusin', handleReviewFocusIn);
+                        document.addEventListener('input', handleReviewInput);
+                        window.addEventListener('beforeunload', handleBeforeUnload);
+                        window.addEventListener('pagehide', handlePageHide);
                     });
-                    onUnmounted(() => window.removeEventListener('beforeunload', () => {}));
+                    onUnmounted(() => {
+                        releaseEditorSession();
+                        document.removeEventListener('pointerdown', handleReviewPointerDown);
+                        document.removeEventListener('focusin', handleReviewFocusIn);
+                        document.removeEventListener('input', handleReviewInput);
+                        window.removeEventListener('beforeunload', handleBeforeUnload);
+                        window.removeEventListener('pagehide', handlePageHide);
+                    });
+
+                    const toast = ref({ visible: false, message: '' });
+                    let toastTimeout = null;
+                    const showToast = (message) => {
+                        toast.value.message = message;
+                        toast.value.visible = true;
+                        if (toastTimeout) clearTimeout(toastTimeout);
+                        toastTimeout = setTimeout(() => {
+                            toast.value.visible = false;
+                        }, 2200);
+                    };
+                    const copyIngredientName = (name) => {
+                        if (!name) return;
+                        navigator.clipboard.writeText(name).then(() => {
+                            showToast(`已复制原料名称: "${name}"`);
+                        }).catch((err) => {
+                            console.error('Could not copy text: ', err);
+                            showToast(`原料: ${name}`);
+                        });
+                    };
 
                     return {
                         recipes,
@@ -2902,6 +5391,43 @@
                         editorTenantName,
                         cloudDrafts,
                         cloudStatusText,
+                        showImportPanel,
+                        showReviewPanel,
+                        importFileInput,
+                        selectedImportFile,
+                        importText,
+                        importAnalyzing,
+                        importStatusText,
+                        showIngredientReviewPanel,
+                        pendingImportResult,
+                        ingredientReviewItems,
+                        ingredientReviewFilter,
+                        ingredientReviewSearch,
+                        aiReviewItems,
+                        aiIngredientItems,
+                        aiImportedFamilyIds,
+                        aiImportMeta,
+                        activeReviewItem,
+                        reviewPanelTab,
+                        reviewBarCollapsed,
+                        reviewScope,
+                        showConfirmedReviewItems,
+                        ingredientSearch,
+                        isAiReviewMode,
+                        pendingReviewItems,
+                        pendingBlockingCount,
+                        pendingReviewCount,
+                        confirmedReviewCount,
+                        visibleReviewItems,
+                        availableIngredientNames,
+                        libraryIngredientItems,
+                        filteredLibraryIngredientItems,
+                        importedIngredientItems,
+                        filteredImportedIngredientItems,
+                        pendingIngredientReviewCount,
+                        confirmedIngredientReviewCount,
+                        filteredIngredientReviewItems,
+                        ingredientReviewResolutionText,
                         processedPreDoughs,
                         isFamilyDirty,
                         isFamilyUnpublished,
@@ -2911,6 +5437,8 @@
                         familyStatusText,
                         addFamily,
                         selectFamily,
+                        syncSingleProductName,
+                        handleFamilyNameInput,
                         deleteFamily,
                         openAddPreDoughModal,
                         addPreDoughReference,
@@ -2938,6 +5466,23 @@
                         removeProductProcedureStep,
                         saveCloudDraft,
                         syncCloudDraft,
+                        openImportPanel,
+                        handleImportFile,
+                        analyzeImport,
+                        markIngredientPending,
+                        setIngredientSelfMade,
+                        confirmIngredientItem,
+                        confirmAllVisibleIngredients,
+                        cancelIngredientReview,
+                        applyIngredientReviewAndContinue,
+                        applyIngredientMapping,
+                        openReviewPanel,
+                        toggleReviewPanel,
+                        focusReviewItem,
+                        confirmReviewItem,
+                        reviewEvidenceItems,
+                        reviewPathForIngredient,
+                        reviewFieldIdForIngredient,
                         updatePreDoughRatio,
                         sortedMainDoughIngredients,
                         sortedOtherIngredients,
@@ -2947,6 +5492,9 @@
                         shouldShowWaterTag,
                         calculatedWaterContent,
                         nameValidationError, // 新增的校验属性
+                        toast,
+                        showToast,
+                        copyIngredientName,
                     };
                 },
             }).mount('#app');

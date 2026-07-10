@@ -37,6 +37,68 @@ export class SuperAdminService {
         private entitlementsService: EntitlementsService,
     ) {}
 
+    async findRecipeImportJobs(page = 1, limit = 20, tenantId?: string) {
+        const safePage = Math.max(1, page);
+        const safeLimit = Math.min(100, Math.max(1, limit));
+        const where = tenantId ? { tenantId } : {};
+        const [data, total] = await Promise.all([
+            this.prisma.recipeImportJob.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip: (safePage - 1) * safeLimit,
+                take: safeLimit,
+                select: {
+                    id: true,
+                    tenantId: true,
+                    status: true,
+                    fileName: true,
+                    mimeType: true,
+                    errorMessage: true,
+                    startedAt: true,
+                    completedAt: true,
+                    createdAt: true,
+                    diagnosticExpiresAt: true,
+                    tenant: { select: { name: true } },
+                },
+            }),
+            this.prisma.recipeImportJob.count({ where }),
+        ]);
+        return { data, meta: { total, page: safePage, limit: safeLimit, lastPage: Math.ceil(total / safeLimit) } };
+    }
+
+    async getRecipeImportDiagnostic(jobId: string) {
+        const job = await this.prisma.recipeImportJob.findUnique({
+            where: { id: jobId },
+            include: { tenant: { select: { name: true } } },
+        });
+        if (!job) throw new NotFoundException('智能导入任务不存在');
+        if (!job.diagnosticExpiresAt || job.diagnosticExpiresAt <= new Date()) {
+            throw new NotFoundException('该任务的诊断数据已过期');
+        }
+        return {
+            manifest: {
+                jobId: job.id,
+                tenantId: job.tenantId,
+                tenantName: job.tenant.name,
+                status: job.status,
+                fileName: job.fileName,
+                mimeType: job.mimeType,
+                createdAt: job.createdAt,
+                startedAt: job.startedAt,
+                completedAt: job.completedAt,
+                errorMessage: job.errorMessage,
+            },
+            source: {
+                text: job.sourceText,
+                fileName: job.fileName,
+                mimeType: job.mimeType,
+                fileBase64: job.sourceData ? Buffer.from(job.sourceData).toString('base64') : null,
+            },
+            model: job.diagnosticData,
+            normalizedResult: job.result,
+        };
+    }
+
     // --- Dashboard ---
     async getDashboardStats() {
         const [totalTenants, totalUsers, totalRecipes, totalTasks, activeSubscriptions, paidOrdersAggregate] =

@@ -37,11 +37,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
             method: httpAdapter.getRequestMethod(ctx.getRequest()) as string,
             message: message, // 使用经过类型安全处理后的 message
         };
-
-        this.logger.error(
-            `HTTP Status: ${httpStatus} Error Message: ${JSON.stringify(responseBody.message)}`,
-            exception instanceof Error ? exception.stack : '',
-        );
+        const request = ctx.getRequest<{ ip?: string; headers?: Record<string, string | undefined> }>();
+        const logMessage = `HTTP Status: ${httpStatus} Path: ${responseBody.path} IP: ${request.ip || '-'} Error Message: ${JSON.stringify(responseBody.message)}`;
+        if (httpStatus >= 500) {
+            this.logger.error(logMessage, exception instanceof Error ? exception.stack : '');
+        } else if (httpStatus === HttpStatus.NOT_FOUND) {
+            const scannerPath = /^\/(?:\.git|\.env|wp-admin|wp-login)/i.test(responseBody.path);
+            if (scannerPath) this.logger.warn(`安全扫描请求 ${logMessage}`);
+            else this.logger.debug(logMessage);
+        } else {
+            this.logger.warn(logMessage);
+        }
 
         httpAdapter.reply(ctx.getResponse(), responseBody, httpStatus);
     }

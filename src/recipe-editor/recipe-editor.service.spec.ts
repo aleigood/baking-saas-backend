@@ -58,6 +58,25 @@ describe('RecipeEditorService session leases', () => {
         expect(findFirst).not.toHaveBeenCalled();
     });
 
+    it('expires the editor session when the browser closes', async () => {
+        findFirst.mockResolvedValue({
+            id: 'session-1',
+            token: 'active-token',
+            status: RecipeEditorSessionStatus.APPROVED,
+            expiresAt: new Date(Date.now() + 60000),
+        });
+        update.mockResolvedValue({ id: 'session-1', status: RecipeEditorSessionStatus.EXPIRED });
+
+        const result = await service.closeSession('session-1', 'active-token');
+
+        expect(update).toHaveBeenCalledWith({
+            where: { id: 'session-1' },
+            data: { status: RecipeEditorSessionStatus.EXPIRED },
+            select: { id: true, status: true },
+        });
+        expect(result.status).toBe(RecipeEditorSessionStatus.EXPIRED);
+    });
+
     it('does not approve a second editor for the same tenant', async () => {
         findFirst
             .mockResolvedValueOnce({

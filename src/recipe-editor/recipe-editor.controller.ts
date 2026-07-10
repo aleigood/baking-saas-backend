@@ -1,4 +1,17 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+    Body,
+    Controller,
+    Get,
+    Headers,
+    Param,
+    Patch,
+    Post,
+    Query,
+    UploadedFile,
+    UseGuards,
+    UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '@nestjs/passport';
 import { UserPayload } from '../auth/interfaces/user-payload.interface';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -9,10 +22,14 @@ import {
     ApproveRecipeEditorSessionDto,
     UpsertRecipeDraftDto,
 } from './dto/recipe-editor.dto';
+import { RecipeImportService } from '../recipe-import/recipe-import.service';
 
 @Controller('recipe-editor')
 export class RecipeEditorController {
-    constructor(private readonly recipeEditorService: RecipeEditorService) {}
+    constructor(
+        private readonly recipeEditorService: RecipeEditorService,
+        private readonly recipeImportService: RecipeImportService,
+    ) {}
 
     @Post('sessions')
     createLoginSession() {
@@ -70,6 +87,37 @@ export class RecipeEditorController {
     @Get('ingredients')
     listIngredients(@Headers('x-editor-session-id') sessionId: string, @Headers('x-editor-token') token: string) {
         return this.recipeEditorService.listIngredients(sessionId, token);
+    }
+
+    @Post('imports/analyze')
+    @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024, files: 1 } }))
+    analyzeImport(
+        @Headers('x-editor-session-id') sessionId: string,
+        @Headers('x-editor-token') token: string,
+        @UploadedFile() file: { originalname: string; mimetype: string; buffer: Buffer } | undefined,
+        @Body('text') text?: string,
+    ) {
+        return this.recipeImportService.createJob(sessionId, token, {
+            fileName: file ? this.decodeUploadFileName(file.originalname) : undefined,
+            mimeType: file?.mimetype,
+            buffer: file?.buffer,
+            text,
+        });
+    }
+
+    private decodeUploadFileName(fileName: string) {
+        if ([...fileName].some((character) => character.charCodeAt(0) > 255)) return fileName;
+        const decoded = Buffer.from(fileName, 'latin1').toString('utf8');
+        return decoded.includes('\uFFFD') ? fileName : decoded;
+    }
+
+    @Get('imports/:jobId')
+    getImportJob(
+        @Headers('x-editor-session-id') sessionId: string,
+        @Headers('x-editor-token') token: string,
+        @Param('jobId') jobId: string,
+    ) {
+        return this.recipeImportService.getJob(sessionId, token, jobId);
     }
 
     @Post('drafts')

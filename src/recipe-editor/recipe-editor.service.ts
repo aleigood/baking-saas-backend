@@ -399,6 +399,14 @@ export class RecipeEditorService {
             const remainingTargets = (payload.targets ?? []).filter((target) =>
                 failedRecipeNames.has(target.recipeName),
             );
+            const originalMeta = ((draft.payload as Record<string, unknown>).meta ?? {}) as Record<string, unknown>;
+            const remainingReviewItems = Array.isArray(originalMeta.reviewItems)
+                ? originalMeta.reviewItems.filter((item) => {
+                      if (!item || typeof item !== 'object') return false;
+                      const recipeName = (item as Record<string, unknown>).recipeName;
+                      return typeof recipeName === 'string' && failedRecipeNames.has(recipeName);
+                  })
+                : undefined;
             await this.prisma.recipeDraft.update({
                 where: { id: draft.id },
                 data: {
@@ -406,7 +414,10 @@ export class RecipeEditorService {
                     payload: {
                         recipes: remainingRecipes,
                         targets: remainingTargets,
-                        meta: (draft.payload as Record<string, unknown>).meta,
+                        meta: {
+                            ...originalMeta,
+                            ...(remainingReviewItems ? { reviewItems: remainingReviewItems } : {}),
+                        },
                     } as unknown as Prisma.InputJsonValue,
                 },
             });
