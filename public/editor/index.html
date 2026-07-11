@@ -2420,7 +2420,7 @@
                                 />
                             </div>
                             <div class="form-item">
-                                <label class="form-item-label">分割损耗 (g)</label
+                                <label class="form-item-label">分割余量 (g/个)</label
                                 ><input
                                     class="input-field"
                                     type="number"
@@ -2726,6 +2726,17 @@
                                         type="number"
                                         v-model.number="currentVersion.lossRatio"
                                         placeholder="1"
+                                    />
+                                </div>
+                                <div v-if="currentFamily.type === 'EXTRA'" class="form-item">
+                                    <label class="form-item-label">分装余量 (g/份)</label>
+                                    <input
+                                        class="input-field"
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        v-model.number="currentVersion.divisionLoss"
+                                        placeholder="0"
                                     />
                                 </div>
                                 <div class="form-item">
@@ -3703,6 +3714,7 @@
                             id: nextVersionId++,
                             notes: `V${nextVersionId}`,
                             lossRatio: null,
+                            divisionLoss: 0,
                             customWaterContent: null,
                             ingredients: [JSON.parse(JSON.stringify(commonIngredient))],
                             procedure: [''],
@@ -4058,7 +4070,7 @@
                             notes: vData.notes || 'V?',
                             targetTemp: vData.targetTemp || null,
                             lossRatio: toPercentage(vData.lossRatio),
-                            divisionLoss: vData.divisionLoss ?? 2,
+                            divisionLoss: vData.divisionLoss ?? (fType === 'MAIN' ? 2 : 0),
                             // 假设 JSON 中存储的是小数 (0.45)，转换为 45
                             customWaterContent:
                                 vData.customWaterContent !== undefined ? vData.customWaterContent : null,
@@ -4244,6 +4256,7 @@
                                             return {
                                                 notes: v.notes,
                                                 lossRatio: toDecimal(v.lossRatio),
+                                                divisionLoss: f.type === 'EXTRA' ? Number(v.divisionLoss || 0) : 0,
                                                 customWaterContent:
                                                     v.customWaterContent !== null
                                                         ? Number(v.customWaterContent)

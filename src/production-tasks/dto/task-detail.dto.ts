@@ -10,6 +10,7 @@ export interface TaskIngredientDetail {
     name: string;
     brand: string | null;
     weightInGrams: number;
+    weightPerUnit?: number;
     isRecipe: boolean;
     extraInfo?: string | null;
 }

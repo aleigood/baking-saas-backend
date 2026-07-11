@@ -1211,7 +1211,12 @@ export class ProductionTasksService {
                         const extraVersionId = extraVersion.id;
                         let weight = new Prisma.Decimal(0);
                         if (pIng.weightInGrams) {
-                            weight = new Prisma.Decimal(pIng.weightInGrams).mul(item.quantity);
+                            const portionReserve =
+                                pIng.type === ProductIngredientType.FILLING ||
+                                pIng.type === ProductIngredientType.TOPPING
+                                    ? new Prisma.Decimal(extraRecipe.divisionLoss || 0)
+                                    : new Prisma.Decimal(0);
+                            weight = new Prisma.Decimal(pIng.weightInGrams).add(portionReserve).mul(item.quantity);
                         } else if (pIng.ratio && pIng.type === 'MIX_IN') {
                             weight = totalFlourWeight.mul(new Prisma.Decimal(pIng.ratio)).mul(item.quantity);
                         }
@@ -2090,7 +2095,14 @@ export class ProductionTasksService {
             if (pIng.linkedExtra) {
                 const extraComponent = pIng.linkedExtra.versions?.[0]?.components?.[0];
                 if (extraComponent) {
-                    processComponentWithLoss(extraComponent as ComponentWithIngredients, requiredOutputWeight);
+                    const portionReserve =
+                        pIng.type === 'FILLING' || pIng.type === 'TOPPING'
+                            ? new Prisma.Decimal(extraComponent.divisionLoss || 0)
+                            : new Prisma.Decimal(0);
+                    processComponentWithLoss(
+                        extraComponent as ComponentWithIngredients,
+                        requiredOutputWeight.add(portionReserve),
+                    );
                 }
             } else if (pIng.ingredientId) {
                 const currentWeight = flattenedIngredients.get(pIng.ingredientId) || new Prisma.Decimal(0);

@@ -1059,6 +1059,7 @@ export class RecipesService {
             return {
                 notes: version.notes || '',
                 lossRatio: toNum(component.lossRatio),
+                divisionLoss: familyType === RecipeType.EXTRA ? toNum(component.divisionLoss) : undefined,
                 customWaterContent:
                     component.customWaterContent !== null ? toNum(component.customWaterContent) : undefined,
                 ingredients: component.ingredients
@@ -2015,7 +2016,7 @@ export class RecipesService {
         const lossRatioForDb =
             lossRatio === null || lossRatio === undefined ? undefined : new Prisma.Decimal(lossRatio);
         const divisionLossForDb =
-            divisionLoss === null || divisionLoss === undefined ? undefined : new Prisma.Decimal(divisionLoss);
+            type === RecipeType.PRE_DOUGH ? new Prisma.Decimal(0) : new Prisma.Decimal(divisionLoss ?? 0);
         const customWaterContentForDb =
             customWaterContent === null || customWaterContent === undefined
                 ? undefined

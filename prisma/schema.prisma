@@ -636,7 +636,7 @@ model RecipeComponent {
   targetTemp         Decimal?
   // [核心修改] 出缸温度
   lossRatio          Decimal               @default(0) // [核心修改] 损耗率
-  divisionLoss       Decimal               @default(0) // [核心新增] 分割定额损耗(克)
+  divisionLoss       Decimal               @default(0) // 每份固定余量：主面团为分割余量，自制 EXTRA 为分装余量
   customWaterContent Decimal?
   // [核心新增] 自定义含水量(0-100)，如果设置则覆盖计算值
   procedure          String[] // 制作流程要点

@@ -5,7 +5,7 @@ import {
     NotFoundException,
     // 导入 Prisma 类型
 } from '@nestjs/common';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from '../prisma/prisma.service';
 import {
     Prisma,
     RecipeComponent,
@@ -1659,10 +1659,14 @@ export class CostingService {
                 // 如果附加原料是另一个配方 (如卡仕达酱)
                 const extraComponent = pIng.linkedExtra.versions?.[0]?.components?.[0];
                 if (extraComponent) {
+                    const portionReserve =
+                        pIng.type === ProductIngredientType.FILLING || pIng.type === ProductIngredientType.TOPPING
+                            ? new Prisma.Decimal(extraComponent.divisionLoss || 0)
+                            : new Prisma.Decimal(0);
                     // 递归调用, `requiredInputWeight` 成为子配方的 "目标产出"
                     processComponentRecursively(
                         extraComponent as FullRecipeVersion['components'][0],
-                        requiredInputWeight,
+                        requiredInputWeight.add(portionReserve),
                     );
                 }
             } else if (pIng.ingredientId) {
