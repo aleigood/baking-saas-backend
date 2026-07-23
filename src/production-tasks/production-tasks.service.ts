@@ -3418,6 +3418,8 @@ export class ProductionTasksService {
         const finalSnapshot = await this._fetchAndSerializeSnapshot(id);
         const snapshot = finalSnapshot as unknown as TaskWithDetails;
         const snapshotProductMap = new Map(snapshot.items.map((i) => [i.product.id, i.product]));
+        const shouldRecordIngredientConsumption = (product: TaskWithDetails['items'][number]['product']) =>
+            product.recipeVersion?.family?.type === RecipeType.MAIN;
 
         const { notes, completedItems } = completeDto;
 
@@ -3434,6 +3436,9 @@ export class ProductionTasksService {
                 const snapshotProduct = snapshotProductMap.get(item.productId);
                 if (!snapshotProduct) {
                     throw new BadRequestException(`快照中未找到产品ID ${item.productId}。`);
+                }
+                if (!shouldRecordIngredientConsumption(snapshotProduct)) {
+                    continue;
                 }
 
                 // calculateProductConsumptionsFromSnapshot 计算的是“含损耗”的总投入量
@@ -3460,6 +3465,7 @@ export class ProductionTasksService {
             const { productId, completedQuantity, spoilageDetails } = completedItem;
             const snapshotProduct = snapshotProductMap.get(productId);
             if (!snapshotProduct) continue;
+            if (!shouldRecordIngredientConsumption(snapshotProduct)) continue;
 
             if (completedQuantity > 0) {
                 const successConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
@@ -3584,9 +3590,10 @@ export class ProductionTasksService {
                 if (plannedQuantity === undefined) {
                     throw new BadRequestException(`产品ID ${productId} 不在任务中。`);
                 }
+                const recordsIngredientConsumption = shouldRecordIngredientConsumption(snapshotProduct);
 
                 // --- 步骤一：处理【成功产品】 ---
-                if (completedQuantity > 0) {
+                if (recordsIngredientConsumption && completedQuantity > 0) {
                     const successConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
                         snapshotProduct,
                         completedQuantity,
@@ -3627,25 +3634,28 @@ export class ProductionTasksService {
                         }
                     }
 
-                    // 计算报损品的理论消耗
-                    const spoiledConsumptions = this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
-                        snapshotProduct,
-                        calculatedSpoilage,
-                    );
+                    if (recordsIngredientConsumption) {
+                        // 计算报损品的理论消耗
+                        const spoiledConsumptions =
+                            this.costingService.calculateTheoreticalProductConsumptionsFromSnapshot(
+                                snapshotProduct,
+                                calculatedSpoilage,
+                            );
 
-                    for (const cons of spoiledConsumptions) {
-                        // 累加报损消耗
-                        const current = totalSpoiledConsumption.get(cons.ingredientId) || new Prisma.Decimal(0);
-                        totalSpoiledConsumption.set(cons.ingredientId, current.add(cons.totalConsumed));
+                        for (const cons of spoiledConsumptions) {
+                            // 累加报损消耗
+                            const current = totalSpoiledConsumption.get(cons.ingredientId) || new Prisma.Decimal(0);
+                            totalSpoiledConsumption.set(cons.ingredientId, current.add(cons.totalConsumed));
 
-                        const priceInfo = getPriceInfo(cons.ingredientId);
-                        consumptionLogsData.push({
-                            productionLogId: productionLog.id,
-                            ingredientId: cons.ingredientId,
-                            skuId: priceInfo.skuId || cons.activeSkuId,
-                            quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
-                            unitPrice: priceInfo.unitPrice,
-                        });
+                            const priceInfo = getPriceInfo(cons.ingredientId);
+                            consumptionLogsData.push({
+                                productionLogId: productionLog.id,
+                                ingredientId: cons.ingredientId,
+                                skuId: priceInfo.skuId || cons.activeSkuId,
+                                quantityInGrams: new Prisma.Decimal(cons.totalConsumed),
+                                unitPrice: priceInfo.unitPrice,
+                            });
+                        }
                     }
                 }
 

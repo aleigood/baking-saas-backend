@@ -67,3 +67,71 @@ describe('RecipesService dependency resolution', () => {
         ).rejects.toBeInstanceOf(BadRequestException);
     });
 });
+
+describe('RecipesService dependency graph validation', () => {
+    type DependencyGraphValidator = {
+        _validateDependencyGraph(
+            parentFamilyId: string,
+            parentRecipeName: string,
+            ingredients: Array<{ name: string }>,
+            linkedFamilies: Map<string, { id: string; name: string }>,
+            tx: { recipeVersion: { findFirst: jest.Mock } },
+        ): Promise<void>;
+    };
+
+    const service = new RecipesService({} as never, {} as never) as unknown as DependencyGraphValidator;
+
+    const activeVersionWithChildren = (children: string[], productExtras: string[] = []) => ({
+        components: [
+            {
+                ingredients: children.map((childId) => ({
+                    preDoughId: childId,
+                    extraId: null,
+                })),
+            },
+        ],
+        products: productExtras.map((childId) => ({
+            ingredients: [{ linkedExtraId: childId }],
+        })),
+    });
+
+    it('rejects circular references that are reached through product extras', async () => {
+        const findFirst = jest.fn(({ where }) => {
+            if (where.familyId === 'extra-child') {
+                return activeVersionWithChildren([], ['parent-family']);
+            }
+            return null;
+        });
+
+        await expect(
+            service._validateDependencyGraph(
+                'parent-family',
+                '吐司',
+                [{ name: '焦糖酱' }],
+                new Map([['焦糖酱', { id: 'extra-child', name: '焦糖酱' }]]),
+                { recipeVersion: { findFirst } },
+            ),
+        ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects dependency chains deeper than five recipe layers', async () => {
+        const graph = new Map<string, string[]>([
+            ['layer-1', ['layer-2']],
+            ['layer-2', ['layer-3']],
+            ['layer-3', ['layer-4']],
+            ['layer-4', ['layer-5']],
+            ['layer-5', []],
+        ]);
+        const findFirst = jest.fn(({ where }) => activeVersionWithChildren(graph.get(where.familyId) ?? []));
+
+        await expect(
+            service._validateDependencyGraph(
+                'parent-family',
+                '吐司',
+                [{ name: '一层原料' }],
+                new Map([['一层原料', { id: 'layer-1', name: '一层原料' }]]),
+                { recipeVersion: { findFirst } },
+            ),
+        ).rejects.toBeInstanceOf(BadRequestException);
+    });
+});

@@ -100,8 +100,22 @@ export class IngredientsService {
                     SUM(icl."quantityInGrams")::float AS total
                 FROM
                     "IngredientConsumptionLog" AS icl
+                INNER JOIN
+                    "ProductionLog" AS pl ON pl."id" = icl."productionLogId"
+                INNER JOIN
+                    "ProductionTask" AS pt ON pt."id" = pl."taskId"
                 WHERE
                     icl."ingredientId" IN (${Prisma.join(ingredientIds)})
+                    AND EXISTS (
+                        SELECT 1
+                        FROM "ProductionTaskItem" AS pti
+                        INNER JOIN "Product" AS p ON p."id" = pti."productId"
+                        INNER JOIN "RecipeVersion" AS rv ON rv."id" = p."recipeVersionId"
+                        INNER JOIN "RecipeFamily" AS rf ON rf."id" = rv."familyId"
+                        WHERE pti."taskId" = pt."id"
+                            AND pti."role" = 'FINAL_PRODUCT'
+                            AND rf."type" = 'MAIN'
+                    )
                 GROUP BY
                     icl."ingredientId"
             `,
@@ -118,9 +132,21 @@ export class IngredientsService {
                     "IngredientConsumptionLog" AS icl
                 INNER JOIN
                     "ProductionLog" AS pl ON pl."id" = icl."productionLogId"
+                INNER JOIN
+                    "ProductionTask" AS pt ON pt."id" = pl."taskId"
                 WHERE
                     icl."ingredientId" IN (${Prisma.join(ingredientIds)})
                     AND pl."completedAt" >= ${monthStart}
+                    AND EXISTS (
+                        SELECT 1
+                        FROM "ProductionTaskItem" AS pti
+                        INNER JOIN "Product" AS p ON p."id" = pti."productId"
+                        INNER JOIN "RecipeVersion" AS rv ON rv."id" = p."recipeVersionId"
+                        INNER JOIN "RecipeFamily" AS rf ON rf."id" = rv."familyId"
+                        WHERE pti."taskId" = pt."id"
+                            AND pti."role" = 'FINAL_PRODUCT'
+                            AND rf."type" = 'MAIN'
+                    )
                 GROUP BY
                     icl."ingredientId"
             `,
@@ -129,81 +155,12 @@ export class IngredientsService {
         const statsMap = new Map(consumptionStats.map((stat) => [stat.ingredientId, stat.total]));
         const monthlyStatsMap = new Map(monthlyConsumptionStats.map((stat) => [stat.ingredientId, stat.total]));
 
-        // 针对自制原料，批量统计已完成的前置准备任务（role === 'PREP_INGREDIENT'）作为消耗量
-        const selfMadeFamilyIds = ingredients
-            .filter((i) => i.type === IngredientType.SELF_MADE && i.recipeFamilyId)
-            .map((i) => i.recipeFamilyId)
-            .filter((id): id is string => !!id);
-
-        const selfMadeTotalMap = new Map<string, number>();
-        const selfMadeMonthlyMap = new Map<string, number>();
-
-        if (selfMadeFamilyIds.length > 0) {
-            const selfMadeConsumptions = await this.prisma.productionTaskItem.findMany({
-                where: {
-                    role: 'PREP_INGREDIENT',
-                    product: {
-                        recipeVersion: {
-                            familyId: { in: selfMadeFamilyIds },
-                        },
-                    },
-                    task: {
-                        status: 'COMPLETED',
-                    },
-                },
-                select: {
-                    quantity: true,
-                    product: {
-                        select: {
-                            recipeVersion: {
-                                select: {
-                                    familyId: true,
-                                },
-                            },
-                        },
-                    },
-                    task: {
-                        select: {
-                            startDate: true,
-                            log: {
-                                select: {
-                                    completedAt: true,
-                                },
-                            },
-                        },
-                    },
-                },
-            });
-
-            selfMadeConsumptions.forEach((item) => {
-                const familyId = item.product?.recipeVersion?.familyId;
-                if (!familyId) return;
-                const ing = ingredients.find((i) => i.recipeFamilyId === familyId);
-                if (!ing) return;
-
-                const quantity = item.quantity.toNumber();
-                const completedAt = item.task.log?.completedAt;
-                const recordDate = completedAt || item.task.startDate;
-
-                selfMadeTotalMap.set(ing.id, (selfMadeTotalMap.get(ing.id) || 0) + quantity);
-                if (recordDate && recordDate >= monthStart) {
-                    selfMadeMonthlyMap.set(ing.id, (selfMadeMonthlyMap.get(ing.id) || 0) + quantity);
-                }
-            });
-        }
-
         const processedIngredients = await Promise.all(
             ingredients.map(async (ingredient) => {
-                let totalConsumptionInGrams = 0;
-                let monthlyConsumptionInGrams = 0;
-
-                if (ingredient.type === IngredientType.SELF_MADE) {
-                    totalConsumptionInGrams = selfMadeTotalMap.get(ingredient.id) || 0;
-                    monthlyConsumptionInGrams = selfMadeMonthlyMap.get(ingredient.id) || 0;
-                } else {
-                    totalConsumptionInGrams = statsMap.get(ingredient.id) || 0;
-                    monthlyConsumptionInGrams = monthlyStatsMap.get(ingredient.id) || 0;
-                }
+                const totalConsumptionInGrams =
+                    ingredient.type === IngredientType.SELF_MADE ? 0 : statsMap.get(ingredient.id) || 0;
+                const monthlyConsumptionInGrams =
+                    ingredient.type === IngredientType.SELF_MADE ? 0 : monthlyStatsMap.get(ingredient.id) || 0;
 
                 const currentPricePerPackage = ingredient.activeSkuId
                     ? priceMap.get(ingredient.activeSkuId) || new Prisma.Decimal(0)
@@ -374,6 +331,7 @@ export class IngredientsService {
         if (ingredient.type === IngredientType.SELF_MADE && ingredient.recipeFamilyId) {
             const taskItems = await this.prisma.productionTaskItem.findMany({
                 where: {
+                    role: 'FINAL_PRODUCT',
                     product: {
                         recipeVersion: {
                             familyId: ingredient.recipeFamilyId,
@@ -419,35 +377,37 @@ export class IngredientsService {
                     const dateStr = new Date(recordDate).toISOString().split('T')[0];
                     uniqueDates.add(dateStr);
                 }
-                const isAuto = item.role === 'PREP_INGREDIENT';
                 return {
                     id: item.id,
                     date: recordDate,
-                    details: isAuto ? '前置准备自动创建' : `手动创建 (任务#${item.task.id.substring(0, 4)})`,
+                    details: `自制任务 (任务#${item.task.id.substring(0, 4)})`,
                     change: quantityGrams,
-                    operator: isAuto ? '系统' : item.task.createdBy?.name || '系统',
+                    operator: item.task.createdBy?.name || '系统',
                 };
             });
             monthlyProductionCount = uniqueDates.size;
-
-            // 针对自制原料，汇总其所有的 PREP_INGREDIENT 任务项克重作为消耗量
-            taskItems.forEach((item) => {
-                if (item.role === 'PREP_INGREDIENT') {
-                    const quantityGrams = item.quantity.toNumber();
-                    totalConsumptionInGrams += quantityGrams;
-                    const completedAt = item.task.log?.completedAt;
-                    const recordDate = completedAt || item.task.startDate;
-                    if (recordDate && recordDate >= monthStart) {
-                        monthlyConsumptionInGrams += quantityGrams;
-                    }
-                }
-            });
         }
 
         if (ingredient.type !== IngredientType.SELF_MADE) {
             const totalConsumption = await this.prisma.ingredientConsumptionLog.aggregate({
                 where: {
                     ingredientId: ingredient.id,
+                    productionLog: {
+                        task: {
+                            items: {
+                                some: {
+                                    role: 'FINAL_PRODUCT',
+                                    product: {
+                                        recipeVersion: {
+                                            family: {
+                                                type: 'MAIN',
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
                 },
                 _sum: {
                     quantityInGrams: true,
@@ -459,6 +419,20 @@ export class IngredientsService {
                     productionLog: {
                         completedAt: {
                             gte: monthStart,
+                        },
+                        task: {
+                            items: {
+                                some: {
+                                    role: 'FINAL_PRODUCT',
+                                    product: {
+                                        recipeVersion: {
+                                            family: {
+                                                type: 'MAIN',
+                                            },
+                                        },
+                                    },
+                                },
+                            },
                         },
                     },
                 },
@@ -579,16 +553,36 @@ export class IngredientsService {
                     },
                 },
             },
+            AND: [
+                {
+                    task: {
+                        items: {
+                            some: {
+                                role: 'FINAL_PRODUCT',
+                                product: {
+                                    recipeVersion: {
+                                        family: {
+                                            type: 'MAIN',
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                ...(userId
+                    ? [
+                          {
+                              task: {
+                                  createdById: userId,
+                              },
+                          },
+                      ]
+                    : []),
+            ],
             ...(startDate || endDate
                 ? {
                       completedAt: completedAtFilter,
-                  }
-                : {}),
-            ...(userId
-                ? {
-                      task: {
-                          createdById: userId,
-                      },
                   }
                 : {}),
             ...(keyword
@@ -634,6 +628,9 @@ export class IngredientsService {
                                 },
                             },
                             items: {
+                                where: {
+                                    role: 'FINAL_PRODUCT',
+                                },
                                 select: {
                                     quantity: true,
                                     product: {

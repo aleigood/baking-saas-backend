@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ProductionTaskStatus, RecipeType, TaskItemRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatsDto } from './dto/stats.dto';
 import { getUtcDayBounds } from 'src/common/utils/timezone.util';
@@ -23,16 +24,31 @@ export class StatsService {
         const completedTasks = await this.prisma.productionTask.findMany({
             where: {
                 tenantId,
-                status: 'COMPLETED',
+                status: ProductionTaskStatus.COMPLETED,
                 log: {
                     completedAt: {
                         gte: startOfDay,
                         lte: endOfDay,
                     },
                 },
+                items: {
+                    some: {
+                        role: TaskItemRole.FINAL_PRODUCT,
+                        product: {
+                            recipeVersion: {
+                                family: {
+                                    type: RecipeType.MAIN,
+                                },
+                            },
+                        },
+                    },
+                },
             },
             include: {
                 items: {
+                    where: {
+                        role: TaskItemRole.FINAL_PRODUCT,
+                    },
                     include: {
                         product: {
                             select: {
@@ -60,7 +76,7 @@ export class StatsService {
         const productStatsMap = new Map<string, { name: string; count: number }>();
         for (const task of completedTasks) {
             for (const item of task.items) {
-                if (item.productId && item.product?.recipeVersion.family.type === 'MAIN') {
+                if (item.productId && item.product?.recipeVersion.family.type === RecipeType.MAIN) {
                     const existing = productStatsMap.get(item.productId);
                     const name = item.product?.name || '未知产品';
                     const count = (existing?.count || 0) + Number(item.quantity);

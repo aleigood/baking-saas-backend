@@ -30,6 +30,8 @@ import {
 } from './dto/dependency-upgrade.dto';
 import { EntitlementsService } from '../billing/entitlements.service';
 
+const MAX_RECIPE_NESTING_DEPTH = 5;
+
 // [新增] 单一递归类型定义
 type WaterCalcFamily = {
     versions: {
@@ -1989,7 +1991,16 @@ export class RecipesService {
         }
         await this._ensureIngredientsExist(tenantId, recipeDto, tx);
 
-        const linkedFamilies = await this.preloadLinkedFamilies(tenantId, ingredients, tx);
+        const productIngredients = (products ?? []).flatMap((p) => [
+            ...(p.mixIn ?? []),
+            ...(p.fillings ?? []),
+            ...(p.toppings ?? []),
+        ]);
+        const linkedFamilies = await this.preloadLinkedFamilies(
+            tenantId,
+            [...ingredients, ...productIngredients],
+            tx,
+        );
 
         const parentVersion = await tx.recipeVersion.findUnique({
             where: { id: versionId },
@@ -2001,7 +2012,13 @@ export class RecipesService {
         const parentFamilyId = parentVersion.family.id;
         const parentRecipeName = parentVersion.family.name;
 
-        await this._validateCircularReference(parentFamilyId, parentRecipeName, ingredients, linkedFamilies, tx);
+        await this._validateDependencyGraph(
+            parentFamilyId,
+            parentRecipeName,
+            [...ingredients, ...productIngredients],
+            linkedFamilies,
+            tx,
+        );
 
         this.calculateAndValidateLinkedFamilyRatios(type, ingredients, linkedFamilies);
 
@@ -3708,16 +3725,7 @@ export class RecipesService {
         return new Map(families.map((f) => [f.name, f as PreloadedRecipeFamily]));
     }
 
-    private async _getDescendantFamilyIds(
-        familyId: string,
-        tx: Prisma.TransactionClient,
-        visited: Set<string>,
-    ): Promise<Set<string>> {
-        if (visited.has(familyId)) {
-            return new Set<string>();
-        }
-        visited.add(familyId);
-
+    private async _getDirectChildFamilyIds(familyId: string, tx: Prisma.TransactionClient): Promise<Set<string>> {
         const activeVersion = await tx.recipeVersion.findFirst({
             where: { familyId: familyId, isActive: true },
             include: {
@@ -3728,19 +3736,44 @@ export class RecipesService {
                         },
                     },
                 },
+                products: {
+                    where: { deletedAt: null },
+                    include: {
+                        ingredients: {
+                            select: { linkedExtraId: true },
+                        },
+                    },
+                },
             },
         });
 
-        if (!activeVersion?.components[0]) {
+        const childRecipeIds = new Set<string>();
+        for (const component of activeVersion?.components ?? []) {
+            for (const ing of component.ingredients) {
+                if (ing.preDoughId) childRecipeIds.add(ing.preDoughId);
+                if (ing.extraId) childRecipeIds.add(ing.extraId);
+            }
+        }
+        for (const product of activeVersion?.products ?? []) {
+            for (const ing of product.ingredients) {
+                if (ing.linkedExtraId) childRecipeIds.add(ing.linkedExtraId);
+            }
+        }
+
+        return childRecipeIds;
+    }
+
+    private async _getDescendantFamilyIds(
+        familyId: string,
+        tx: Prisma.TransactionClient,
+        visited: Set<string>,
+    ): Promise<Set<string>> {
+        if (visited.has(familyId)) {
             return new Set<string>();
         }
+        visited.add(familyId);
 
-        const childRecipeIds = new Set<string>();
-        for (const ing of activeVersion.components[0].ingredients) {
-            if (ing.preDoughId) childRecipeIds.add(ing.preDoughId);
-            if (ing.extraId) childRecipeIds.add(ing.extraId);
-        }
-
+        const childRecipeIds = await this._getDirectChildFamilyIds(familyId, tx);
         const allDescendants = new Set<string>(childRecipeIds);
         for (const childId of childRecipeIds) {
             const grandChildren = await this._getDescendantFamilyIds(childId, tx, visited);
@@ -3750,10 +3783,34 @@ export class RecipesService {
         return allDescendants;
     }
 
-    private async _validateCircularReference(
+    private async _getMaxDependencyDepth(
+        familyId: string,
+        tx: Prisma.TransactionClient,
+        path: Set<string>,
+    ): Promise<number> {
+        if (path.has(familyId)) {
+            return MAX_RECIPE_NESTING_DEPTH + 1;
+        }
+
+        const nextPath = new Set(path);
+        nextPath.add(familyId);
+        const childRecipeIds = await this._getDirectChildFamilyIds(familyId, tx);
+        if (childRecipeIds.size === 0) {
+            return 1;
+        }
+
+        let maxChildDepth = 0;
+        for (const childId of childRecipeIds) {
+            maxChildDepth = Math.max(maxChildDepth, await this._getMaxDependencyDepth(childId, tx, nextPath));
+        }
+
+        return 1 + maxChildDepth;
+    }
+
+    private async _validateDependencyGraph(
         parentFamilyId: string,
         parentRecipeName: string,
-        ingredients: ComponentIngredientDto[],
+        ingredients: Array<ComponentIngredientDto | ProductIngredientDto>,
         linkedFamilies: Map<string, PreloadedRecipeFamily>,
         tx: Prisma.TransactionClient,
     ) {
@@ -3770,6 +3827,13 @@ export class RecipesService {
             if (descendants.has(parentFamilyId)) {
                 throw new BadRequestException(
                     `循环引用：配方 "${linkedFamily.name}" 已经（或间接）引用了您正在保存的配方 "${parentRecipeName}"。`,
+                );
+            }
+
+            const depth = 1 + (await this._getMaxDependencyDepth(linkedFamily.id, tx, new Set<string>()));
+            if (depth > MAX_RECIPE_NESTING_DEPTH) {
+                throw new BadRequestException(
+                    `配方嵌套过深：配方 "${parentRecipeName}" 引用 "${linkedFamily.name}" 后将达到 ${depth} 层，最多允许 ${MAX_RECIPE_NESTING_DEPTH} 层。`,
                 );
             }
         }

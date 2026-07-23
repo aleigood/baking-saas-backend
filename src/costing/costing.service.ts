@@ -761,8 +761,20 @@ export class CostingService {
                     "IngredientConsumptionLog" icl
                 INNER JOIN
                     "ProductionLog" pl ON pl."id" = icl."productionLogId"
+                INNER JOIN
+                    "ProductionTask" pt ON pt."id" = pl."taskId"
                 WHERE
                     icl."ingredientId" = ${ingredientId}
+                    AND EXISTS (
+                        SELECT 1
+                        FROM "ProductionTaskItem" pti
+                        INNER JOIN "Product" p ON p."id" = pti."productId"
+                        INNER JOIN "RecipeVersion" rv ON rv."id" = p."recipeVersionId"
+                        INNER JOIN "RecipeFamily" rf ON rf."id" = rv."familyId"
+                        WHERE pti."taskId" = pt."id"
+                            AND pti."role" = 'FINAL_PRODUCT'
+                            AND rf."type" = 'MAIN'
+                    )
                 GROUP BY
                     label
                 ORDER BY
