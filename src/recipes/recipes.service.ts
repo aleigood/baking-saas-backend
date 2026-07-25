@@ -2314,78 +2314,97 @@ export class RecipesService {
             include: queryInclude,
         });
 
-        const familiesWithCounts = await Promise.all(
-            rawFamilies.map(async (family) => {
-                // [修改] 计算逻辑移植自原代码
-                const activeVersion = family.versions.find((v) => v.isActive) || family.versions[0];
-                const productCount = activeVersion?.products?.length || 0;
-                const ingredientCount =
-                    activeVersion?.components.reduce(
-                        (sum, component) => sum + (component.ingredients?.length || 0),
-                        0,
-                    ) || 0;
+        const productFamilyMap = new Map<string, string>();
+        for (const family of rawFamilies) {
+            const activeVersion = family.versions.find((v) => v.isActive) || family.versions[0];
+            for (const product of activeVersion?.products ?? []) {
+                productFamilyMap.set(product.id, family.id);
+            }
+        }
 
-                const usageCount =
-                    (family._count?.usedInComponentsAsPreDough || 0) +
-                    (family._count?.usedInComponentsAsExtra || 0) +
-                    (family._count?.usedInProducts || 0);
-
-                const referencedByNames = Array.from(
-                    new Set([
-                        ...family.usedInComponentsAsPreDough.map((item) => item.component.recipeVersion.family.name),
-                        ...family.usedInComponentsAsExtra.map((item) => item.component.recipeVersion.family.name),
-                        ...family.usedInProducts.map((item) => item.product.recipeVersion.family.name),
-                    ]),
-                ).sort((a, b) => a.localeCompare(b));
-
-                const listMetadata = {
-                    productNames: activeVersion?.products.map((product) => product.name) ?? [],
-                    referencedByNames,
-                    versionCount: family._count.versions,
-                    activeVersion: activeVersion
-                        ? {
-                              id: activeVersion.id,
-                              version: activeVersion.version,
-                              notes: activeVersion.notes,
-                              changeSummary: activeVersion.changeSummary,
-                          }
-                        : null,
-                };
-
-                if (!activeVersion || activeVersion.products.length === 0) {
-                    return {
-                        ...family,
-                        productCount,
-                        ingredientCount,
-                        productionTaskCount: 0,
-                        usageCount,
-                        ...listMetadata,
-                    };
-                }
-
-                const productIds = activeVersion.products.map((p) => p.id);
-
-                const distinctTasks = await this.prisma.productionTaskItem.groupBy({
-                    by: ['taskId'],
-                    where: {
-                        productId: { in: productIds },
-                        task: {
-                            status: 'COMPLETED',
-                            deletedAt: null,
-                        },
+        const productionTaskCountMap = new Map<string, number>();
+        const allProductIds = Array.from(productFamilyMap.keys());
+        if (allProductIds.length > 0) {
+            const taskProducts = await this.prisma.productionTaskItem.groupBy({
+                by: ['taskId', 'productId'],
+                where: {
+                    productId: { in: allProductIds },
+                    task: {
+                        status: 'COMPLETED',
+                        deletedAt: null,
                     },
-                });
+                },
+            });
 
+            const familyTaskMap = new Map<string, Set<string>>();
+            for (const item of taskProducts) {
+                const familyId = productFamilyMap.get(item.productId);
+                if (!familyId) continue;
+                const taskIds = familyTaskMap.get(familyId) || new Set<string>();
+                taskIds.add(item.taskId);
+                familyTaskMap.set(familyId, taskIds);
+            }
+
+            for (const [familyId, taskIds] of familyTaskMap.entries()) {
+                productionTaskCountMap.set(familyId, taskIds.size);
+            }
+        }
+
+        const familiesWithCounts = rawFamilies.map((family) => {
+            // [修改] 计算逻辑移植自原代码
+            const activeVersion = family.versions.find((v) => v.isActive) || family.versions[0];
+            const productCount = activeVersion?.products?.length || 0;
+            const ingredientCount =
+                activeVersion?.components.reduce((sum, component) => sum + (component.ingredients?.length || 0), 0) ||
+                0;
+
+            const usageCount =
+                (family._count?.usedInComponentsAsPreDough || 0) +
+                (family._count?.usedInComponentsAsExtra || 0) +
+                (family._count?.usedInProducts || 0);
+
+            const referencedByNames = Array.from(
+                new Set([
+                    ...family.usedInComponentsAsPreDough.map((item) => item.component.recipeVersion.family.name),
+                    ...family.usedInComponentsAsExtra.map((item) => item.component.recipeVersion.family.name),
+                    ...family.usedInProducts.map((item) => item.product.recipeVersion.family.name),
+                ]),
+            ).sort((a, b) => a.localeCompare(b));
+
+            const listMetadata = {
+                productNames: activeVersion?.products.map((product) => product.name) ?? [],
+                referencedByNames,
+                versionCount: family._count.versions,
+                activeVersion: activeVersion
+                    ? {
+                          id: activeVersion.id,
+                          version: activeVersion.version,
+                          notes: activeVersion.notes,
+                          changeSummary: activeVersion.changeSummary,
+                      }
+                    : null,
+            };
+
+            if (!activeVersion || activeVersion.products.length === 0) {
                 return {
                     ...family,
                     productCount,
                     ingredientCount,
-                    productionTaskCount: distinctTasks.length,
+                    productionTaskCount: 0,
                     usageCount,
                     ...listMetadata,
                 };
-            }),
-        );
+            }
+
+            return {
+                ...family,
+                productCount,
+                ingredientCount,
+                productionTaskCount: productionTaskCountMap.get(family.id) || 0,
+                usageCount,
+                ...listMetadata,
+            };
+        });
 
         // 2. 数据转换与“瘦身”
         // 在这里计算含水量，并丢弃不需要返回给前端的 heavy data

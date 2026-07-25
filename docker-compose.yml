@@ -9,21 +9,16 @@ services:
       - .env.production
     environment:
       NODE_ENV: production
-      PAYMENT_PROVIDER: wechat
     ports:
-      - '9527:9527'
+      - '127.0.0.1:9527:9527'
     depends_on:
       - db
 
   db:
     image: docker.1ms.run/postgres:15
     restart: always
-    environment:
-      POSTGRES_USER: aleigood
-      POSTGRES_PASSWORD: Hulei1234
-      POSTGRES_DB: baking-saas
-    ports:
-      - '5432:5432'
+    env_file:
+      - .env.production
     volumes:
       - postgres_data:/var/lib/postgresql/data
 

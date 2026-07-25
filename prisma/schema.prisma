@@ -378,6 +378,7 @@ model RecipeImportJob {
   @@index([tenantId, createdAt(sort: Desc)])
   @@index([status, createdAt])
   @@index([diagnosticExpiresAt])
+  @@index([tenantId, status, completedAt(sort: Desc)])
 }
 
 // 用户与租户的多对多关系表
@@ -544,6 +545,8 @@ model AuditLog {
 
   @@index([actorUserId, createdAt])
   @@index([action, createdAt])
+  @@index([createdAt(sort: Desc)])
+  @@index([statusCode, createdAt(sort: Desc)])
 }
 
 // ================================================================= //
@@ -832,6 +835,9 @@ model ProductionTask {
   @@index([tenantId])
   @@index([createdById]) // [核心新增] 为创建者ID添加索引
   @@index([executionStartedById])
+  @@index([tenantId, status, startDate, deletedAt])
+  @@index([tenantId, status, updatedAt(sort: Desc), deletedAt])
+  @@index([tenantId, status, endDate, startDate, deletedAt])
 }
 
 // 生产任务清单项 (中间表)
@@ -846,6 +852,8 @@ model ProductionTaskItem {
 
   @@index([taskId])
   @@index([productId])
+  @@index([taskId, role, productId])
+  @@index([productId, taskId])
 }
 
 // ================================================================= //
@@ -865,6 +873,8 @@ model ProductionLog {
   overproductionLogs ProductionTaskOverproductionLog[]
 
   @@index([taskId])
+  @@index([completedAt(sort: Desc)])
+  @@index([completedAt(sort: Desc), taskId])
 }
 
 // 生产任务损耗日志模型
@@ -915,4 +925,5 @@ model IngredientConsumptionLog {
   @@index([productionLogId])
   @@index([ingredientId])
   @@index([skuId])
+  @@index([ingredientId, productionLogId])
 }

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ProductionTaskStatus, RecipeType, TaskItemRole } from '@prisma/client';
+import { Prisma, ProductionTaskStatus, RecipeType, TaskItemRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatsDto } from './dto/stats.dto';
 import { getUtcDayBounds } from 'src/common/utils/timezone.util';
@@ -21,83 +21,63 @@ export class StatsService {
         const { start: startOfDay } = getUtcDayBounds(startDate);
         const { end: endOfDay } = getUtcDayBounds(endDate);
 
-        const completedTasks = await this.prisma.productionTask.findMany({
-            where: {
-                tenantId,
-                status: ProductionTaskStatus.COMPLETED,
-                log: {
-                    completedAt: {
-                        gte: startOfDay,
-                        lte: endOfDay,
-                    },
-                },
-                items: {
-                    some: {
-                        role: TaskItemRole.FINAL_PRODUCT,
-                        product: {
-                            recipeVersion: {
-                                family: {
-                                    type: RecipeType.MAIN,
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-            include: {
-                items: {
-                    where: {
-                        role: TaskItemRole.FINAL_PRODUCT,
-                    },
-                    include: {
-                        product: {
-                            select: {
-                                id: true,
-                                name: true,
-                                recipeVersion: {
-                                    select: {
-                                        family: {
-                                            select: {
-                                                type: true,
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                log: true,
-            },
-        });
+        const completedTaskWhere = Prisma.sql`
+            pt."tenantId" = ${tenantId}
+            AND pt."status" = ${ProductionTaskStatus.COMPLETED}::"ProductionTaskStatus"
+            AND pl."completedAt" >= ${startOfDay}
+            AND pl."completedAt" <= ${endOfDay}
+            AND EXISTS (
+                SELECT 1
+                FROM "ProductionTaskItem" pti_exists
+                INNER JOIN "Product" p_exists ON p_exists."id" = pti_exists."productId"
+                INNER JOIN "RecipeVersion" rv_exists ON rv_exists."id" = p_exists."recipeVersionId"
+                INNER JOIN "RecipeFamily" rf_exists ON rf_exists."id" = rv_exists."familyId"
+                WHERE pti_exists."taskId" = pt."id"
+                    AND pti_exists."role" = ${TaskItemRole.FINAL_PRODUCT}::"TaskItemRole"
+                    AND rf_exists."type" = ${RecipeType.MAIN}::"RecipeType"
+            )
+        `;
 
-        const totalTasks = completedTasks.length;
+        const totalRows: { total: bigint }[] = await this.prisma.$queryRaw(
+            Prisma.sql`
+                SELECT COUNT(DISTINCT pt."id") AS total
+                FROM "ProductionTask" pt
+                INNER JOIN "ProductionLog" pl ON pl."taskId" = pt."id"
+                WHERE ${completedTaskWhere}
+            `,
+        );
 
-        const productStatsMap = new Map<string, { name: string; count: number }>();
-        for (const task of completedTasks) {
-            for (const item of task.items) {
-                if (item.productId && item.product?.recipeVersion.family.type === RecipeType.MAIN) {
-                    const existing = productStatsMap.get(item.productId);
-                    const name = item.product?.name || '未知产品';
-                    const count = (existing?.count || 0) + Number(item.quantity);
-                    productStatsMap.set(item.productId, { name, count });
-                }
-            }
-        }
+        const productStats: { name: string; count: number }[] = await this.prisma.$queryRaw(
+            Prisma.sql`
+                SELECT
+                    p."name" AS name,
+                    SUM(pti."quantity")::float AS count
+                FROM "ProductionTaskItem" pti
+                INNER JOIN "ProductionTask" pt ON pt."id" = pti."taskId"
+                INNER JOIN "ProductionLog" pl ON pl."taskId" = pt."id"
+                INNER JOIN "Product" p ON p."id" = pti."productId"
+                INNER JOIN "RecipeVersion" rv ON rv."id" = p."recipeVersionId"
+                INNER JOIN "RecipeFamily" rf ON rf."id" = rv."familyId"
+                WHERE ${completedTaskWhere}
+                    AND pti."role" = ${TaskItemRole.FINAL_PRODUCT}::"TaskItemRole"
+                    AND rf."type" = ${RecipeType.MAIN}::"RecipeType"
+                GROUP BY p."id", p."name"
+                ORDER BY count DESC
+            `,
+        );
 
-        const consumptionStats = await this.prisma.ingredientConsumptionLog.groupBy({
-            by: ['ingredientId'],
-            _sum: {
-                quantityInGrams: true,
-            },
-            where: {
-                productionLog: {
-                    taskId: {
-                        in: completedTasks.map((t) => t.id),
-                    },
-                },
-            },
-        });
+        const consumptionStats: { ingredientId: string; consumedGrams: number }[] = await this.prisma.$queryRaw(
+            Prisma.sql`
+                SELECT
+                    icl."ingredientId",
+                    SUM(icl."quantityInGrams")::float AS "consumedGrams"
+                FROM "IngredientConsumptionLog" icl
+                INNER JOIN "ProductionLog" pl ON pl."id" = icl."productionLogId"
+                INNER JOIN "ProductionTask" pt ON pt."id" = pl."taskId"
+                WHERE ${completedTaskWhere}
+                GROUP BY icl."ingredientId"
+            `,
+        );
 
         const ingredientIds = consumptionStats.map((s) => s.ingredientId);
         const ingredients = await this.prisma.ingredient.findMany({
@@ -107,11 +87,11 @@ export class StatsService {
         const ingredientMap = new Map(ingredients.map((i) => [i.id, i.name]));
 
         return {
-            totalTasks,
-            productStats: Array.from(productStatsMap.values()),
+            totalTasks: Number(totalRows[0]?.total || 0),
+            productStats,
             ingredientConsumption: consumptionStats.map((s) => ({
                 name: ingredientMap.get(s.ingredientId) || '未知原料',
-                consumedGrams: s._sum.quantityInGrams || 0,
+                consumedGrams: s.consumedGrams || 0,
             })),
         };
     }

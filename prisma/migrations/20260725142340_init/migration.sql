@@ -64,6 +64,9 @@ CREATE TYPE "RecipeEditorSessionStatus" AS ENUM ('PENDING', 'APPROVED', 'EXPIRED
 -- CreateEnum
 CREATE TYPE "RecipeDraftStatus" AS ENUM ('DRAFT', 'SYNCED', 'ARCHIVED');
 
+-- CreateEnum
+CREATE TYPE "RecipeImportJobStatus" AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
@@ -202,6 +205,28 @@ CREATE TABLE "RecipeDraft" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "RecipeDraft_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RecipeImportJob" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "status" "RecipeImportJobStatus" NOT NULL DEFAULT 'PENDING',
+    "fileName" TEXT,
+    "mimeType" TEXT,
+    "sourceData" BYTEA,
+    "sourceText" TEXT,
+    "catalogContext" TEXT NOT NULL,
+    "result" JSONB,
+    "diagnosticData" JSONB,
+    "diagnosticExpiresAt" TIMESTAMP(3),
+    "errorMessage" TEXT,
+    "startedAt" TIMESTAMP(3),
+    "completedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RecipeImportJob_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -651,6 +676,18 @@ CREATE INDEX "RecipeDraft_tenantId_status_updatedAt_idx" ON "RecipeDraft"("tenan
 CREATE INDEX "RecipeDraft_createdById_createdAt_idx" ON "RecipeDraft"("createdById", "createdAt");
 
 -- CreateIndex
+CREATE INDEX "RecipeImportJob_tenantId_createdAt_idx" ON "RecipeImportJob"("tenantId", "createdAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "RecipeImportJob_status_createdAt_idx" ON "RecipeImportJob"("status", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "RecipeImportJob_diagnosticExpiresAt_idx" ON "RecipeImportJob"("diagnosticExpiresAt");
+
+-- CreateIndex
+CREATE INDEX "RecipeImportJob_tenantId_status_completedAt_idx" ON "RecipeImportJob"("tenantId", "status", "completedAt" DESC);
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Invitation_tenantId_phone_key" ON "Invitation"("tenantId", "phone");
 
 -- CreateIndex
@@ -697,6 +734,12 @@ CREATE INDEX "AuditLog_actorUserId_createdAt_idx" ON "AuditLog"("actorUserId", "
 
 -- CreateIndex
 CREATE INDEX "AuditLog_action_createdAt_idx" ON "AuditLog"("action", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_createdAt_idx" ON "AuditLog"("createdAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "AuditLog_statusCode_createdAt_idx" ON "AuditLog"("statusCode", "createdAt" DESC);
 
 -- CreateIndex
 CREATE INDEX "RecipeFamily_tenantId_idx" ON "RecipeFamily"("tenantId");
@@ -792,16 +835,37 @@ CREATE INDEX "ProductionTask_createdById_idx" ON "ProductionTask"("createdById")
 CREATE INDEX "ProductionTask_executionStartedById_idx" ON "ProductionTask"("executionStartedById");
 
 -- CreateIndex
+CREATE INDEX "ProductionTask_tenantId_status_startDate_deletedAt_idx" ON "ProductionTask"("tenantId", "status", "startDate", "deletedAt");
+
+-- CreateIndex
+CREATE INDEX "ProductionTask_tenantId_status_updatedAt_deletedAt_idx" ON "ProductionTask"("tenantId", "status", "updatedAt" DESC, "deletedAt");
+
+-- CreateIndex
+CREATE INDEX "ProductionTask_tenantId_status_endDate_startDate_deletedAt_idx" ON "ProductionTask"("tenantId", "status", "endDate", "startDate", "deletedAt");
+
+-- CreateIndex
 CREATE INDEX "ProductionTaskItem_taskId_idx" ON "ProductionTaskItem"("taskId");
 
 -- CreateIndex
 CREATE INDEX "ProductionTaskItem_productId_idx" ON "ProductionTaskItem"("productId");
 
 -- CreateIndex
+CREATE INDEX "ProductionTaskItem_taskId_role_productId_idx" ON "ProductionTaskItem"("taskId", "role", "productId");
+
+-- CreateIndex
+CREATE INDEX "ProductionTaskItem_productId_taskId_idx" ON "ProductionTaskItem"("productId", "taskId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "ProductionLog_taskId_key" ON "ProductionLog"("taskId");
 
 -- CreateIndex
 CREATE INDEX "ProductionLog_taskId_idx" ON "ProductionLog"("taskId");
+
+-- CreateIndex
+CREATE INDEX "ProductionLog_completedAt_idx" ON "ProductionLog"("completedAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "ProductionLog_completedAt_taskId_idx" ON "ProductionLog"("completedAt" DESC, "taskId");
 
 -- CreateIndex
 CREATE INDEX "ProductionTaskSpoilageLog_productionLogId_idx" ON "ProductionTaskSpoilageLog"("productionLogId");
@@ -823,6 +887,9 @@ CREATE INDEX "IngredientConsumptionLog_ingredientId_idx" ON "IngredientConsumpti
 
 -- CreateIndex
 CREATE INDEX "IngredientConsumptionLog_skuId_idx" ON "IngredientConsumptionLog"("skuId");
+
+-- CreateIndex
+CREATE INDEX "IngredientConsumptionLog_ingredientId_productionLogId_idx" ON "IngredientConsumptionLog"("ingredientId", "productionLogId");
 
 -- AddForeignKey
 ALTER TABLE "Tenant" ADD CONSTRAINT "Tenant_trialEntitlementPolicyId_fkey" FOREIGN KEY ("trialEntitlementPolicyId") REFERENCES "EntitlementPolicy"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -865,6 +932,9 @@ ALTER TABLE "RecipeDraft" ADD CONSTRAINT "RecipeDraft_tenantId_fkey" FOREIGN KEY
 
 -- AddForeignKey
 ALTER TABLE "RecipeDraft" ADD CONSTRAINT "RecipeDraft_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecipeImportJob" ADD CONSTRAINT "RecipeImportJob_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "TenantUser" ADD CONSTRAINT "TenantUser_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
